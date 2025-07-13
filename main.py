@@ -551,27 +551,18 @@ def handle_scrape_replays(args) -> None:
                 # Get version from registry first (optimization)
                 game_info = games_registry.get_game_info(table_id, player_perspective)
                 
-                # version = game_info.get('version') if game_info else None
+                version = game_info.get('version') if game_info else None
                 
-                # if version:
-                #     logger.info(f"Using cached version from registry: {version}")
-                # else:
-                #     logger.info("Version not in registry, extracting from gamereview...")
-                #     version = scraper.extract_version_from_gamereview(table_id)
-                #     if version and game_info:
-                #         # Update registry with the newly found version
-                #         game_info['version'] = version
-                #         games_registry.save_registry()
-                #         logger.info(f"Cached version {version} to registry for future use")
-
-                # games.csv contains multiple incorrect version IDs. Uncomment this later when it has been stabilized
-
-                version = scraper.extract_version_from_gamereview(table_id)
-                if version and game_info:
-                    # Update registry with the newly found version
-                    game_info['version'] = version
-                    games_registry.save_registry()
-                    logger.info(f"Cached version {version} to registry for future use")
+                if version:
+                    logger.info(f"Using cached version from registry: {version}")
+                else:
+                    logger.info("Version not in registry, extracting from gamereview...")
+                    version = scraper.extract_version_from_gamereview(table_id)
+                    if version and game_info:
+                        # Update registry with the newly found version
+                        game_info['version'] = version
+                        games_registry.save_registry()
+                        logger.info(f"Cached version {version} to registry for future use")
                 
                 if not version:
                     logger.warning(f"No version found for {table_id}")
