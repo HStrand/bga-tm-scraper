@@ -544,19 +544,17 @@ class TMScraper:
             # Navigate to the gamereview page
             print(f"Navigating to gamereview page: {gamereview_url}")
             self.driver.get(gamereview_url)
-            gamereview_delay = self.speed_settings.get('gamereview_delay', 2.5)
-            print(f"⏱️  Waiting {gamereview_delay}s for gamereview page to load ({self.speed_profile} mode)")
-            time.sleep(gamereview_delay)
             
-            # Check if we got an error page
+            # Wait for JavaScript content to load instead of just using a fixed delay
+            if not self._wait_for_gamereview_content_to_load(table_id):
+                print("❌ Gamereview content failed to load properly")
+                return None
+            
+            # Get the page source after content has loaded
             page_source = self.driver.page_source
-            if 'must be logged' in page_source.lower():
-                print("❌ Authentication error - please make sure you're logged into BGA")
-                return None
             
-            if 'fatal error' in page_source.lower():
-                print("❌ Fatal error on page - gamereview might not be accessible")
-                return None
+            # Log basic page characteristics for debugging
+            logger.info(f"Content loaded successfully - HTML length: {len(page_source)} chars")
             
             # Try multiple extraction patterns in order of reliability
             version = self._extract_version_with_multiple_patterns(page_source, table_id)
@@ -568,6 +566,9 @@ class TMScraper:
             else:
                 logger.warning(f"No version number found in gamereview page for table {table_id}")
                 print("⚠️  No version number found in gamereview page")
+                
+                # Save HTML and debug info when extraction fails
+                self._save_debug_info_for_failed_extraction(table_id, page_source, gamereview_url)
                 return None
             
         except Exception as e:
@@ -594,6 +595,8 @@ class TMScraper:
         
         try:
             matches = re.findall(replay_pattern, html_content, re.IGNORECASE)
+            logger.info(f"Replay URL pattern search: found {len(matches)} matches")
+            
             if matches:
                 # Remove duplicates and get the first unique match
                 unique_matches = list(dict.fromkeys(matches))  # Preserves order
@@ -608,12 +611,312 @@ class TMScraper:
                 else:
                     logger.warning(f"Invalid version format from replay URL: {version}")
                     return None
+            else:
+                # Log some context about what we're searching in
+                logger.info(f"No replay URL matches found. HTML contains 'archive': {'archive' in html_content.lower()}")
+                logger.info(f"HTML contains 'replay': {'replay' in html_content.lower()}")
+                
+                # Look for any archive/replay patterns for debugging
+                archive_patterns = re.findall(r'/archive/[^/]+/[^/\s"\'<>]+', html_content, re.IGNORECASE)
+                if archive_patterns:
+                    logger.info(f"Found {len(archive_patterns)} archive patterns (not matching version format): {archive_patterns[:5]}")
+                else:
+                    logger.info("No archive patterns found at all")
                     
         except Exception as e:
-            logger.debug(f"Error with replay URL pattern: {e}")
+            logger.error(f"Error with replay URL pattern: {e}")
         
         logger.debug(f"No version number found in replay URLs for table {table_id}")
         return None
+
+    def _save_debug_info_for_failed_extraction(self, table_id: str, html_content: str, gamereview_url: str):
+        """
+        Save HTML content and debug information when version extraction fails
+        
+        Args:
+            table_id: BGA table ID
+            html_content: HTML content of the gamereview page
+            gamereview_url: URL of the gamereview page
+        """
+        try:
+            import json
+            
+            # Create timestamp for unique filenames
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            
+            # Save HTML content
+            html_filename = f"gamereview_{table_id}_{timestamp}.html"
+            with open(html_filename, 'w', encoding='utf-8') as f:
+                f.write(html_content)
+            
+            # Create debug information
+            debug_info = {
+                'table_id': table_id,
+                'timestamp': timestamp,
+                'gamereview_url': gamereview_url,
+                'html_length': len(html_content),
+                'html_filename': html_filename,
+                'page_characteristics': self._analyze_page_characteristics(html_content),
+                'pattern_analysis': self._analyze_version_patterns(html_content),
+                'extraction_context': {
+                    'speed_profile': self.speed_profile,
+                    'speed_settings': self.speed_settings,
+                    'headless_mode': self.headless
+                }
+            }
+            
+            # Save debug JSON
+            json_filename = f"version_debug_results_{table_id}_{timestamp}.json"
+            with open(json_filename, 'w', encoding='utf-8') as f:
+                json.dump(debug_info, f, indent=2, ensure_ascii=False)
+            
+            logger.info(f"Debug info saved: {html_filename} and {json_filename}")
+            print(f"🔍 Debug files saved: {html_filename} and {json_filename}")
+            
+        except Exception as e:
+            logger.error(f"Error saving debug info: {e}")
+            print(f"❌ Error saving debug info: {e}")
+
+    def _analyze_page_characteristics(self, html_content: str) -> Dict:
+        """
+        Analyze basic characteristics of the HTML page
+        
+        Args:
+            html_content: HTML content to analyze
+            
+        Returns:
+            dict: Analysis results
+        """
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            # Extract title
+            title = soup.find('title')
+            title_text = title.get_text().strip() if title else "No title found"
+            
+            # Check for key elements
+            characteristics = {
+                'title': title_text,
+                'html_length': len(html_content),
+                'has_archive_links': 'archive' in html_content.lower(),
+                'has_replay_links': 'replay' in html_content.lower(),
+                'has_table_references': f'table' in html_content.lower(),
+                'has_version_patterns': bool(re.search(r'\d{6}-\d{4}', html_content)),
+                'script_tags_count': len(soup.find_all('script')),
+                'div_count': len(soup.find_all('div')),
+                'link_count': len(soup.find_all('a')),
+                'contains_error_messages': any(error in html_content.lower() for error in ['error', 'fatal', 'must be logged']),
+                'page_seems_loaded': len(html_content) > 10000  # Rough heuristic
+            }
+            
+            return characteristics
+            
+        except Exception as e:
+            logger.error(f"Error analyzing page characteristics: {e}")
+            return {'error': str(e)}
+
+    def _analyze_version_patterns(self, html_content: str) -> Dict:
+        """
+        Analyze version-related patterns in the HTML content
+        
+        Args:
+            html_content: HTML content to analyze
+            
+        Returns:
+            dict: Pattern analysis results
+        """
+        try:
+            analysis = {}
+            
+            # Primary pattern: replay URLs
+            replay_pattern = r'/archive/replay/(\d{6}-\d{4})/'
+            replay_matches = re.findall(replay_pattern, html_content, re.IGNORECASE)
+            analysis['replay_url_pattern'] = {
+                'pattern': replay_pattern,
+                'matches_count': len(replay_matches),
+                'matches': replay_matches[:10],  # First 10 matches
+                'unique_matches': list(dict.fromkeys(replay_matches))[:10]
+            }
+            
+            # Look for any 6-4 digit patterns
+            version_pattern = r'\b(\d{6}-\d{4})\b'
+            version_matches = re.findall(version_pattern, html_content)
+            analysis['general_version_pattern'] = {
+                'pattern': version_pattern,
+                'matches_count': len(version_matches),
+                'matches': version_matches[:10],
+                'unique_matches': list(dict.fromkeys(version_matches))[:10]
+            }
+            
+            # Look for archive patterns (broader)
+            archive_pattern = r'/archive/[^/\s"\'<>]+'
+            archive_matches = re.findall(archive_pattern, html_content, re.IGNORECASE)
+            analysis['archive_pattern'] = {
+                'pattern': archive_pattern,
+                'matches_count': len(archive_matches),
+                'matches': archive_matches[:10],
+                'unique_matches': list(dict.fromkeys(archive_matches))[:10]
+            }
+            
+            # Sample content around potential matches
+            if replay_matches:
+                # Find context around the first replay match
+                first_match = replay_matches[0]
+                match_index = html_content.find(f'/archive/replay/{first_match}/')
+                if match_index != -1:
+                    start = max(0, match_index - 200)
+                    end = min(len(html_content), match_index + 200)
+                    analysis['first_match_context'] = html_content[start:end]
+            
+            return analysis
+            
+        except Exception as e:
+            logger.error(f"Error analyzing version patterns: {e}")
+            return {'error': str(e)}
+
+    def _wait_for_gamereview_content_to_load(self, table_id: str) -> bool:
+        """
+        Wait for the gamereview page JavaScript content to load properly
+        
+        Args:
+            table_id: BGA table ID for logging purposes
+            
+        Returns:
+            bool: True if content loaded successfully, False if timeout or error
+        """
+        try:
+            # Get timeout from speed settings
+            timeout = self.speed_settings.get('element_wait_timeout', 10)
+            
+            print(f"⏱️  Waiting for JavaScript content to load (timeout: {timeout}s)")
+            logger.info(f"Waiting for gamereview content to load for table {table_id}")
+            
+            # Strategy 1: Wait for specific content indicators to appear
+            wait = WebDriverWait(self.driver, timeout)
+            
+            # Check for authentication errors first
+            try:
+                # Quick check for immediate errors
+                time.sleep(0.5)
+                page_source = self.driver.page_source
+                if 'must be logged' in page_source.lower():
+                    print("❌ Authentication error detected")
+                    return False
+                
+                if 'fatal error' in page_source.lower():
+                    print("❌ Fatal error detected")
+                    return False
+            except:
+                pass
+            
+            # Try multiple strategies to detect when content is loaded
+            content_loaded = False
+            
+            # Strategy 1: Wait for replay links to appear
+            try:
+                logger.info("Strategy 1: Waiting for replay links to appear...")
+                wait.until(EC.presence_of_element_located((By.XPATH, "//a[contains(@href, '/archive/replay/')]")))
+                logger.info("Replay links found - content appears to be loaded")
+                print("✅ Replay links detected - content loaded")
+                content_loaded = True
+            except:
+                logger.info("Strategy 1 failed: No replay links found")
+            
+            # Strategy 2: Wait for player selection elements (common in gamereview pages)
+            if not content_loaded:
+                try:
+                    logger.info("Strategy 2: Waiting for player selection elements...")
+                    wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "div.playerselection, div.score-entry")))
+                    logger.info("Player selection elements found")
+                    print("✅ Player selection elements detected - content loaded")
+                    content_loaded = True
+                except:
+                    logger.info("Strategy 2 failed: No player selection elements found")
+            
+            # Strategy 3: Wait for overall-content div to be populated
+            if not content_loaded:
+                try:
+                    logger.info("Strategy 3: Waiting for overall-content to be populated...")
+                    
+                    def content_populated(driver):
+                        try:
+                            overall_content = driver.find_element(By.ID, "overall-content")
+                            # Check if it has meaningful content (not just empty or minimal)
+                            content_text = overall_content.text.strip()
+                            inner_html = overall_content.get_attribute('innerHTML').strip()
+                            
+                            # Content is considered loaded if:
+                            # 1. It has substantial text content, OR
+                            # 2. It has substantial HTML content with meaningful elements
+                            has_text = len(content_text) > 100
+                            has_html = len(inner_html) > 1000 and ('playerselection' in inner_html or 'archive/replay' in inner_html)
+                            
+                            if has_text or has_html:
+                                logger.info(f"Overall-content populated: text={len(content_text)} chars, html={len(inner_html)} chars")
+                                return True
+                            return False
+                        except:
+                            return False
+                    
+                    wait.until(content_populated)
+                    logger.info("Overall-content div populated with meaningful content")
+                    print("✅ Page content populated - content loaded")
+                    content_loaded = True
+                except:
+                    logger.info("Strategy 3 failed: Overall-content not populated")
+            
+            # Strategy 4: Progressive delay with content checks
+            if not content_loaded:
+                logger.info("Strategy 4: Using progressive delays with content validation...")
+                delays = [1.0, 2.0, 3.0, 5.0]  # Progressive delays
+                
+                for delay in delays:
+                    print(f"⏱️  Waiting {delay}s for content to load...")
+                    time.sleep(delay)
+                    
+                    # Check if content has appeared
+                    page_source = self.driver.page_source
+                    
+                    # Look for replay URLs in the page source
+                    if '/archive/replay/' in page_source and re.search(r'/archive/replay/\d{6}-\d{4}/', page_source):
+                        logger.info(f"Content loaded after {delay}s delay - replay URLs found")
+                        print(f"✅ Content loaded after {delay}s - replay URLs detected")
+                        content_loaded = True
+                        break
+                    
+                    # Look for substantial content in overall-content div
+                    try:
+                        soup = BeautifulSoup(page_source, 'html.parser')
+                        overall_content = soup.find('div', id='overall-content')
+                        if overall_content:
+                            content_text = overall_content.get_text().strip()
+                            if len(content_text) > 100:
+                                logger.info(f"Content loaded after {delay}s delay - substantial text found")
+                                print(f"✅ Content loaded after {delay}s - page content detected")
+                                content_loaded = True
+                                break
+                    except:
+                        pass
+                    
+                    logger.info(f"Content not ready after {delay}s, trying next delay...")
+            
+            if content_loaded:
+                # Give a small additional delay to ensure everything is fully rendered
+                time.sleep(0.5)
+                logger.info("Content loading completed successfully")
+                return True
+            else:
+                logger.warning(f"Content failed to load within timeout for table {table_id}")
+                print("⚠️  Content loading timeout - proceeding anyway")
+                
+                # Even if we timeout, let's try to proceed - sometimes content is there but not detected
+                return True
+                
+        except Exception as e:
+            logger.error(f"Error waiting for content to load: {e}")
+            print(f"❌ Error waiting for content: {e}")
+            # Don't fail completely - try to proceed
+            return True
 
     def scrape_replay_from_table(self, table_id: str, player_id: str, save_raw: bool = True, raw_data_dir: str = None, version_id: str = None, player_perspective: str = None) -> Optional[Dict]:
         """
