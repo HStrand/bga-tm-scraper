@@ -40,6 +40,9 @@ venv.bak/
 logs/
 scraper.log
 
+# Backups
+backup/
+
 # Data directories (contain scraped data)
 data/raw/
 data/processed/
