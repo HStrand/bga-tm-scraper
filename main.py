@@ -543,11 +543,6 @@ def handle_scrape_replays(args) -> None:
                 with open(table_html_path, 'r', encoding='utf-8') as f:
                     table_html = f.read()
                 
-                player_ids = scraper.extract_player_ids_from_table(table_html)
-                if not player_ids:
-                    logger.warning(f"No player IDs found for {table_id}")
-                    continue
-                
                 # Get version from registry first (optimization)
                 game_info = games_registry.get_game_info(table_id, player_perspective)
                 
@@ -574,7 +569,7 @@ def handle_scrape_replays(args) -> None:
                     replay_exists = True
                 else:
                     # Scrape replay only (table HTML already exists)
-                    replay_result = scraper.scrape_replay_from_table(table_id, player_ids[0], save_raw=True,
+                    replay_result = scraper.scrape_replay_from_table(table_id, player_perspective, save_raw=True,
                                                                    raw_data_dir=config.RAW_DATA_DIR, version_id=version, 
                                                                    player_perspective=player_perspective)
                     
@@ -610,7 +605,7 @@ def handle_scrape_replays(args) -> None:
                         replay_html=replay_html,
                         table_html=table_html,
                         table_id=table_id,
-                        player_perspective=player_perspective or player_ids[0]
+                        player_perspective=player_perspective
                     )
                     
                     # Export to JSON
