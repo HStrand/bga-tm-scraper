@@ -10,6 +10,7 @@ session = BGASession(
         email=config.BGA_EMAIL,
         password=config.BGA_PASSWORD,
         chromedriver_path=config.CHROMEDRIVER_PATH,
+        chrome_path=config.CHROME_PATH,
         headless=True
     )
 

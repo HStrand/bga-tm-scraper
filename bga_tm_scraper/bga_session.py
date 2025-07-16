@@ -29,7 +29,7 @@ class BGASession:
     BASE_URL = 'https://boardgamearena.com'
     LOGIN_URL = '/account/account/login.html'
     
-    def __init__(self, email: str, password: str, chromedriver_path: str, headless: bool = False):
+    def __init__(self, email: str, password: str, chromedriver_path: str, chrome_path: str=None, headless: bool = False):
         """
         Initialize session manager
         
@@ -42,6 +42,7 @@ class BGASession:
         self.email = email
         self.password = password
         self.chromedriver_path = chromedriver_path
+        self.chrome_path = chrome_path
         self.headless = headless
         
         # Session-based components
@@ -133,7 +134,7 @@ class BGASession:
             
             login_resp = self.session.post(f'{self.BASE_URL}{self.LOGIN_URL}', data=login_data)
             login_resp.raise_for_status()
-            
+
             # Verify login by checking for authentication indicators
             if self._verify_session_authentication():
                 self.is_session_logged_in = True
@@ -220,6 +221,10 @@ class BGASession:
             
             # Set user agent to match session requests
             chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+
+            if self.chrome_path:
+                # If a custom Chrome path is provided, set it
+                chrome_options.binary_location = self.chrome_path
             
             service = Service(self.chromedriver_path)
             self.driver = webdriver.Chrome(service=service, options=chrome_options)
