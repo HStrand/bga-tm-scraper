@@ -2256,11 +2256,6 @@ class Parser:
                     elo_data[player_name] = EloData(**player_elo)
                     logger.info(f"Parsed ELO data for {player_name}")
             
-            # Fallback: try alternative parsing methods if score-entry method fails
-            if not elo_data:
-                logger.info("Fallback: trying alternative ELO parsing methods")
-                elo_data = self._parse_elo_alternative_methods(soup, table_html)
-            
             logger.info(f"Successfully parsed ELO data for {len(elo_data)} players")
             return elo_data
             
@@ -2276,7 +2271,7 @@ class Parser:
         span_element = soup.find('span', id='mob_gameoption_201_displayed_value')
 
         if span_element:
-            
+
             mode = span_element.get_text().strip()
 
             return mode
@@ -2404,45 +2399,7 @@ class Parser:
         except Exception as e:
             logger.error(f"Error parsing single player ELO: {e}")
             return None
-    
-    def _parse_elo_alternative_methods(self, soup: BeautifulSoup, html_content: str) -> Dict[str, EloData]:
-        """Alternative methods to parse ELO data if standard method fails"""
-        elo_data = {}
-        
-        try:
-            # Method 1: Look for winpoints sections
-            winpoints_sections = soup.find_all('div', id=lambda x: x and 'winpoints' in x)
-            
-            for section in winpoints_sections:
-                # Try to find associated player name
-                player_name = self._find_associated_player_name(section, soup)
-                if player_name:
-                    elo_info = {}
-                    
-                    # Extract points from this section
-                    points_text = section.get_text()
-                    points_match = re.search(r'(\d+)', points_text)
-                    if points_match:
-                        elo_info['arena_points'] = int(points_match.group(1))
-                    
-                    # Look for change indicators
-                    change_match = re.search(r'([+-]\d+)', points_text)
-                    if change_match:
-                        elo_info['arena_points_change'] = int(change_match.group(1))
-                    
-                    if elo_info:
-                        elo_data[player_name] = EloData(**elo_info)
-            
-            # Method 2: Parse from raw HTML patterns
-            if not elo_data:
-                elo_data = self._parse_elo_from_raw_patterns(html_content)
-            
-            return elo_data
-            
-        except Exception as e:
-            logger.error(f"Error in alternative ELO parsing: {e}")
-            return {}
-    
+
     def _find_associated_player_name(self, element: Tag, soup: BeautifulSoup) -> Optional[str]:
         """Find the player name associated with an ELO element"""
         # Look for player name in parent elements
@@ -2463,73 +2420,6 @@ class Parser:
                     return player_elem.get_text().strip()
         
         return None
-    
-    def _parse_elo_from_raw_patterns(self, html_content: str) -> Dict[str, EloData]:
-        """Parse ELO data using raw HTML pattern matching"""
-        elo_data = {}
-        
-        try:
-            # Pattern to find player sections with ELO data
-            # This is a more aggressive approach for when structured parsing fails
-            
-            # Find all player names first
-            player_names = re.findall(r'<span[^>]*class="playername"[^>]*>([^<]+)</span>', html_content)
-            
-            for player_name in player_names:
-                player_name = player_name.strip()
-                if not player_name:
-                    continue
-                
-                # Find the section of HTML around this player
-                player_pattern = rf'<span[^>]*class="playername"[^>]*>{re.escape(player_name)}</span>'
-                match = re.search(player_pattern, html_content)
-                
-                if match:
-                    # Extract a reasonable chunk of HTML around the player name
-                    start = max(0, match.start() - 1000)
-                    end = min(len(html_content), match.end() + 1000)
-                    player_section = html_content[start:end]
-                    
-                    elo_info = {}
-                    
-                    # Look for Arena points patterns
-                    arena_points_patterns = [
-                        r'winpoints[^>]*>.*?(\d+)',
-                        r'(\d+)\s*pts',
-                        r'points[^>]*>.*?(\d+)',
-                    ]
-                    
-                    for pattern in arena_points_patterns:
-                        match = re.search(pattern, player_section, re.IGNORECASE)
-                        if match:
-                            elo_info['arena_points'] = int(match.group(1))
-                            break
-                    
-                    # Look for Arena points change
-                    change_match = re.search(r'([+-]\d+)', player_section)
-                    if change_match:
-                        elo_info['arena_points_change'] = int(change_match.group(1))
-                    
-                    # Look for Game rank
-                    rank_patterns = [
-                        r'gamerank[^>]*>.*?(\d+)',
-                        r'rank[^>]*>.*?(\d+)',
-                    ]
-                    
-                    for pattern in rank_patterns:
-                        match = re.search(pattern, player_section, re.IGNORECASE)
-                        if match:
-                            elo_info['game_rank'] = int(match.group(1))
-                            break
-                    
-                    if elo_info:
-                        elo_data[player_name] = EloData(**elo_info)
-            
-            return elo_data
-            
-        except Exception as e:
-            logger.error(f"Error in raw pattern ELO parsing: {e}")
-            return {}
     
     def _create_players_from_elo_data(self, elo_data: Dict[str, EloData], replay_html: str, table_id: str) -> Dict[str, Player]:
         """Create player objects from ELO data when replay HTML doesn't contain player info"""

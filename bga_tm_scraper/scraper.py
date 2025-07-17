@@ -300,9 +300,16 @@ class TMScraper:
                 logger.error(f"Failed to scrape table page for {table_id}")
                 return None
 
-            # Step 2: Check if this is an Arena mode game using ELO data
-            logger.info("Checking if game is Arena mode using ELO data...")
-            if not self._is_arena_mode_game_by_elo(table_data['html_content']):
+            # Step 2: Check if this is an Arena mode game
+            logger.info("Checking if game is Arena mode...")
+
+            from .parser import Parser
+            parser = Parser()
+            game_mode = parser.parse_game_mode(table_data['html_content'])
+            logger.info("Detected game mode:", game_mode)
+            is_arena_mode = game_mode == "Arena mode"
+
+            if not is_arena_mode:
                 logger.info(f"Game {table_id} is not Arena mode - skipping")
                 print(f"⏭️  Game {table_id} is not Arena mode - skipping")
                 return {
@@ -2305,53 +2312,3 @@ class TMScraper:
             for i, player_name in enumerate(player_names):
                 fallback_map[player_name] = f"player_{i}"
             return fallback_map
-
-    def _is_arena_mode_game_by_elo(self, html_content: str) -> bool:
-        """
-        Check if a game is Arena mode based on ELO data (arena_points and arena_points_change)
-        
-        Args:
-            html_content: HTML content of the table page
-            
-        Returns:
-            bool: True if the game is Arena mode, False otherwise
-        """
-        try:
-            # Import parser to use its ELO parsing functionality
-            from .parser import Parser
-            parser = Parser()
-            
-            # Parse ELO data from the table HTML
-            elo_data = parser.parse_elo_data(html_content)
-            
-            if not elo_data:
-                logger.info("No ELO data found - assuming not Arena mode")
-                return False
-            
-            # Check if any player has non-null arena_points or arena_points_change
-            arena_players = 0
-            total_players = len(elo_data)
-            
-            for player_name, elo_info in elo_data.items():
-                # Check if this player has meaningful Arena data
-                # Both arena_points and arena_points_change should be non-null for a true Arena game
-                if elo_info.arena_points is not None and elo_info.arena_points_change is not None:
-                    arena_players += 1
-                    logger.debug(f"Player {player_name} has Arena data: points={elo_info.arena_points}, change={elo_info.arena_points_change}")
-                else:
-                    logger.debug(f"Player {player_name} has incomplete/no Arena data: points={elo_info.arena_points}, change={elo_info.arena_points_change}")
-            
-            # If any player has Arena data, it's an Arena game
-            is_arena = arena_players > 0
-            
-            if is_arena:
-                logger.info(f"Game is Arena mode - {arena_players}/{total_players} players have Arena data")
-            else:
-                logger.info(f"Game is not Arena mode - {arena_players}/{total_players} players have Arena data (all null)")
-            
-            return is_arena
-            
-        except Exception as e:
-            logger.error(f"Error checking Arena mode by ELO: {e}")
-            # If there's an error parsing ELO data, assume it's not Arena mode
-            return False
