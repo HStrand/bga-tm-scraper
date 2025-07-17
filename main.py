@@ -267,7 +267,7 @@ def handle_scrape_tables(args) -> None:
             # Scrape player's game history
             games_data = scraper.scrape_player_game_history(
                 player_id=player_id,
-                max_clicks=1,
+                max_clicks=1000,
                 filter_arena_season_21=getattr(config, 'FILTER_ARENA_SEASON_21', False)
             )
             
@@ -290,7 +290,7 @@ def handle_scrape_tables(args) -> None:
                                                      raw_data_dir=config.RAW_DATA_DIR)
                     
                     if result and result.get('success'):
-                        is_arena_mode = result.get('arena_mode', False)
+                        game_mode = result.get('game_mode', 'Normal mode')
                         elo_data = result.get('elo_data', {})
                         version = result.get('version')
                         
@@ -313,34 +313,16 @@ def handle_scrape_tables(args) -> None:
                             'table_id': table_id,
                             'raw_datetime': game_info['raw_datetime'],
                             'parsed_datetime': game_info['parsed_datetime'],
-                            'is_arena_mode': is_arena_mode,
+                            'game_mode': game_mode,
                             'version': version,
                             'player_perspective': player_id,
                             'scraped_at': result.get('scraped_at'),
                             'players': players_list
                         }
                         
-                        api_games_data.append(game_api_data)
+                        api_games_data.append(game_api_data)                  
                         
-
-                        # OLD REGISTRY
-
-                        # # Still add to registry for tracking purposes
-                        # player_ids_found = [p['player_id'] for p in players_list if p['player_id']]
-                        # games_registry.add_game_check(
-                        #     table_id=table_id,
-                        #     raw_datetime=game_info['raw_datetime'],
-                        #     parsed_datetime=game_info['parsed_datetime'],
-                        #     players=player_ids_found,
-                        #     is_arena_mode=is_arena_mode,
-                        #     version=version,
-                        #     player_perspective=player_id
-                        # )
-                        
-                        if is_arena_mode:
-                            logger.info(f"✅ Game {table_id} is Arena mode")
-                        else:
-                            logger.info(f"⏭️  Game {table_id} is not Arena mode - skipped")
+                        logger.info(f"✅ Game {table_id} is {game_mode}")
                     else:
                         logger.warning(f"❌ Failed to process game {table_id}")
                 
@@ -360,7 +342,7 @@ def handle_scrape_tables(args) -> None:
                     'player_id': player_id,
                     'scraped_at': datetime.now().isoformat(),
                     'total_games': len(api_games_data),
-                    'arena_games': len([g for g in api_games_data if g['is_arena_mode']]),
+                    'arena_games': len([g for g in api_games_data if g['game_mode'] == 'Arena mode']),
                     'games': api_games_data
                 }
                 
@@ -442,7 +424,7 @@ def handle_scrape_complete(args) -> None:
             # Scrape player's game history
             games_data = scraper.scrape_player_game_history(
                 player_id=player_id,
-                max_clicks=1,
+                max_clicks=1000,
                 filter_arena_season_21=getattr(config, 'FILTER_ARENA_SEASON_21', False)
             )
             

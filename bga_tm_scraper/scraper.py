@@ -245,19 +245,14 @@ class TMScraper:
                 'table_data': table_data,
                 'scraped_at': datetime.now().isoformat(),
                 'success': True,
-                'arena_mode': is_arena_mode,
+                'game_mode': game_mode,
                 'player_ids': player_ids,
                 'elo_data': elo_data,
                 'version': version,
                 'table_only': True  # Flag to indicate this was table-only scraping
             }
             
-            if is_arena_mode:
-                logger.info(f"Successfully scraped Arena mode game {table_id} (table only)")
-                print(f"✅ Game {table_id} is Arena mode - table data extracted")
-            else:
-                logger.info(f"Game {table_id} is not Arena mode - table data extracted")
-                print(f"⏭️  Game {table_id} is not Arena mode - table data extracted")
+            logger.info(f"Successfully scraped {game_mode} game {table_id} (table only)")
             
             return result_data
             
