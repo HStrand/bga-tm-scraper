@@ -29,7 +29,7 @@ ARENA_SEASON_21_END = datetime(2025, 7, 8, 23, 59, 59)  # End of day
 class TMScraper:
     """Web scraper for Terraforming Mars replays from BoardGameArena"""
     
-    def __init__(self, chromedriver_path: str, request_delay: int = 1, headless: bool = False, 
+    def __init__(self, chromedriver_path: str, chrome_path: str=None, request_delay: int = 1, headless: bool = False,
                  email: Optional[str] = None, password: Optional[str] = None):
         """
         Initialize the scraper
@@ -42,6 +42,7 @@ class TMScraper:
             password: BGA account password (optional, will try to load from config if not provided)
         """
         self.chromedriver_path = chromedriver_path
+        self.chrome_path = chrome_path
         self.request_delay = request_delay
         self.headless = headless
         self.driver = None
@@ -103,6 +104,7 @@ class TMScraper:
                 email=self.email,
                 password=self.password,
                 chromedriver_path=self.chromedriver_path,
+                chrome_path=self.chrome_path,
                 headless=self.headless
             )
             
@@ -137,7 +139,11 @@ class TMScraper:
         chrome_options.add_argument('--disable-dev-shm-usage')
         chrome_options.add_argument('--disable-gpu')
         chrome_options.add_argument('--window-size=1920,1080')
-        
+
+        if self.chrome_path:
+            # If a custom Chrome path is provided, set it
+            options.binary_location = self.chrome_path
+
         # Set user agent to avoid detection
         chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
         
@@ -1099,7 +1105,7 @@ class TMScraper:
             title_elem = soup.find('title')
             if title_elem:
                 replay_data['title'] = title_elem.get_text().strip()
-            
+
             # Look for game logs section
             game_logs = soup.find_all('div', class_='replaylogs_move')
             if game_logs:
@@ -1122,7 +1128,7 @@ class TMScraper:
                 player_name = player_elem.get_text().strip()
                 if player_name:
                     replay_data['players'].append(player_name)
-            
+
             logger.info(f"Successfully scraped replay {replay_id}")
             return replay_data
             
@@ -1725,6 +1731,7 @@ class TMScraper:
                     email=self.email,
                     password=self.password,
                     chromedriver_path=self.chromedriver_path,
+                    chrome_path=self.chrome_path,
                     headless=True  # Use headless for session-only initialization
                 )
                 

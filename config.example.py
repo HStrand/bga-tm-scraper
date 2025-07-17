@@ -3,7 +3,7 @@
 
 # URL templates for constructing BGA URLs
 TABLE_URL_TEMPLATE = "https://boardgamearena.com/table?table={table_id}"
-REPLAY_URL_TEMPLATE = "https://boardgamearena.com/archive/replay/250604-1037/?table={table_id}&player={player_id}&comments={player_id}"
+REPLAY_URL_TEMPLATE = "https://boardgamearena.com/archive/replay/{version_id}/?table={table_id}&player={player_id}&comments={player_id}"
 
 
 # Request settings

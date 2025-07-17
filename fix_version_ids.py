@@ -134,6 +134,7 @@ class VersionFixer:
             # Initialize scraper with credentials from config
             self.scraper = TMScraper(
                 chromedriver_path=config.CHROMEDRIVER_PATH,
+                chrome_path=config.CHROME_PATH,
                 request_delay=config.REQUEST_DELAY,
                 headless=True,  # Use headless mode for batch processing
                 email=config.BGA_EMAIL,

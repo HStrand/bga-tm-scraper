@@ -156,6 +156,7 @@ def update_players_registry(count: int = 1000) -> bool:
             email=config.BGA_EMAIL,
             password=config.BGA_PASSWORD,
             chromedriver_path=config.CHROMEDRIVER_PATH,
+            chrome_path=config.CHROME_PATH,
             headless=True
         )
         
@@ -192,6 +193,7 @@ def initialize_scraper() -> TMScraper:
     """Initialize and authenticate the scraper"""
     scraper = TMScraper(
         chromedriver_path=config.CHROMEDRIVER_PATH,
+        chrome_path=config.CHROME_PATH,
         request_delay=getattr(config, 'REQUEST_DELAY', 1),
         headless=True,
         email=config.BGA_EMAIL,
