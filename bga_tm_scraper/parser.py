@@ -20,6 +20,9 @@ class EloData:
     arena_points_change: Optional[int] = None
     game_rank: Optional[int] = None
     game_rank_change: Optional[int] = None
+    player_name: Optional[str] = None
+    player_id: Optional[str] = None
+    position: Optional[int] = None
 
 @dataclass
 class GameState:
@@ -2346,16 +2349,9 @@ class Parser:
                 # Extract game ELO change
                 game_change_match = re.search(r'([+-]\d+)', game_winpoints_text)
                 if game_change_match:
-                    player_data['game_rank_change'] = int(game_change_match.group(1))
+                    player_data['game_rank_change'] = int(game_change_match.group(1))        
             
-            if len(newranks) >= 2:
-                game_newrank_text = newranks[1].get_text().strip()
-                # Extract game rank (current)
-                game_rank_match = re.search(r'(\d+)', game_newrank_text)
-                if game_rank_match:
-                    player_data['game_rank'] = int(game_rank_match.group(1))
-            
-            logger.info(f"Extracted ELO data for {player_name}: {player_data}")
+            logger.info(f"Extracted ELO data for {player_data['player_name']}: {player_data}")
             return player_data if len(player_data) > 1 else None  # Must have more than just player_name
             
         except Exception as e:

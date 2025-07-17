@@ -219,20 +219,13 @@ class TMScraper:
 
             # Step 3: Check game mode
             game_mode = parser.parse_game_mode(table_data['html_content'])
-            logger.info("Detected game mode:", game_mode)
             is_arena_mode = game_mode == "Arena mode"
             
-            # Extract player IDs using a simplified approach for table-only scraping
+            # Extract player IDs from ELO data (they're already included now)
             player_ids = []
             if elo_data:
-                # Get player names from ELO data
-                player_names = list(elo_data.keys())
-                logger.info(f"Found {len(player_names)} players with ELO data: {player_names}")
-                
-                # Use a simplified player ID extraction for table-only mode
-                player_id_mapping = self._extract_player_ids_simple(table_data['html_content'], player_names)
-                player_ids = list(player_id_mapping.values())
-                logger.info(f"Mapped to {len(player_ids)} player IDs: {player_ids}")
+                player_ids = [elo.player_id for elo in elo_data.values() if elo.player_id]
+                logger.info(f"Found {len(player_ids)} player IDs from ELO data: {player_ids}")
             else:
                 logger.warning("No ELO data found - cannot extract player IDs")
             

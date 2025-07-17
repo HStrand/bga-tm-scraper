@@ -267,7 +267,7 @@ def handle_scrape_tables(args) -> None:
             # Scrape player's game history
             games_data = scraper.scrape_player_game_history(
                 player_id=player_id,
-                max_clicks=1000,
+                max_clicks=1,
                 filter_arena_season_21=getattr(config, 'FILTER_ARENA_SEASON_21', False)
             )
             
@@ -276,6 +276,8 @@ def handle_scrape_tables(args) -> None:
                 continue
             
             # Process each game (table-only scraping)
+            api_games_data = []  # List to store games for REST API
+            
             for game_info in games_data:
                 table_id = game_info['table_id']
                 
@@ -289,19 +291,51 @@ def handle_scrape_tables(args) -> None:
                     
                     if result and result.get('success'):
                         is_arena_mode = result.get('arena_mode', False)
-                        player_ids_found = result.get('player_ids', [])
+                        elo_data = result.get('elo_data', {})
                         version = result.get('version')
                         
-                        # Add to registry
-                        games_registry.add_game_check(
-                            table_id=table_id,
-                            raw_datetime=game_info['raw_datetime'],
-                            parsed_datetime=game_info['parsed_datetime'],
-                            players=player_ids_found,
-                            is_arena_mode=is_arena_mode,
-                            version=version,
-                            player_perspective=player_id
-                        )
+                        # Convert EloData objects to dictionaries for JSON serialization
+                        players_list = []
+                        for player_name, elo_obj in elo_data.items():
+                            player_dict = {
+                                'player_name': elo_obj.player_name or player_name,
+                                'player_id': elo_obj.player_id,
+                                'position': elo_obj.position,
+                                'arena_points': elo_obj.arena_points,
+                                'arena_points_change': elo_obj.arena_points_change,
+                                'game_rank': elo_obj.game_rank,
+                                'game_rank_change': elo_obj.game_rank_change
+                            }
+                            players_list.append(player_dict)
+                        
+                        # Create game data structure for REST API
+                        game_api_data = {
+                            'table_id': table_id,
+                            'raw_datetime': game_info['raw_datetime'],
+                            'parsed_datetime': game_info['parsed_datetime'],
+                            'is_arena_mode': is_arena_mode,
+                            'version': version,
+                            'player_perspective': player_id,
+                            'scraped_at': result.get('scraped_at'),
+                            'players': players_list
+                        }
+                        
+                        api_games_data.append(game_api_data)
+                        
+
+                        # OLD REGISTRY
+
+                        # # Still add to registry for tracking purposes
+                        # player_ids_found = [p['player_id'] for p in players_list if p['player_id']]
+                        # games_registry.add_game_check(
+                        #     table_id=table_id,
+                        #     raw_datetime=game_info['raw_datetime'],
+                        #     parsed_datetime=game_info['parsed_datetime'],
+                        #     players=player_ids_found,
+                        #     is_arena_mode=is_arena_mode,
+                        #     version=version,
+                        #     player_perspective=player_id
+                        # )
                         
                         if is_arena_mode:
                             logger.info(f"✅ Game {table_id} is Arena mode")
@@ -315,6 +349,28 @@ def handle_scrape_tables(args) -> None:
                 
                 # Add delay between games
                 time.sleep(getattr(config, 'REQUEST_DELAY', 1))
+            
+            # Save API games data to JSON file for REST API consumption
+            if api_games_data:
+                import json
+                api_output_path = os.path.join(config.PARSED_DATA_DIR, f"api_games_{player_id}.json")
+                
+                # Create the API data structure
+                api_data = {
+                    'player_id': player_id,
+                    'scraped_at': datetime.now().isoformat(),
+                    'total_games': len(api_games_data),
+                    'arena_games': len([g for g in api_games_data if g['is_arena_mode']]),
+                    'games': api_games_data
+                }
+                
+                # Save to JSON file
+                os.makedirs(os.path.dirname(api_output_path), exist_ok=True)
+                with open(api_output_path, 'w', encoding='utf-8') as f:
+                    json.dump(api_data, f, indent=2, ensure_ascii=False)
+                
+                logger.info(f"Saved API data for player {player_id} to {api_output_path}")
+                print(f"💾 Saved API data: {len(api_games_data)} games for player {player_id}")
             
             # Save registry after each player
             games_registry.save_registry()
@@ -386,7 +442,7 @@ def handle_scrape_complete(args) -> None:
             # Scrape player's game history
             games_data = scraper.scrape_player_game_history(
                 player_id=player_id,
-                max_clicks=1000,
+                max_clicks=1,
                 filter_arena_season_21=getattr(config, 'FILTER_ARENA_SEASON_21', False)
             )
             
