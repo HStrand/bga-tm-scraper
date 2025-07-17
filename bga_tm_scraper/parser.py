@@ -2284,16 +2284,40 @@ class Parser:
         try:
             player_data = {}
             
-            # Extract player name
-            player_elem = score_entry.find('a', class_='playername')
-            if not player_elem:
-                return None
-            
-            player_name = player_elem.get_text().strip()
-            if not player_name or player_name in ['Visitor']:
-                return None
-            
-            player_data['player_name'] = player_name
+            # Extract player name from playername link
+            player_link = score_entry.find('a', class_='playername')
+            if player_link:
+                player_data['player_name'] = player_link.get_text().strip()
+
+            # Extract player ID from href attribute
+            href = player_link.get('href')
+            if href:
+                # Extract ID from "/player?id=86296239" format
+                id_match = re.search(r'id=(\d+)', href)
+                if id_match:
+                    player_data['player_id'] = id_match.group(1)
+
+            # Extract position from rank div
+            rank_div = score_entry.find('div', class_='rank')
+            if rank_div:
+                rank_text = rank_div.get_text().strip()
+                # Extract number from "1st", "2nd", "3rd", etc.
+                position_match = re.search(r'(\d+)', rank_text)
+                if position_match:
+                    player_data['position'] = int(position_match.group(1))
+
+            # Extract ELO rating from gamerank_value span
+            elo_span = score_entry.find('span', class_='gamerank_value')
+            if elo_span:
+                elo_text = elo_span.get_text().strip()
+                try:
+                    player_data['game_rank'] = int(elo_text)
+                except ValueError:
+                    # In case the ELO text isn't a valid integer
+                    player_data['game_rank'] = None
+            else:
+                player_data['game_rank'] = None
+
             
             # Find all winpoints in this entry (there should be 2: arena and regular)
             winpoints = score_entry.find_all('div', class_='winpoints')
