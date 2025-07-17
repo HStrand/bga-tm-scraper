@@ -73,3 +73,6 @@ CURRENT_SPEED = SPEED_PROFILES[SPEED_PROFILE]
 # - click_delay: Time to wait between clicks when auto-clicking "See more" (seconds)
 # - gamereview_delay: Time to wait for gamereview page to load (seconds)
 # - element_wait_timeout: Maximum time to wait for elements to appear (seconds)
+
+# API Configuration
+API_KEY = "your_api_key_here"  # Update with your actual API key

@@ -33,10 +33,97 @@ try:
     from bga_tm_scraper.parser import Parser
     from bga_tm_scraper.games_registry import GamesRegistry
     from bga_tm_scraper.bga_session import BGASession
+    import requests
+    import json
 except ImportError as e:
     logger.error(f"Failed to import required modules: {e}")
     print("Please ensure all dependencies are installed and config.py is properly configured.")
     sys.exit(1)
+
+
+def get_next_player_to_index() -> Optional[str]:
+    """
+    Get the next player ID to scrape from the API
+    
+    Returns:
+        str: Player ID or None if no more players available
+    """
+    try:
+        url = f"https://bga-tm-scraper-functions.azurewebsites.net/api/GetNextPlayerToIndex?code={config.API_KEY}"
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        
+        data = response.json()
+        player_id = data.get('playerId')
+        
+        if player_id:
+            logger.info(f"Got next player from API: {player_id}")
+            return str(player_id)
+        else:
+            logger.info("No more players available from API")
+            return None
+            
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error getting next player from API: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error getting next player: {e}")
+        return None
+
+
+def get_indexed_games_by_player(player_id: str) -> List[str]:
+    """
+    Get list of already indexed game table IDs for a player
+    
+    Args:
+        player_id: Player ID to get indexed games for
+        
+    Returns:
+        list: List of table IDs (strings) that are already indexed
+    """
+    try:
+        url = f"https://bga-tm-scraper-functions.azurewebsites.net/api/GetIndexedGamesByPlayer?playerId={player_id}&code={config.API_KEY}"
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        
+        data = response.json()
+        table_ids = data
+        
+        logger.info(f"Found {len(table_ids)} indexed games for player {player_id}")
+        return [str(tid) for tid in table_ids]
+        
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error getting indexed games for player {player_id}: {e}")
+        return []
+    except Exception as e:
+        logger.error(f"Unexpected error getting indexed games: {e}")
+        return []
+
+
+def update_games(api_data: Dict[str, Any]) -> bool:
+    """
+    POST the scraped games data to the API
+    
+    Args:
+        api_data: Dictionary containing the games data to upload
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        url = f"https://bga-tm-scraper-functions.azurewebsites.net/api/UpdateGames?code={config.API_KEY}"
+        response = requests.post(url, json=api_data, timeout=60)
+        response.raise_for_status()
+        
+        logger.info(f"Successfully updated games for player {api_data.get('player_id')}")
+        return True
+        
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error updating games via API: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error updating games: {e}")
+        return False
 
 
 def validate_config():
@@ -207,158 +294,137 @@ def initialize_scraper() -> TMScraper:
     return scraper
 
 
+def process_single_player(player_id: str, scraper: TMScraper, args) -> None:
+    """Indexes a single player's games - uses API for filtering and saving"""
+    
+    # Get already indexed games from API
+    indexed_games = get_indexed_games_by_player(player_id)
+    logger.info(f"Found {len(indexed_games)} already indexed games for player {player_id}")
+    
+    # Scrape player's game history
+    games_data = scraper.scrape_player_game_history(
+        player_id=player_id,
+        max_clicks=1000,
+        filter_arena_season_21=getattr(config, 'FILTER_ARENA_SEASON_21', False)
+    )
+    
+    if not games_data:
+        logger.warning(f"No games found for player {player_id}")
+        return
+    
+    # Process each game
+    api_games_data = []
+    for game_info in games_data:
+        table_id = game_info['table_id']
+        
+        # Skip already indexed games
+        if table_id in indexed_games:
+            logger.info(f"Skipping already indexed game {table_id}")
+            continue
+        
+        try:
+            result = scraper.scrape_table_only(table_id, player_id, save_raw=True, 
+                                             raw_data_dir=config.RAW_DATA_DIR)
+            
+            if result and result.get('success'):
+                game_mode = result.get('game_mode', 'Normal mode')
+                elo_data = result.get('elo_data', {})
+                version = result.get('version')
+                
+                # Convert EloData objects to dictionaries for JSON serialization
+                players_list = []
+                for player_name, elo_obj in elo_data.items():
+                    player_dict = {
+                        'player_name': elo_obj.player_name or player_name,
+                        'player_id': elo_obj.player_id,
+                        'position': elo_obj.position,
+                        'arena_points': elo_obj.arena_points,
+                        'arena_points_change': elo_obj.arena_points_change,
+                        'game_rank': elo_obj.game_rank,
+                        'game_rank_change': elo_obj.game_rank_change
+                    }
+                    players_list.append(player_dict)
+                
+                # Create game data structure for REST API
+                game_api_data = {
+                    'table_id': table_id,
+                    'raw_datetime': game_info['raw_datetime'],
+                    'parsed_datetime': game_info['parsed_datetime'],
+                    'game_mode': game_mode,
+                    'version': version,
+                    'player_perspective': player_id,
+                    'scraped_at': result.get('scraped_at'),
+                    'players': players_list
+                }
+                
+                api_games_data.append(game_api_data)                  
+                
+                logger.info(f"✅ Game {table_id} is {game_mode}")
+            else:
+                logger.warning(f"❌ Failed to process game {table_id}")
+        
+        except Exception as e:
+            logger.error(f"Error processing game {table_id}: {e}")
+        
+        # Add delay between games
+        time.sleep(getattr(config, 'REQUEST_DELAY', 1))
+    
+    # POST results to API
+    if api_games_data:
+        api_data = {
+            'player_id': player_id,
+            'scraped_at': datetime.now().isoformat(),
+            'total_games': len(api_games_data),
+            'arena_games': len([g for g in api_games_data if g['game_mode'] == 'Arena mode']),
+            'games': api_games_data
+        }
+        
+        if update_games(api_data):
+            logger.info(f"Successfully updated {len(api_games_data)} games for player {player_id} via API")
+            print(f"✅ Updated API: {len(api_games_data)} games for player {player_id}")
+        else:
+            logger.error(f"Failed to update games for player {player_id} via API")
+            print(f"❌ Failed to update API for player {player_id}")
+
+
 def handle_scrape_tables(args) -> None:
     """Handle scrape-tables command"""
     logger.info("Starting table scraping...")
     
-    # Update players if requested
-    if args.update_players:
-        if not update_players_registry():
-            logger.error("Failed to update players registry")
-            return
-    
-    # Determine target players
-    if args.all:
-        players = load_players_by_rank()
-        if not players:
-            logger.error("No players found. Run 'update-players' first.")
-            return
-        
-        # Filter out players with completed discovery
-        total_players = len(players)
-        filtered_players = []
-        completed_players = 0
-        
-        for player in players:
-            player_id = player['player_id']
-            if is_player_discovery_completed(player_id):
-                completed_players += 1
-                logger.debug(f"Skipping player {player_id} - discovery already completed")
-            else:
-                filtered_players.append(player)
-        
-        player_ids = [p['player_id'] for p in filtered_players]
-        
-        logger.info(f"Found {total_players} total players")
-        logger.info(f"Filtered out {completed_players} players with completed discovery")
-        logger.info(f"Processing remaining {len(player_ids)} players")
-        print(f"📊 Player filtering: {len(player_ids)}/{total_players} players to process ({completed_players} already completed)")
-        
-        if not player_ids:
-            logger.info("No players need processing - all have completed discovery")
-            print("✅ All players have completed discovery!")
-            return
-            
-    elif args.players:
+    # Determine target players based on arguments
+    if args.players:
+        # Manual mode: specific players provided
         player_ids = args.players
-        logger.info(f"Processing {len(player_ids)} specified players")
+        logger.info(f"Manual mode: Processing {len(player_ids)} specified players")
+        
+        # Initialize scraper
+        scraper = initialize_scraper()
+        
+        try:
+            for i, player_id in enumerate(player_ids, 1):
+                logger.info(f"Processing player {i}/{len(player_ids)}: {player_id}")
+                process_single_player(player_id, scraper, args)
+        finally:
+            scraper.close_browser()
+            
     else:
-        logger.error("Must specify either --all or provide player IDs")
-        return
-    
-    # Initialize components
-    games_registry = GamesRegistry()
-    scraper = initialize_scraper()
-    
-    try:
-        for i, player_id in enumerate(player_ids, 1):
-            logger.info(f"Processing player {i}/{len(player_ids)}: {player_id}")
-            
-            # Scrape player's game history
-            games_data = scraper.scrape_player_game_history(
-                player_id=player_id,
-                max_clicks=1000,
-                filter_arena_season_21=getattr(config, 'FILTER_ARENA_SEASON_21', False)
-            )
-            
-            if not games_data:
-                logger.warning(f"No games found for player {player_id}")
-                continue
-            
-            # Process each game (table-only scraping)
-            api_games_data = []  # List to store games for REST API
-            
-            for game_info in games_data:
-                table_id = game_info['table_id']
+        # API mode: get players from API endpoint
+        logger.info("API mode: Getting players from API endpoint")
+        
+        # Initialize scraper
+        scraper = initialize_scraper()
+        
+        try:
+            while True:
+                player_id = get_next_player_to_index()
+                if not player_id:
+                    logger.info("No more players available from API")
+                    break
                 
-                # Skip if already checked and not retrying failed
-                if not args.retry_failed and games_registry.is_game_checked(table_id, player_id):
-                    continue
-                
-                try:
-                    result = scraper.scrape_table_only(table_id, player_id, save_raw=True, 
-                                                     raw_data_dir=config.RAW_DATA_DIR)
-                    
-                    if result and result.get('success'):
-                        game_mode = result.get('game_mode', 'Normal mode')
-                        elo_data = result.get('elo_data', {})
-                        version = result.get('version')
-                        
-                        # Convert EloData objects to dictionaries for JSON serialization
-                        players_list = []
-                        for player_name, elo_obj in elo_data.items():
-                            player_dict = {
-                                'player_name': elo_obj.player_name or player_name,
-                                'player_id': elo_obj.player_id,
-                                'position': elo_obj.position,
-                                'arena_points': elo_obj.arena_points,
-                                'arena_points_change': elo_obj.arena_points_change,
-                                'game_rank': elo_obj.game_rank,
-                                'game_rank_change': elo_obj.game_rank_change
-                            }
-                            players_list.append(player_dict)
-                        
-                        # Create game data structure for REST API
-                        game_api_data = {
-                            'table_id': table_id,
-                            'raw_datetime': game_info['raw_datetime'],
-                            'parsed_datetime': game_info['parsed_datetime'],
-                            'game_mode': game_mode,
-                            'version': version,
-                            'player_perspective': player_id,
-                            'scraped_at': result.get('scraped_at'),
-                            'players': players_list
-                        }
-                        
-                        api_games_data.append(game_api_data)                  
-                        
-                        logger.info(f"✅ Game {table_id} is {game_mode}")
-                    else:
-                        logger.warning(f"❌ Failed to process game {table_id}")
-                
-                except Exception as e:
-                    logger.error(f"Error processing game {table_id}: {e}")
-                
-                # Add delay between games
-                time.sleep(getattr(config, 'REQUEST_DELAY', 1))
-            
-            # Save API games data to JSON file for REST API consumption
-            if api_games_data:
-                import json
-                api_output_path = os.path.join(config.PARSED_DATA_DIR, f"api_games_{player_id}.json")
-                
-                # Create the API data structure
-                api_data = {
-                    'player_id': player_id,
-                    'scraped_at': datetime.now().isoformat(),
-                    'total_games': len(api_games_data),
-                    'arena_games': len([g for g in api_games_data if g['game_mode'] == 'Arena mode']),
-                    'games': api_games_data
-                }
-                
-                # Save to JSON file
-                os.makedirs(os.path.dirname(api_output_path), exist_ok=True)
-                with open(api_output_path, 'w', encoding='utf-8') as f:
-                    json.dump(api_data, f, indent=2, ensure_ascii=False)
-                
-                logger.info(f"Saved API data for player {player_id} to {api_output_path}")
-                print(f"💾 Saved API data: {len(api_games_data)} games for player {player_id}")
-            
-            # Save registry after each player
-            games_registry.save_registry()
-    
-    finally:
-        scraper.close_browser()
+                logger.info(f"Processing player from API: {player_id}")
+                process_single_player(player_id, scraper, args)
+        finally:
+            scraper.close_browser()
     
     logger.info("Table scraping completed")
 
@@ -959,7 +1025,8 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python main.py scrape-tables --all --update-players
+  python main.py scrape-tables                    # API mode - gets players from API
+  python main.py scrape-tables 12345678 87654321  # Manual mode - specific players
   python main.py scrape-complete 12345678 87654321
   python main.py scrape-replays 123456789:12345678 987654321:87654321
   python main.py parse
@@ -977,12 +1044,8 @@ Examples:
     # scrape-tables command
     scrape_tables_parser = subparsers.add_parser('scrape-tables', 
                                                 help='Scrape table HTMLs only')
-    scrape_tables_parser.add_argument('--all', '-a', action='store_true',
-                                     help='Process all players')
-    scrape_tables_parser.add_argument('--update-players', action='store_true',
-                                     help='Update player registry before processing')
     scrape_tables_parser.add_argument('players', nargs='*',
-                                     help='Space-separated list of player IDs')
+                                     help='Space-separated list of player IDs (if none provided, uses API mode)')
     
     # scrape-complete command
     scrape_complete_parser = subparsers.add_parser('scrape-complete',
