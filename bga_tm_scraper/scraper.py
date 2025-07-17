@@ -211,15 +211,16 @@ class TMScraper:
                 logger.error(f"Failed to scrape table page for {table_id}")
                 return None
 
-            # Step 2: Check if this is an Arena mode game using ELO data
-            logger.info("Checking if game is Arena mode using ELO data...")
-            is_arena_mode = self._is_arena_mode_game_by_elo(table_data['html_content'])
-            
-            # Step 3: Extract player information using parser
+            # Step 2: Extract player information using parser
             logger.info("Extracting player information...")
             from .parser import Parser
             parser = Parser()
             elo_data = parser.parse_elo_data(table_data['html_content'])
+
+            # Step 3: Check game mode
+            game_mode = parser.parse_game_mode(table_data['html_content'])
+            logger.info("Detected game mode:", game_mode)
+            is_arena_mode = game_mode == "Arena mode"
             
             # Extract player IDs using a simplified approach for table-only scraping
             player_ids = []

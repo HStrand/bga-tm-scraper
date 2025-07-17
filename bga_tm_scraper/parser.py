@@ -2268,6 +2268,22 @@ class Parser:
             logger.error(f"Error parsing ELO data: {e}")
             return {}
     
+    
+    def parse_game_mode(self, table_html: str) -> str:
+        
+        soup = BeautifulSoup(table_html, 'html.parser')
+
+        span_element = soup.find('span', id='mob_gameoption_201_displayed_value')
+
+        if span_element:
+            
+            mode = span_element.get_text().strip()
+
+            return mode
+        
+        else:
+            return "Normal mode" # Default
+    
     def _parse_player_from_score_entry(self, score_entry: Tag) -> Optional[Dict[str, Any]]:
         """Parse ELO data for a single player from their score entry section"""
         try:
