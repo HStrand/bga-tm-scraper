@@ -1137,7 +1137,7 @@ class TMScraper:
             print(f"❌ Error scraping replay: {e}")
             return None
     
-    def scrape_player_game_history(self, player_id: str, max_clicks: int = 100, 
+    def scrape_player_game_history(self, player_id: str, max_clicks: int = 1000, 
                                  click_delay: Optional[float] = None, filter_arena_season_21: bool = False) -> List[Dict]:
         """
         Scrape all table IDs and datetimes from a player's game history by auto-clicking "See more"
@@ -1189,70 +1189,8 @@ class TMScraper:
                 # Primary strategy: Look for the specific ID "see_more_tables"
                 see_more_element = None
                 
-                try:
-                    see_more_element = self.driver.find_element(By.ID, "see_more_tables")
-                    print(f"Found 'See more' button using ID: see_more_tables")
-                except:
-                    # Fallback strategies if ID method fails
-                    print("ID method failed, trying fallback strategies...")
-                    
-                    # Strategy 1: Look for exact text "See more"
-                    see_more_elements = self.driver.find_elements(By.XPATH, 
-                        "//*[contains(text(), 'See more')]")
-                    
-                    if see_more_elements:
-                        see_more_element = see_more_elements[0]
-                        print(f"Found 'See more' using text search")
-                    
-                    # Strategy 2: Look for links with "See more" text
-                    if not see_more_element:
-                        see_more_elements = self.driver.find_elements(By.XPATH, 
-                            "//a[contains(text(), 'See more')]")
-                        if see_more_elements:
-                            see_more_element = see_more_elements[0]
-                            print(f"Found 'See more' link")
-                    
-                    # Strategy 3: Look for buttons with "See more" text
-                    if not see_more_element:
-                        see_more_elements = self.driver.find_elements(By.XPATH, 
-                            "//button[contains(text(), 'See more')]")
-                        if see_more_elements:
-                            see_more_element = see_more_elements[0]
-                            print(f"Found 'See more' button")
-                    
-                    # Strategy 4: Look for elements with class names that might indicate "see more"
-                    if not see_more_element:
-                        see_more_elements = self.driver.find_elements(By.CSS_SELECTOR, 
-                            "[class*='more'], [class*='load'], [class*='expand']")
-                        for elem in see_more_elements:
-                            try:
-                                if 'see more' in elem.text.lower() or 'more' in elem.text.lower():
-                                    see_more_element = elem
-                                    print(f"Found 'See more' using CSS selector: {elem.text}")
-                                    break
-                            except:
-                                continue
-                    
-                    # Strategy 5: Look for clickable elements at the bottom of the page
-                    if not see_more_element:
-                        # Scroll to bottom first
-                        self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                        time.sleep(1)
-                        
-                        # Look for clickable elements near the bottom
-                        clickable_elements = self.driver.find_elements(By.XPATH, 
-                            "//a | //button | //div[@onclick] | //span[@onclick]")
-                        
-                        for elem in clickable_elements:
-                            try:
-                                elem_text = elem.text.lower().strip()
-                                if any(phrase in elem_text for phrase in ['see more', 'more', 'load more', 'show more']):
-                                    see_more_element = elem
-                                    print(f"Found potential 'See more' element: '{elem.text}'")
-                                    break
-                            except:
-                                continue
-                
+                see_more_element = self.driver.find_element(By.ID, "see_more_tables")
+
                 # If no element found, break
                 if not see_more_element:
                     print("No 'See more' button found - all games may be loaded")
@@ -1270,18 +1208,7 @@ class TMScraper:
                     self.driver.execute_script("arguments[0].scrollIntoView(true);", see_more_element)
                     time.sleep(1)
                     
-                    # Try different click methods
-                    try:
-                        # Method 1: Regular click
-                        see_more_element.click()
-                    except:
-                        try:
-                            # Method 2: JavaScript click
-                            self.driver.execute_script("arguments[0].click();", see_more_element)
-                        except:
-                            # Method 3: Action chains click
-                            from selenium.webdriver.common.action_chains import ActionChains
-                            ActionChains(self.driver).move_to_element(see_more_element).click().perform()
+                    see_more_element.click()
                     
                     click_count += 1
                     print(f"Clicked 'See more' #{click_count}, waiting for content to load...")
@@ -1295,13 +1222,8 @@ class TMScraper:
                         print("✅ 'No more results' detected - all games loaded!")
                         break
                     
-                    # Count current games for progress tracking
-                    current_games = len(self.driver.find_elements(By.XPATH, 
-                        "//*[contains(@class, 'game') or contains(text(), '#')]"))
-                    
-                    if current_games > games_loaded:
-                        games_loaded = current_games
-                        print(f"Progress: ~{games_loaded} games loaded so far...")
+                    games_loaded += 10
+                    print(f"Progress: ~{games_loaded} games loaded so far...")
                     
                 except Exception as e:
                     logger.warning(f"Error clicking 'See more' button: {e}")
