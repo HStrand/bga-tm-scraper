@@ -91,8 +91,9 @@ def process_game_for_elo_data(file_path):
                 print(f"Warning: No elo_data found for player {player_id} ({corporation}) in {file_path}")
                 continue
             
-            # Get ELO change (game_rank_change)
+            # Get ELO change (game_rank_change) and rating (game_rank)
             elo_change = elo_data.get('game_rank_change')
+            elo_rating = elo_data.get('game_rank')
             
             if elo_change is None:
                 print(f"Warning: No game_rank_change found for player {player_id} ({corporation}) in {file_path}")
@@ -105,6 +106,7 @@ def process_game_for_elo_data(file_path):
             elo_data_list.append({
                 'corporation': normalized_corporation,
                 'elo_change': elo_change,
+                'elo_rating': elo_rating,
                 'player_id': player_id,
                 'player_name': player_data.get('player_name', 'Unknown'),
                 'replay_id': game_data.get('replay_id', 'unknown'),
@@ -151,8 +153,10 @@ def analyze_corporation_elo(data_dir):
     # Data structures for aggregation
     corporation_stats = defaultdict(lambda: {
         'total_elo_change': 0,
+        'total_elo_rating': 0,
         'game_count': 0,
         'elo_changes': [],  # For calculating statistics
+        'elo_ratings': [],  # For calculating average ELO rating
         'player_instances': []  # For detailed tracking
     })
     
@@ -171,11 +175,18 @@ def analyze_corporation_elo(data_dir):
             for elo_data in elo_data_list:
                 corporation = elo_data['corporation']
                 elo_change = elo_data['elo_change']
+                elo_rating = elo_data['elo_rating']
                 
                 # Update corporation statistics
                 corporation_stats[corporation]['total_elo_change'] += elo_change
                 corporation_stats[corporation]['game_count'] += 1
                 corporation_stats[corporation]['elo_changes'].append(elo_change)
+                
+                # Update ELO rating statistics if available
+                if elo_rating is not None:
+                    corporation_stats[corporation]['total_elo_rating'] += elo_rating
+                    corporation_stats[corporation]['elo_ratings'].append(elo_rating)
+                
                 corporation_stats[corporation]['player_instances'].append(elo_data)
                 
                 # Add to overall data
@@ -198,6 +209,8 @@ def analyze_corporation_elo(data_dir):
         
         # Calculate additional statistics
         elo_changes = stats['elo_changes']
+        elo_ratings = stats['elo_ratings']
+        avg_elo_rating = stats['total_elo_rating'] / len(elo_ratings) if elo_ratings else 0
         min_elo = min(elo_changes)
         max_elo = max(elo_changes)
         
@@ -210,9 +223,11 @@ def analyze_corporation_elo(data_dir):
             'game_count': stats['game_count'],
             'total_elo_change': stats['total_elo_change'],
             'avg_elo_change': avg_elo_change,
+            'avg_elo_rating': avg_elo_rating,
             'min_elo_change': min_elo,
             'max_elo_change': max_elo,
             'win_rate': win_rate,
+            'elo_rating_instances': len(elo_ratings),
             'player_instances': stats['player_instances']
         }
     
@@ -236,12 +251,12 @@ def display_results(corporation_results):
                          key=lambda x: x[1]['avg_elo_change'], 
                          reverse=True)
     
-    print(f"\n{'Rank':<4} {'Corporation':<25} {'Games':<6} {'Avg ELO':<8} {'Total':<7} {'Min':<6} {'Max':<6} {'Win%':<6}")
-    print("-" * 100)
+    print(f"\n{'Rank':<4} {'Corporation':<25} {'Games':<6} {'Avg ELO Δ':<9} {'Avg ELO':<8} {'Total':<7} {'Min':<6} {'Max':<6} {'Win%':<6}")
+    print("-" * 110)
     
     for rank, (corporation, stats) in enumerate(sorted_corps, 1):
         print(f"{rank:<4} {corporation:<25} {stats['game_count']:<6} "
-              f"{stats['avg_elo_change']:<8.2f} {stats['total_elo_change']:<7} "
+              f"{stats['avg_elo_change']:<9.2f} {stats['avg_elo_rating']:<8.0f} {stats['total_elo_change']:<7} "
               f"{stats['min_elo_change']:<6} {stats['max_elo_change']:<6} "
               f"{stats['win_rate']*100:<6.1f}")
     
@@ -267,7 +282,7 @@ def save_detailed_results_to_csv(all_elo_data, output_file):
         return
     
     try:
-        fieldnames = ['corporation', 'elo_change', 'player_id', 'player_name', 
+        fieldnames = ['corporation', 'elo_change', 'elo_rating', 'player_id', 'player_name', 
                      'replay_id', 'game_date']
         
         with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
@@ -294,7 +309,7 @@ def save_corporation_summary_to_csv(corporation_results, output_file):
     
     try:
         fieldnames = ['corporation', 'game_count', 'total_elo_change', 'avg_elo_change', 
-                     'min_elo_change', 'max_elo_change', 'win_rate']
+                     'avg_elo_rating', 'min_elo_change', 'max_elo_change', 'win_rate', 'elo_rating_instances']
         
         with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
@@ -311,9 +326,11 @@ def save_corporation_summary_to_csv(corporation_results, output_file):
                     'game_count': stats['game_count'],
                     'total_elo_change': stats['total_elo_change'],
                     'avg_elo_change': round(stats['avg_elo_change'], 4),
+                    'avg_elo_rating': round(stats['avg_elo_rating'], 1),
                     'min_elo_change': stats['min_elo_change'],
                     'max_elo_change': stats['max_elo_change'],
-                    'win_rate': round(stats['win_rate'], 4)
+                    'win_rate': round(stats['win_rate'], 4),
+                    'elo_rating_instances': stats['elo_rating_instances']
                 }
                 writer.writerow(row)
         
@@ -412,7 +429,7 @@ def plot_corporation_elo_histograms(corporation_results, output_dir, min_games=1
         
         # Formatting
         plt.title(f'ELO Gain Distribution - {corporation}\n'
-                 f'({stats["game_count"]} games, Win Rate: {stats["win_rate"]*100:.1f}%)', 
+                 f'({stats["game_count"]} games, Win Rate: {stats["win_rate"]*100:.1f}%, Avg ELO: {stats["avg_elo_rating"]:.0f})', 
                  fontsize=16, fontweight='bold')
         plt.xlabel('ELO Change', fontsize=14)
         plt.ylabel('Frequency', fontsize=14)
@@ -453,8 +470,13 @@ def main():
     script_dir = Path(__file__).parent
     project_root = script_dir.parent
     data_dir = project_root / "data" / "parsed"
-    detailed_output_file = script_dir / "corporation_elo_detailed.csv"
-    summary_output_file = script_dir / "corporation_elo_summary.csv"
+    output_dir = script_dir / "data"
+    
+    # Create output directory if it doesn't exist
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    detailed_output_file = output_dir / "corporation_elo_detailed.csv"
+    summary_output_file = output_dir / "corporation_elo_summary.csv"
     
     print("Terraforming Mars - Corporation ELO Analysis")
     print("=" * 50)
@@ -471,9 +493,9 @@ def main():
         save_corporation_summary_to_csv(corporation_results, summary_output_file)
         
         # Generate ELO distribution histograms
-        plot_corporation_elo_histograms(corporation_results, script_dir, min_games=10)
+        plot_corporation_elo_histograms(corporation_results, output_dir, min_games=10)
         
-        print(f"\nAnalysis complete! Check the CSV files and histogram plots for detailed data.")
+        print(f"\nAnalysis complete! Check the CSV files and histogram plots in {output_dir} for detailed data.")
     else:
         print("No data found to analyze.")
 

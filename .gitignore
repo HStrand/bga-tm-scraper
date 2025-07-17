@@ -49,6 +49,9 @@ data/processed/
 data/parsed/
 data/registry/
 
+# Analysis output data
+analysis/data/
+
 # Chrome debug profile
 chrome-debug-profile/
 
