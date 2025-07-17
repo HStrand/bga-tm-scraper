@@ -267,7 +267,7 @@ def handle_scrape_tables(args) -> None:
             # Scrape player's game history
             games_data = scraper.scrape_player_game_history(
                 player_id=player_id,
-                max_clicks=100,
+                max_clicks=1000,
                 filter_arena_season_21=getattr(config, 'FILTER_ARENA_SEASON_21', False)
             )
             
@@ -386,7 +386,7 @@ def handle_scrape_complete(args) -> None:
             # Scrape player's game history
             games_data = scraper.scrape_player_game_history(
                 player_id=player_id,
-                max_clicks=100,
+                max_clicks=1000,
                 filter_arena_season_21=getattr(config, 'FILTER_ARENA_SEASON_21', False)
             )
             
