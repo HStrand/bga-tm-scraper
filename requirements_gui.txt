@@ -1,0 +1,17 @@
+# BGA TM Scraper GUI Requirements
+# Core GUI dependencies (tkinter is built into Python)
+
+# For future integration with existing scraper
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+selenium>=4.15.0
+psutil>=5.9.0
+webdriver-manager>=4.0.0
+
+# For PyInstaller packaging
+pyinstaller>=5.13.0
+
+# Optional: For enhanced GUI features in the future
+# pillow>=10.0.0  # For image handling
+# matplotlib>=3.7.0  # For advanced charts

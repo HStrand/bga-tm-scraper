@@ -57,6 +57,7 @@ chrome-debug-profile/
 
 # Sensitive configuration
 config.py
+config.json
 config_local.py
 config_production.py
 
