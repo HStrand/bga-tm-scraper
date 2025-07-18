@@ -96,8 +96,8 @@ python main.py status --detailed
 # Complete workflow for all players (tables + replays + parsing)
 python main.py scrape-complete --all
 
-# Or start with just table scraping to identify Arena games
-python main.py scrape-tables --all
+# Or use API-based table scraping (requires API_KEY)
+python main.py scrape-tables
 ```
 
 ### 4. Parse Games
@@ -113,18 +113,20 @@ The CLI provides six main commands for different operations:
 ### `scrape-tables` - Scrape table HTMLs only
 Scrapes table pages to identify Arena mode games and extract basic information.
 
-```bash
-# Scrape tables for all players (updates player registry first)
-python main.py scrape-tables --all --update-players
+> **⚠️ IMPORTANT**: This command now integrates with a cloud API and cannot be used for local-only scraping. It requires API access and uploads data to the cloud service. Use `scrape-complete` or `scrape-replays` for local-only operations.
 
-# Scrape tables for specific players
+```bash
+# API mode - gets players from cloud API (requires API_KEY)
+python main.py scrape-tables
+
+# Manual mode - specific players (still uploads to API)
 python main.py scrape-tables 12345678 87654321 11223344
 ```
 
 **Options:**
-- `--all, -a`: Process all players from the registry
-- `--update-players`: Update player registry before processing
 - `--retry-failed`: Include previously failed games
+
+**Note**: This command no longer supports `--all` or `--update-players` flags as it operates in API mode.
 
 ### `scrape-complete` - Full workflow (tables + replays + parsing)
 Performs the complete workflow: scrapes tables, scrapes replays for Arena games, and parses them.
@@ -310,8 +312,8 @@ python main.py update-players --count 100
 # 2. Check what's in the registry
 python main.py status --detailed
 
-# 3. Start with table scraping to identify Arena games
-python main.py scrape-tables --all
+# 3. Use API-based table scraping (requires API_KEY)
+python main.py scrape-tables
 
 # 4. Check progress
 python main.py status
