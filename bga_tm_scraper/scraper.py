@@ -382,19 +382,14 @@ class TMScraper:
             # Navigate to the table URL
             print(f"Navigating to table page: {table_url}")
             self.driver.get(table_url)
-            page_delay = self.speed_settings.get('page_load_delay', 3)
-            print(f"⏱️  Waiting {page_delay}s for page to load ({self.speed_profile} mode)")
-            time.sleep(page_delay)
             
-            # Check if we got an error page
+            # Wait for content to load using smart detection instead of fixed delay
+            if not self._wait_for_table_content_to_load(table_id):
+                print("❌ Table content failed to load properly")
+                return None
+            
+            # Get the page source after content has loaded
             page_source = self.driver.page_source
-            if 'must be logged' in page_source.lower():
-                print("❌ Authentication error - please make sure you're logged into BGA")
-                return None
-            
-            if 'fatal error' in page_source.lower():
-                print("❌ Fatal error on page - table might not be accessible")
-                return None
             
             # Save raw HTML if requested
             if save_raw:
@@ -776,6 +771,308 @@ class TMScraper:
             logger.error(f"Error analyzing version patterns: {e}")
             return {'error': str(e)}
 
+    def _wait_for_table_content_to_load(self, table_id: str) -> bool:
+        """
+        Wait for the table page content to load properly instead of using fixed delays
+        
+        Args:
+            table_id: BGA table ID for logging purposes
+            
+        Returns:
+            bool: True if content loaded successfully, False if timeout or error
+        """
+        try:
+            # Get timeout from speed settings
+            timeout = self.speed_settings.get('element_wait_timeout', 10)
+            
+            print(f"⏱️  Waiting for table content to load (timeout: {timeout}s)")
+            logger.info(f"Waiting for table content to load for table {table_id}")
+            
+            # Strategy 1: Wait for specific content indicators to appear
+            wait = WebDriverWait(self.driver, timeout)
+            
+            # Try multiple strategies to detect when content is loaded
+            content_loaded = False
+            
+            # Strategy 1: Wait for ELO data elements with actual populated content
+            try:
+                logger.info("Strategy 1: Waiting for populated ELO data elements...")
+                
+                def elo_data_populated(driver):
+                    try:
+                        # Look for elements that contain actual ELO numbers, not just empty containers
+                        elo_elements = driver.find_elements(By.XPATH, "//*[contains(text(), 'Arena points:') or contains(text(), 'Game rank:') or contains(text(), 'Arena points ') or contains(text(), 'Game rank ')]")
+                        
+                        # Check if we found elements with actual numerical data
+                        for element in elo_elements:
+                            text = element.text.strip()
+                            # Look for patterns like "Arena points: 1234" or "Game rank: 567"
+                            if re.search(r'(Arena points|Game rank)[:]\s*[-+]?\d+', text):
+                                logger.info(f"Found populated ELO data: {text[:50]}")
+                                return True
+                        
+                        # Alternative: look for score entries with actual numbers
+                        score_elements = driver.find_elements(By.CSS_SELECTOR, "[class*='rankdetails'], [class*='winpoints']")
+                        for element in score_elements:
+                            text = element.text.strip()
+                            # Check if the element contains actual numbers (not just empty)
+                            if re.search(r'\d+', text) and len(text) > 5:  # Must have numbers and substantial content
+                                logger.info(f"Found populated score element: {text[:50]}")
+                                return True
+                        
+                        return False
+                    except:
+                        return False
+                
+                wait.until(elo_data_populated)
+                logger.info("Populated ELO data elements found - content appears to be loaded")
+                print("✅ Populated ELO data detected - content loaded")
+                content_loaded = True
+            except:
+                logger.info("Strategy 1 failed: No populated ELO data elements found")
+            
+            # Strategy 2: Wait for player name elements
+            if not content_loaded:
+                try:
+                    logger.info("Strategy 2: Waiting for player name elements...")
+                    wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "span.playername")))
+                    
+                    # Verify we have multiple players (typical game has 2-5 players)
+                    player_elements = self.driver.find_elements(By.CSS_SELECTOR, "span.playername")
+                    if len(player_elements) >= 2:
+                        logger.info(f"Found {len(player_elements)} player names - content appears loaded")
+                        print(f"✅ Player names detected ({len(player_elements)} players) - content loaded")
+                        content_loaded = True
+                    else:
+                        logger.info(f"Only found {len(player_elements)} player names - waiting for more")
+                except:
+                    logger.info("Strategy 2 failed: No player name elements found")
+            
+            # Strategy 3: Wait for game status/completion elements
+            if not content_loaded:
+                try:
+                    logger.info("Strategy 3: Waiting for game status elements...")
+                    wait.until(EC.any_of(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, ".game_result, .game_status")),
+                        EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'Finished') or contains(text(), 'Winner')]"))
+                    ))
+                    logger.info("Game status elements found")
+                    print("✅ Game status detected - content loaded")
+                    content_loaded = True
+                except:
+                    logger.info("Strategy 3 failed: No game status elements found")
+            
+            # Strategy 4: Wait for overall-content div to be populated with table-specific content
+            if not content_loaded:
+                try:
+                    logger.info("Strategy 4: Waiting for overall-content to be populated...")
+                    
+                    def table_content_populated(driver):
+                        try:
+                            overall_content = driver.find_element(By.ID, "overall-content")
+                            content_text = overall_content.text.strip()
+                            inner_html = overall_content.get_attribute('innerHTML').strip()
+                            
+                            # Content is considered loaded if:
+                            # 1. It has substantial text content, AND
+                            # 2. It contains table-specific indicators
+                            has_text = len(content_text) > 200
+                            has_table_content = any(indicator in inner_html.lower() for indicator in [
+                                'playername', 'rankdetails', 'winpoints', 'arena points', 'game rank'
+                            ])
+                            
+                            if has_text and has_table_content:
+                                logger.info(f"Table content populated: text={len(content_text)} chars, has_table_content={has_table_content}")
+                                return True
+                            return False
+                        except:
+                            return False
+                    
+                    wait.until(table_content_populated)
+                    logger.info("Overall-content div populated with table content")
+                    print("✅ Table content populated - content loaded")
+                    content_loaded = True
+                except:
+                    logger.info("Strategy 4 failed: Overall-content not populated with table content")
+            
+            # Strategy 5: Progressive delay with content validation (fallback)
+            if not content_loaded:
+                logger.info("Strategy 5: Using progressive delays with content validation...")
+                delays = [0.5, 1.0, 2.0]  # Shorter delays for table pages
+                
+                for delay in delays:
+                    print(f"⏱️  Waiting {delay}s for content to load...")
+                    time.sleep(delay)
+                    
+                    # Check if content has appeared
+                    page_source = self.driver.page_source
+                    
+                    # Look for ELO/ranking data in the page source
+                    if any(indicator in page_source.lower() for indicator in [
+                        'rankdetails', 'winpoints', 'arena points', 'game rank'
+                    ]):
+                        logger.info(f"Content loaded after {delay}s delay - ELO data found")
+                        print(f"✅ Content loaded after {delay}s - ELO data detected")
+                        content_loaded = True
+                        break
+                    
+                    # Look for player names
+                    try:
+                        soup = BeautifulSoup(page_source, 'html.parser')
+                        player_names = soup.find_all('span', class_='playername')
+                        if len(player_names) >= 2:
+                            logger.info(f"Content loaded after {delay}s delay - {len(player_names)} player names found")
+                            print(f"✅ Content loaded after {delay}s - player names detected")
+                            content_loaded = True
+                            break
+                    except:
+                        pass
+                    
+                    logger.info(f"Content not ready after {delay}s, trying next delay...")
+            
+            if content_loaded:
+                # Give a small additional delay to ensure everything is fully rendered
+                time.sleep(0.2)  # Shorter final delay for table pages
+                logger.info("Table content loading completed successfully")
+                return True
+            else:
+                logger.warning(f"Table content failed to load within timeout for table {table_id}")
+                print("⚠️  Table content loading timeout - proceeding anyway")
+                
+                # Even if we timeout, let's try to proceed - sometimes content is there but not detected
+                return True
+                
+        except Exception as e:
+            logger.error(f"Error waiting for table content to load: {e}")
+            print(f"❌ Error waiting for table content: {e}")
+            # Don't fail completely - try to proceed
+            return True
+
+    def _wait_for_player_history_content_to_load(self, player_id: str) -> bool:
+        """
+        Wait for the player history page content to load properly instead of using fixed delays
+        
+        Args:
+            player_id: BGA player ID for logging purposes
+            
+        Returns:
+            bool: True if content loaded successfully, False if timeout or error
+        """
+        try:
+            # Get timeout from speed settings
+            timeout = self.speed_settings.get('element_wait_timeout', 10)
+            
+            print(f"⏱️  Waiting for player history content to load (timeout: {timeout}s)")
+            logger.info(f"Waiting for player history content to load for player {player_id}")
+            
+            # Strategy 1: Wait for specific content indicators to appear
+            wait = WebDriverWait(self.driver, timeout)
+            
+            # Try multiple strategies to detect when content is loaded
+            content_loaded = False
+            
+            # Strategy 1: Wait for game history table or rows to appear
+            try:
+                logger.info("Strategy 1: Waiting for game history elements...")
+                wait.until(EC.any_of(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "table.gamehistory")),
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "div.gamehistory")),
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "tr.gamehistory_row"))
+                ))
+                logger.info("Game history elements found - content appears to be loaded")
+                print("✅ Game history table detected - content loaded")
+                content_loaded = True
+            except:
+                logger.info("Strategy 1 failed: No game history elements found")
+            
+            # Strategy 2: Wait for "See more" button or game entries
+            if not content_loaded:
+                try:
+                    logger.info("Strategy 2: Waiting for game entries or See more button...")
+                    wait.until(EC.any_of(
+                        EC.presence_of_element_located((By.ID, "see_more_tables")),
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "div.row")),
+                        EC.presence_of_element_located((By.XPATH, "//*[contains(text(), '#')]"))
+                    ))
+                    logger.info("Game entries or See more button found")
+                    print("✅ Game entries detected - content loaded")
+                    content_loaded = True
+                except:
+                    logger.info("Strategy 2 failed: No game entries or See more button found")
+            
+            # Strategy 3: Wait for table IDs to appear (games with # prefix)
+            if not content_loaded:
+                try:
+                    logger.info("Strategy 3: Waiting for table IDs to appear...")
+                    
+                    def table_ids_present(driver):
+                        try:
+                            page_source = driver.page_source
+                            # Look for table ID patterns like #12345678
+                            table_id_matches = re.findall(r'#\d{8,}', page_source)
+                            if len(table_id_matches) >= 1:  # At least one game
+                                logger.info(f"Found {len(table_id_matches)} table IDs")
+                                return True
+                            return False
+                        except:
+                            return False
+                    
+                    wait.until(table_ids_present)
+                    logger.info("Table IDs found in page content")
+                    print("✅ Table IDs detected - content loaded")
+                    content_loaded = True
+                except:
+                    logger.info("Strategy 3 failed: No table IDs found")
+            
+            # Strategy 4: Progressive delay with content validation (fallback)
+            if not content_loaded:
+                logger.info("Strategy 4: Using progressive delays with content validation...")
+                delays = [1.0, 2.0, 3.0]  # Progressive delays for player history
+                
+                for delay in delays:
+                    print(f"⏱️  Waiting {delay}s for content to load...")
+                    time.sleep(delay)
+                    
+                    # Check if content has appeared
+                    page_source = self.driver.page_source
+                    
+                    # Look for game history indicators
+                    if any(indicator in page_source.lower() for indicator in [
+                        'gamehistory', 'see_more_tables', 'table_id'
+                    ]):
+                        logger.info(f"Content loaded after {delay}s delay - game history indicators found")
+                        print(f"✅ Content loaded after {delay}s - game history detected")
+                        content_loaded = True
+                        break
+                    
+                    # Look for table IDs
+                    table_id_matches = re.findall(r'#\d{8,}', page_source)
+                    if len(table_id_matches) >= 1:
+                        logger.info(f"Content loaded after {delay}s delay - {len(table_id_matches)} table IDs found")
+                        print(f"✅ Content loaded after {delay}s - table IDs detected")
+                        content_loaded = True
+                        break
+                    
+                    logger.info(f"Content not ready after {delay}s, trying next delay...")
+            
+            if content_loaded:
+                # Give a small additional delay to ensure everything is fully rendered
+                time.sleep(0.2)  # Short final delay for player history
+                logger.info("Player history content loading completed successfully")
+                return True
+            else:
+                logger.warning(f"Player history content failed to load within timeout for player {player_id}")
+                print("⚠️  Player history content loading timeout - proceeding anyway")
+                
+                # Even if we timeout, let's try to proceed - sometimes content is there but not detected
+                return True
+                
+        except Exception as e:
+            logger.error(f"Error waiting for player history content to load: {e}")
+            print(f"❌ Error waiting for player history content: {e}")
+            # Don't fail completely - try to proceed
+            return True
+
     def _wait_for_gamereview_content_to_load(self, table_id: str) -> bool:
         """
         Wait for the gamereview page JavaScript content to load properly
@@ -795,21 +1092,6 @@ class TMScraper:
             
             # Strategy 1: Wait for specific content indicators to appear
             wait = WebDriverWait(self.driver, timeout)
-            
-            # Check for authentication errors first
-            try:
-                # Quick check for immediate errors
-                time.sleep(0.5)
-                page_source = self.driver.page_source
-                if 'must be logged' in page_source.lower():
-                    print("❌ Authentication error detected")
-                    return False
-                
-                if 'fatal error' in page_source.lower():
-                    print("❌ Fatal error detected")
-                    return False
-            except:
-                pass
             
             # Try multiple strategies to detect when content is loaded
             content_loaded = False
@@ -1162,19 +1444,14 @@ class TMScraper:
             # Navigate to player page
             print(f"Navigating to player page: {player_url}")
             self.driver.get(player_url)
-            page_delay = self.speed_settings.get('page_load_delay', 3)
-            print(f"⏱️  Waiting {page_delay}s for player page to load ({self.speed_profile} mode)")
-            time.sleep(page_delay)
             
-            # Check if we got an error page
+            # Wait for content to load using smart detection instead of fixed delay
+            if not self._wait_for_player_history_content_to_load(player_id):
+                print("❌ Player history content failed to load properly")
+                return []
+            
+            # Get the page source after content has loaded
             page_source = self.driver.page_source
-            if 'must be logged' in page_source.lower():
-                print("❌ Authentication error - please make sure you're logged into BGA")
-                return []
-            
-            if 'fatal error' in page_source.lower():
-                print("❌ Fatal error on page - player page might not be accessible")
-                return []
             
             click_count = 0
             games_loaded = 0
