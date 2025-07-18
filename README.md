@@ -32,8 +32,9 @@ A Python CLI tool for scraping and parsing Terraforming Mars game replays from B
 ### System Requirements
 - **Python 3.7+**
 - **Google Chrome browser** (latest version recommended)
-- **ChromeDriver** (matching your Chrome version)
 - **Windows/macOS/Linux** (tested on Windows 11)
+
+**Note**: ChromeDriver is now installed automatically! No manual setup required.
 
 ### Important Limitations
 - **BGA Daily Replay Limit**: BoardGameArena has a daily limit on replay access that resets after 24 hours. This limits how many replays you can scrape per day.
@@ -44,6 +45,7 @@ A Python CLI tool for scraping and parsing Terraforming Mars game replays from B
 - `lxml>=4.9.0` - XML/HTML processing
 - `selenium>=4.15.0` - Browser automation
 - `psutil>=5.9.0` - System process management
+- `webdriver-manager>=4.0.0` - Automatic ChromeDriver management
 
 ## Installation & Setup
 
@@ -58,24 +60,18 @@ cd bga-tm-scraper
 pip install -r requirements.txt
 ```
 
-### 3. Setup ChromeDriver
-1. Check your Chrome version: `chrome://version/`
-2. Download matching ChromeDriver from https://chromedriver.chromium.org/
-3. Extract to a folder (e.g., `C:\Code\chromedriver-win64\`)
-4. Note the path to `chromedriver.exe`
-
-### 4. Configure Settings
+### 3. Configure Settings
 ```bash
 cp config.example.py config.py
 ```
 
 Edit `config.py` and update:
-- `CHROMEDRIVER_PATH`: Path to your ChromeDriver executable
-- `CHROME_PATH`: Path to your Chrome browser (if not default)
 - `BGA_EMAIL` and `BGA_PASSWORD`: Your BoardGameArena credentials
 - Other settings as needed (see [Configuration](#configuration))
 
-### 5. Verify Setup
+**Note**: ChromeDriver will be downloaded automatically when you first run the scraper!
+
+### 4. Verify Setup
 ```bash
 # Check if everything is working
 python main.py status
@@ -250,8 +246,10 @@ Key settings in `config.py`:
 
 ### Paths and Browser
 ```python
-CHROMEDRIVER_PATH = r'C:\path\to\chromedriver.exe'
-CHROME_PATH = r'C:\Program Files\Google\Chrome\Application\chrome.exe'
+# ChromeDriver is now managed automatically!
+# Only set CHROMEDRIVER_PATH if you want to use a specific driver
+CHROMEDRIVER_PATH = None  # Uses webdriver-manager (recommended)
+CHROME_PATH = r'C:\Program Files\Google\Chrome\Application\chrome.exe'  # Optional
 ```
 
 ### BGA Credentials
@@ -436,11 +434,30 @@ The parser generates comprehensive JSON (sample excerpt):
 }
 ```
 
-**ChromeDriver Issues**
-- Ensure ChromeDriver version matches your Chrome browser
-- Update `CHROMEDRIVER_PATH` in config.py
-- Try downloading the latest ChromeDriver
+## Troubleshooting
 
+### ChromeDriver Issues
+
+**Automatic Installation (Default)**
+ChromeDriver is now installed automatically! If you encounter issues:
+
+1. **First Run**: ChromeDriver downloads automatically on first use
+2. **Version Mismatch**: webdriver-manager automatically handles Chrome version compatibility
+3. **Network Issues**: Check your internet connection and proxy settings
+4. **Permission Issues**: Ensure your antivirus isn't blocking the download
+
+**Manual Installation (If Needed)**
+If you prefer manual ChromeDriver management or encounter issues with automatic installation:
+
+1. Check your Chrome version: Go to `chrome://version/`
+2. Download matching ChromeDriver from https://chromedriver.chromium.org/
+3. Extract to a folder (e.g., `C:\Code\chromedriver-win64\`)
+4. Update your `config.py`:
+   ```python
+   CHROMEDRIVER_PATH = r'C:\path\to\chromedriver.exe'
+   USE_WEBDRIVER_MANAGER = False  # Disable automatic management
+   ```
+   
 ### Logging
 
 - All operations are logged to `scraper.log`
