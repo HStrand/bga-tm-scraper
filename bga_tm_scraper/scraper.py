@@ -22,10 +22,6 @@ logger = logging.getLogger(__name__)
 import config
 from config import TERRAFORMING_MARS_GAME_ID
 
-# Arena Season 21 date range constants
-ARENA_SEASON_21_START = datetime(2025, 4, 8)
-ARENA_SEASON_21_END = datetime(2025, 7, 8, 23, 59, 59)  # End of day
-
 class TMScraper:
     """Web scraper for Terraforming Mars replays from BoardGameArena"""
     
@@ -262,7 +258,7 @@ class TMScraper:
 
     def scrape_table_and_replay(self, table_id: str, player_perspective: str, save_raw: bool = True, raw_data_dir: str = None) -> Optional[Dict]:
         """
-        Scrape both table page and replay page for a game, filtering for Arena mode only
+        Scrape both table page and replay page for a game
         
         Args:
             table_id: BGA table ID
@@ -271,7 +267,7 @@ class TMScraper:
             raw_data_dir: Directory to save raw HTML files
             
         Returns:
-            dict: Combined scraped data or None if failed or not Arena mode
+            dict: Combined scraped data or None if failed
         """
         if raw_data_dir is None:
             raw_data_dir = config.RAW_DATA_DIR
@@ -288,8 +284,8 @@ class TMScraper:
                 logger.error(f"Failed to scrape table page for {table_id}")
                 return None
 
-            # Step 2: Check if this is an Arena mode game
-            logger.info("Checking if game is Arena mode...")
+            # Step 2: Determine game mode
+            logger.info("Determining game mode...")
 
             from .parser import Parser
             parser = Parser()
@@ -297,20 +293,7 @@ class TMScraper:
             logger.info("Detected game mode:", game_mode)
             is_arena_mode = game_mode == "Arena mode"
 
-            if not is_arena_mode:
-                logger.info(f"Game {table_id} is not Arena mode - skipping")
-                print(f"⏭️  Game {table_id} is not Arena mode - skipping")
-                return {
-                    'table_id': table_id,
-                    'success': False,
-                    'skipped': True,
-                    'skip_reason': 'not_arena_mode',
-                    'scraped_at': datetime.now().isoformat(),
-                    'table_data': table_data,
-                    'replay_data': None
-                }
-
-            print(f"✅ Game {table_id} is Arena mode - proceeding with scraping")
+            print(f"✅ Game {table_id} is {game_mode} - proceeding with scraping")
 
             # Step 3: Extract player IDs from table page
             logger.info("Extracting player IDs...")
@@ -343,11 +326,12 @@ class TMScraper:
                 'replay_data': replay_data,
                 'scraped_at': datetime.now().isoformat(),
                 'success': True,
-                'arena_mode': True,
+                'arena_mode': is_arena_mode,
                 'version': version
             }
             
-            logger.info(f"Successfully scraped Arena mode game {table_id}")
+            game_mode_text = "Arena" if is_arena_mode else "Normal"
+            logger.info(f"Successfully scraped {game_mode_text} mode game {table_id}")
             return combined_data
             
         except Exception as e:
@@ -1409,7 +1393,7 @@ class TMScraper:
             return None
     
     def scrape_player_game_history(self, player_id: str, max_clicks: int = 1000, 
-                                 click_delay: Optional[float] = None, filter_arena_season_21: bool = False) -> List[Dict]:
+                                 click_delay: Optional[float] = None) -> List[Dict]:
         """
         Scrape all table IDs and datetimes from a player's game history by auto-clicking "See more"
         
@@ -1417,7 +1401,6 @@ class TMScraper:
             player_id: BGA player ID
             max_clicks: Maximum number of "See more" clicks to prevent infinite loops
             click_delay: Delay between clicks in seconds (uses speed profile if None)
-            filter_arena_season_21: If True, only return games from Arena season 21 date range (2025-04-08 to 2025-07-08)
             
         Returns:
             list: List of dictionaries containing table_id, raw_datetime, parsed_datetime, and date_type
@@ -1505,20 +1488,6 @@ class TMScraper:
             page_source = self.driver.page_source
             game_data = self._extract_games_with_datetimes_from_history(page_source)
             
-            # Apply Arena season 21 filtering if requested
-            if filter_arena_season_21:
-                original_count = len(game_data)
-                filtered_games = []
-                
-                for game in game_data:
-                    if self._is_game_in_arena_season_21_date_range(game['parsed_datetime']):
-                        filtered_games.append(game)
-                
-                game_data = filtered_games
-                filtered_count = len(game_data)
-                
-                logger.info(f"Arena season 21 filtering: {filtered_count}/{original_count} games within date range")
-                print(f"🎯 Arena season 21 filtering: {filtered_count}/{original_count} games within date range (2025-04-08 to 2025-07-08)")
             
             logger.info(f"Successfully extracted {len(game_data)} games with datetimes from player {player_id}")
             print(f"✅ Found {len(game_data)} games with datetimes for player {player_id}")
@@ -1683,36 +1652,6 @@ class TMScraper:
             logger.debug(f"Error extracting datetime from row: {e}")
             return None
 
-    def _is_game_in_arena_season_21_date_range(self, parsed_datetime_str: Optional[str]) -> bool:
-        """
-        Check if a game's datetime falls within Arena season 21 date range (2025-04-08 to 2025-07-08)
-        
-        Args:
-            parsed_datetime_str: ISO format datetime string from game parsing
-            
-        Returns:
-            bool: True if the game is within Arena season 21 date range, False otherwise
-        """
-        if not parsed_datetime_str:
-            logger.debug("No parsed datetime provided - excluding from Arena season 21")
-            return False
-        
-        try:
-            game_datetime = datetime.fromisoformat(parsed_datetime_str)
-            
-            # Check if game falls within Arena season 21 date range
-            is_in_range = ARENA_SEASON_21_START <= game_datetime <= ARENA_SEASON_21_END
-            
-            if is_in_range:
-                logger.debug(f"Game datetime {parsed_datetime_str} is within Arena season 21 range")
-            else:
-                logger.debug(f"Game datetime {parsed_datetime_str} is outside Arena season 21 range")
-            
-            return is_in_range
-            
-        except Exception as e:
-            logger.debug(f"Error parsing datetime {parsed_datetime_str}: {e}")
-            return False
 
     def _parse_game_datetime(self, text: str) -> Optional[Dict]:
         """

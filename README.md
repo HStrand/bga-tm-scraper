@@ -264,8 +264,6 @@ BGA_PASSWORD = "your_password"
 ```python
 REQUEST_DELAY = 2  # Seconds between requests
 TOP_N_PLAYERS = 1000  # Number of players to fetch
-SEASON_21_FILTER = True  # Only Season 21 games
-TWO_PLAYER_ONLY = True  # Only 2-player games
 ```
 
 ### Speed Profiles

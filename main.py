@@ -353,7 +353,6 @@ def process_single_player(player_id: str, scraper: TMScraper, args) -> None:
     games_data = scraper.scrape_player_game_history(
         player_id=player_id,
         max_clicks=1000,
-        filter_arena_season_21=getattr(config, 'FILTER_ARENA_SEASON_21', False)
     )
     
     if not games_data:
@@ -538,8 +537,7 @@ def handle_scrape_complete(args) -> None:
             # Scrape player's game history
             games_data = scraper.scrape_player_game_history(
                 player_id=player_id,
-                max_clicks=1000,
-                filter_arena_season_21=getattr(config, 'FILTER_ARENA_SEASON_21', False)
+                max_clicks=1000
             )
             
             if not games_data:
@@ -562,50 +560,48 @@ def handle_scrape_complete(args) -> None:
                         is_arena_mode = result.get('arena_mode', False)
                         version = result.get('version')
                         
-                        if is_arena_mode:
-                            # Extract player IDs from scraped data
-                            player_ids_found = []
-                            if result.get('table_data') and result['table_data'].get('html_content'):
-                                player_ids_found = scraper.extract_player_ids_from_table(
-                                    result['table_data']['html_content']
-                                )
-                            
-                            # Add to registry and mark as scraped
-                            games_registry.add_game_check(
+                        # Extract player IDs from scraped data
+                        player_ids_found = []
+                        if result.get('table_data') and result['table_data'].get('html_content'):
+                            player_ids_found = scraper.extract_player_ids_from_table(
+                                result['table_data']['html_content']
+                            )
+                        
+                        # Add to registry and mark as scraped
+                        games_registry.add_game_check(
+                            table_id=table_id,
+                            raw_datetime=game_info['raw_datetime'],
+                            parsed_datetime=game_info['parsed_datetime'],
+                            players=player_ids_found,
+                            is_arena_mode=is_arena_mode,
+                            version=version,
+                            player_perspective=player_id
+                        )
+                        games_registry.mark_game_scraped(table_id, player_perspective=player_id)
+                        
+                        # Parse the game
+                        table_html = result['table_data']['html_content']
+                        replay_html = result['replay_data'].get('html_content', '')
+                        
+                        if replay_html:
+                            game_data = parser.parse_complete_game_with_elo(
+                                replay_html=replay_html,
+                                table_html=table_html,
                                 table_id=table_id,
-                                raw_datetime=game_info['raw_datetime'],
-                                parsed_datetime=game_info['parsed_datetime'],
-                                players=player_ids_found,
-                                is_arena_mode=True,
-                                version=version,
                                 player_perspective=player_id
                             )
-                            games_registry.mark_game_scraped(table_id, player_perspective=player_id)
                             
-                            # Parse the game
-                            table_html = result['table_data']['html_content']
-                            replay_html = result['replay_data'].get('html_content', '')
+                            # Export to JSON
+                            output_path = os.path.join(config.PARSED_DATA_DIR, f"game_{table_id}.json")
+                            parser.export_to_json(game_data, output_path, player_perspective=player_id)
                             
-                            if replay_html:
-                                game_data = parser.parse_complete_game_with_elo(
-                                    replay_html=replay_html,
-                                    table_html=table_html,
-                                    table_id=table_id,
-                                    player_perspective=player_id
-                                )
-                                
-                                # Export to JSON
-                                output_path = os.path.join(config.PARSED_DATA_DIR, f"game_{table_id}.json")
-                                parser.export_to_json(game_data, output_path, player_perspective=player_id)
-                                
-                                # Mark as parsed
-                                games_registry.mark_game_parsed(table_id, player_perspective=player_id)
-                                
-                                logger.info(f"✅ Successfully processed Arena game {table_id}")
-                            else:
-                                logger.warning(f"⚠️  No replay data for game {table_id}")
+                            # Mark as parsed
+                            games_registry.mark_game_parsed(table_id, player_perspective=player_id)
+                            
+                            game_mode_text = "Arena" if is_arena_mode else "Normal"
+                            logger.info(f"✅ Successfully processed {game_mode_text} mode game {table_id}")
                         else:
-                            logger.info(f"⏭️  Game {table_id} is not Arena mode - skipped")
+                            logger.warning(f"⚠️  No replay data for game {table_id}")
                     else:
                         logger.warning(f"❌ Failed to scrape game {table_id}")
                 

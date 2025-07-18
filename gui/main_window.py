@@ -252,10 +252,6 @@ class MainWindow:
                 scraping_settings['request_delay'] = config_module.REQUEST_DELAY
             if hasattr(config_module, 'MAX_RETRIES'):
                 scraping_settings['max_retries'] = config_module.MAX_RETRIES
-            if hasattr(config_module, 'FILTER_ARENA_SEASON_21'):
-                scraping_settings['filter_arena_season_21'] = config_module.FILTER_ARENA_SEASON_21
-            if hasattr(config_module, 'TWO_PLAYER_ONLY'):
-                scraping_settings['two_player_only'] = config_module.TWO_PLAYER_ONLY
             if scraping_settings:
                 imported_settings['scraping_settings'] = scraping_settings
             

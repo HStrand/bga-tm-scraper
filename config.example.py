@@ -32,8 +32,6 @@ BGA_PASSWORD = "your_password"
 # Leaderboard settings
 TERRAFORMING_MARS_GAME_ID = 1924
 TOP_N_PLAYERS = 1000 # Number of players to fetch from leaderboard
-SEASON_21_FILTER = True  # Only get Season 21 games
-TWO_PLAYER_ONLY = True   # Only get 2-player games
 
 # Speed settings for scraping
 # Choose one of the predefined speed profiles or create a custom one
