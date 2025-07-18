@@ -1,6 +1,6 @@
 """
-Scraping Tab for BGA TM Scraper GUI
-Handles the actual scraping operations with progress tracking
+Unified Scraping Tab for BGA TM Scraper GUI
+Handles both getting assignments and running scraping operations
 """
 
 import tkinter as tk
@@ -8,11 +8,13 @@ from tkinter import ttk, messagebox
 import threading
 import time
 import random
+import requests
+import json
 from datetime import datetime
 
 
 class ScrapingTab:
-    """Scraping tab for running scraping operations"""
+    """Unified scraping tab for assignments and scraping operations"""
     
     def __init__(self, parent, config_manager):
         self.parent = parent
@@ -20,6 +22,9 @@ class ScrapingTab:
         
         # Create main frame
         self.frame = ttk.Frame(parent)
+        
+        # Assignment state
+        self.current_assignment = None
         
         # Scraping state
         self.is_scraping = False
@@ -46,24 +51,56 @@ class ScrapingTab:
         main_frame.pack(fill="both", expand=True, padx=20, pady=20)
         
         # Title
-        title_label = ttk.Label(main_frame, text="Start Scraping", 
+        title_label = ttk.Label(main_frame, text="Scraping", 
                                font=("TkDefaultFont", 16, "bold"))
         title_label.pack(pady=(0, 20))
         
         # Assignment status frame
-        self.assignment_status_frame = ttk.LabelFrame(main_frame, text="Assignment Status", padding=10)
+        self.assignment_status_frame = ttk.LabelFrame(main_frame, text="Assignment Status", padding=15)
         self.assignment_status_frame.pack(fill="x", pady=(0, 20))
         
-        self.assignment_status_label = ttk.Label(
+        # No assignment message (initially shown)
+        self.no_assignment_label = ttk.Label(
             self.assignment_status_frame,
-            text="No assignment loaded. Please get an assignment first.",
-            foreground="orange"
+            text="No assignment loaded. Click 'Get Next Assignment' to receive your task.",
+            foreground="gray",
+            font=("TkDefaultFont", 10, "italic")
         )
-        self.assignment_status_label.pack()
+        self.no_assignment_label.pack(expand=True)
+        
+        # Assignment details frame (initially hidden)
+        self.assignment_details_frame = ttk.Frame(self.assignment_status_frame)
+        
+        # Assignment type and description
+        self.assignment_type_label = ttk.Label(
+            self.assignment_details_frame, 
+            text="", 
+            font=("TkDefaultFont", 12, "bold")
+        )
+        self.assignment_type_label.pack(anchor="w", pady=(0, 5))
+        
+        self.assignment_desc_label = ttk.Label(
+            self.assignment_details_frame, 
+            text="", 
+            justify="left"
+        )
+        self.assignment_desc_label.pack(anchor="w", pady=(0, 10))
+        
+        # Assignment summary info
+        self.assignment_summary_frame = ttk.Frame(self.assignment_details_frame)
+        self.assignment_summary_frame.pack(fill="x", pady=(0, 10))
         
         # Control buttons frame
         control_frame = ttk.Frame(main_frame)
         control_frame.pack(fill="x", pady=(0, 20))
+        
+        # Get assignment button
+        self.get_assignment_btn = ttk.Button(
+            control_frame,
+            text="🎯 Get Next Assignment",
+            command=self.get_assignment
+        )
+        self.get_assignment_btn.pack(side="left", padx=(0, 10))
         
         # Start button
         self.start_btn = ttk.Button(
@@ -82,15 +119,7 @@ class ScrapingTab:
             command=self.stop_scraping,
             state="disabled"
         )
-        self.stop_btn.pack(side="left", padx=(0, 10))
-        
-        # Refresh assignment button
-        self.refresh_btn = ttk.Button(
-            control_frame,
-            text="🔄 Refresh Assignment",
-            command=self.check_assignment
-        )
-        self.refresh_btn.pack(side="left")
+        self.stop_btn.pack(side="left")
         
         # Progress section
         progress_frame = ttk.LabelFrame(main_frame, text="Progress", padding=15)
@@ -157,46 +186,322 @@ class ScrapingTab:
         clear_log_btn = ttk.Button(log_frame, text="Clear Log", command=self.clear_log)
         clear_log_btn.pack(pady=(5, 0))
     
+    def get_assignment(self):
+        """Get a new assignment from the API"""
+        # Check if there's an incomplete assignment
+        current_status = self.config_manager.get_value("current_assignment", "status")
+        
+        if current_status in ["ready", "in_progress"]:
+            # Show warning dialog
+            result = messagebox.askyesno(
+                "Abandon Current Assignment?",
+                "You have an incomplete assignment. Getting a new one will abandon "
+                "the current assignment and may lock up games for other users.\n\n"
+                "Are you sure you want to continue?",
+                icon="warning"
+            )
+            if not result:
+                return  # User cancelled
+        
+        # Disable button during request
+        self.get_assignment_btn.config(state="disabled", text="Getting assignment...")
+        self.frame.update()
+        
+        # Start API request in background thread
+        api_thread = threading.Thread(target=self._fetch_assignment_from_api, daemon=True)
+        api_thread.start()
+    
+    def _fetch_assignment_from_api(self):
+        """Fetch assignment from the real API"""
+        try:
+            # Validate configuration
+            api_key = self.config_manager.get_value("api_settings", "api_key")
+            bga_email = self.config_manager.get_value("bga_credentials", "email")
+            
+            if not api_key:
+                self.frame.after(0, lambda: self._show_config_error("API key is not configured. Please set it in Settings."))
+                return
+            
+            if not bga_email:
+                self.frame.after(0, lambda: self._show_config_error("BGA email is not configured. Please set it in Settings."))
+                return
+            
+            # Build API URL
+            base_url = "https://bga-tm-scraper-functions.azurewebsites.net/api/GetNextAssignment"
+            params = {
+                "code": api_key,
+                "email": bga_email
+            }
+            
+            self.frame.after(0, lambda: self.log_message(f"🌐 Requesting assignment from API..."))
+            
+            # Make API request
+            response = requests.get(base_url, params=params, timeout=30)
+            
+            if response.status_code == 200:
+                assignment_data = response.json()
+                self.frame.after(0, lambda: self._process_api_assignment(assignment_data))
+            elif response.status_code == 404:
+                self.frame.after(0, lambda: self._show_no_assignments())
+            else:
+                error_msg = f"API returned status {response.status_code}"
+                try:
+                    error_detail = response.json().get("error", "Unknown error")
+                    error_msg += f": {error_detail}"
+                except:
+                    pass
+                self.frame.after(0, lambda: self._show_api_error(error_msg))
+                
+        except requests.exceptions.Timeout:
+            self.frame.after(0, lambda: self._show_api_error("Request timed out. Please check your internet connection."))
+        except requests.exceptions.ConnectionError:
+            self.frame.after(0, lambda: self._show_api_error("Could not connect to the API. Please check your internet connection."))
+        except Exception as e:
+            self.frame.after(0, lambda: self._show_api_error(f"Unexpected error: {str(e)}"))
+    
+    def _process_api_assignment(self, assignment_data):
+        """Process assignment data from the API"""
+        try:
+            # Parse assignment based on type
+            assignment_type = assignment_data.get("assignmentType", "").lower()
+            
+            if assignment_type == "indexing":
+                self.current_assignment = self._parse_indexing_assignment(assignment_data)
+            elif assignment_type == "replayscraping":
+                self.current_assignment = self._parse_replay_assignment(assignment_data)
+            else:
+                raise ValueError(f"Unknown assignment type: {assignment_type}")
+            
+            # Show assignment
+            self._display_assignment()
+            
+            # Enable start button
+            self.start_btn.config(state="normal")
+            
+            # Re-enable get assignment button
+            self.get_assignment_btn.config(state="normal", text="🎯 Get Next Assignment")
+            
+            # Store assignment in config
+            self.config_manager.set_value("current_assignment", "data", self.current_assignment)
+            self.config_manager.set_value("current_assignment", "status", "ready")
+            self.config_manager.save_config()
+            
+            self.log_message("✅ New assignment received and ready to start")
+            
+        except Exception as e:
+            self._show_api_error(f"Failed to process assignment: {str(e)}")
+    
+    def _parse_indexing_assignment(self, data):
+        """Parse an indexing assignment from API data"""
+        player_id = data.get("playerId")
+        player_name = data.get("playerName", f"Player_{player_id}")
+        
+        # Estimate games count (we don't know the exact count for indexing)
+        estimated_games = random.randint(50, 200)  # Reasonable estimate
+        
+        return {
+            "type": "indexing",
+            "title": "🔍 Index Games Assignment",
+            "description": f"Index games for {player_name}",
+            "details": {
+                "player_id": str(player_id),
+                "player_name": player_name,
+                "estimated_games": estimated_games,
+                "assigned_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            },
+            "raw_data": data
+        }
+    
+    def _parse_replay_assignment(self, data):
+        """Parse a replay scraping assignment from API data"""
+        games = data.get("games", [])
+        game_count = len(games)
+        
+        # Extract player perspective info from first game
+        player_perspective_id = None
+        player_perspective_name = None
+        if games:
+            player_perspective_id = games[0].get("playerPerspective")
+            player_perspective_name = games[0].get("playerName")
+        
+        return {
+            "type": "replayscraping", 
+            "title": "📋 Collect Game Logs Assignment",
+            "description": f"Collect logs for {game_count} games",
+            "details": {
+                "game_count": game_count,
+                "player_perspective_id": str(player_perspective_id) if player_perspective_id else "Unknown",
+                "player_perspective_name": player_perspective_name or "Unknown",
+                "games": games,
+                "assigned_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            },
+            "raw_data": data
+        }
+    
+    def _show_config_error(self, message):
+        """Show configuration error and re-enable button"""
+        messagebox.showerror("Configuration Error", message)
+        self.get_assignment_btn.config(state="normal", text="🎯 Get Next Assignment")
+        self.log_message(f"❌ Configuration error: {message}")
+    
+    def _show_api_error(self, message):
+        """Show API error and re-enable button"""
+        messagebox.showerror("API Error", f"Failed to get assignment:\n{message}")
+        self.get_assignment_btn.config(state="normal", text="🎯 Get Next Assignment")
+        self.log_message(f"❌ API error: {message}")
+    
+    def _show_no_assignments(self):
+        """Show no assignments available message"""
+        messagebox.showinfo("No Assignments", "No assignments are currently available. Please try again later.")
+        self.get_assignment_btn.config(state="normal", text="🎯 Get Next Assignment")
+        self.log_message("ℹ️ No assignments available")
+    
+    def _generate_index_assignment(self):
+        """Generate a mock index games assignment"""
+        # Mock player IDs
+        player_ids = [
+            "86296239", "12345678", "87654321", "11223344", "99887766"
+        ]
+        
+        selected_player = random.choice(player_ids)
+        estimated_games = random.randint(50, 300)
+        
+        return {
+            "type": "index_games",
+            "title": "🔍 Index Games Assignment",
+            "description": f"Index games for Player {selected_player}",
+            "details": {
+                "player_id": selected_player,
+                "player_name": f"Player_{selected_player}",
+                "estimated_games": estimated_games,
+                "priority": random.choice(["Normal", "High"]),
+                "assigned_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+        }
+    
+    def _generate_logs_assignment(self):
+        """Generate a mock collect logs assignment"""
+        # Mock table IDs with player perspectives
+        table_count = 200
+        base_table_id = random.randint(600000000, 700000000)
+        player_perspective = random.choice(["86296239", "12345678", "87654321"])
+        
+        table_ids = []
+        for i in range(table_count):
+            table_ids.append(f"{base_table_id + i}:{player_perspective}")
+        
+        return {
+            "type": "collect_logs",
+            "title": "📋 Collect Game Logs Assignment",
+            "description": f"Collect logs for {table_count} games",
+            "details": {
+                "table_count": table_count,
+                "player_perspective": player_perspective,
+                "table_ids": table_ids,
+                "priority": random.choice(["Normal", "High"]),
+                "assigned_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+        }
+    
+    def _display_assignment(self):
+        """Display the current assignment in the UI"""
+        if not self.current_assignment:
+            return
+        
+        # Hide no assignment message
+        self.no_assignment_label.pack_forget()
+        
+        # Show assignment details frame
+        self.assignment_details_frame.pack(fill="x", expand=True)
+        
+        # Update assignment info
+        self.assignment_type_label.config(text=self.current_assignment["title"])
+        self.assignment_desc_label.config(text=self.current_assignment["description"])
+        
+        # Clear and update summary frame
+        for widget in self.assignment_summary_frame.winfo_children():
+            widget.destroy()
+        
+        details = self.current_assignment["details"]
+        assignment_type = self.current_assignment["type"]
+        
+        if assignment_type == "indexing":
+            # Indexing assignment summary
+            ttk.Label(self.assignment_summary_frame, text=f"Player ID: {details['player_id']}", 
+                     font=("TkDefaultFont", 9)).pack(anchor="w")
+            ttk.Label(self.assignment_summary_frame, text=f"Player Name: {details['player_name']}", 
+                     font=("TkDefaultFont", 9)).pack(anchor="w")
+            ttk.Label(self.assignment_summary_frame, text=f"Estimated Games: {details['estimated_games']}", 
+                     font=("TkDefaultFont", 9)).pack(anchor="w")
+        elif assignment_type == "replayscraping":
+            # Replay scraping assignment summary
+            ttk.Label(self.assignment_summary_frame, text=f"Game Count: {details['game_count']}", 
+                     font=("TkDefaultFont", 9)).pack(anchor="w")
+            
+            # Show player perspective with name and ID
+            player_name = details.get('player_perspective_name', 'Unknown')
+            player_id = details.get('player_perspective_id', 'Unknown')
+            perspective_text = f"Player Perspective: {player_name} ({player_id})"
+            ttk.Label(self.assignment_summary_frame, text=perspective_text, 
+                     font=("TkDefaultFont", 9)).pack(anchor="w")
+            
+            # Show sample table IDs if available
+            if details.get("games") and len(details["games"]) > 0:
+                sample_games = details["games"][:3]  # Show first 3 games
+                sample_ids = [str(game.get("tableId", "Unknown")) for game in sample_games]
+                sample_text = f"Sample Table IDs: {', '.join(sample_ids)}"
+                if len(details["games"]) > 3:
+                    sample_text += "..."
+                ttk.Label(self.assignment_summary_frame, text=sample_text, 
+                         font=("TkDefaultFont", 9)).pack(anchor="w")
+        else:
+            # Legacy format support (for mock assignments)
+            if assignment_type == "index_games":
+                ttk.Label(self.assignment_summary_frame, text=f"Player ID: {details['player_id']}", 
+                         font=("TkDefaultFont", 9)).pack(anchor="w")
+                ttk.Label(self.assignment_summary_frame, text=f"Estimated Games: {details['estimated_games']}", 
+                         font=("TkDefaultFont", 9)).pack(anchor="w")
+            elif assignment_type == "collect_logs":
+                ttk.Label(self.assignment_summary_frame, text=f"Table Count: {details['table_count']}", 
+                         font=("TkDefaultFont", 9)).pack(anchor="w")
+                ttk.Label(self.assignment_summary_frame, text=f"Player Perspective: {details['player_perspective']}", 
+                         font=("TkDefaultFont", 9)).pack(anchor="w")
+        
+        # Show priority if available
+        if details.get("priority"):
+            ttk.Label(self.assignment_summary_frame, text=f"Priority: {details['priority']}", 
+                     font=("TkDefaultFont", 9)).pack(anchor="w")
+        
+        # Always show assigned time
+        ttk.Label(self.assignment_summary_frame, text=f"Assigned: {details['assigned_at']}", 
+                 font=("TkDefaultFont", 9), foreground="gray").pack(anchor="w")
+    
     def check_assignment(self):
         """Check for current assignment and update UI"""
         assignment_data = self.config_manager.get_value("current_assignment", "data")
         assignment_status = self.config_manager.get_value("current_assignment", "status")
         
-        if assignment_data and assignment_status == "accepted":
-            # Show assignment details
-            assignment_type = "Index Games" if assignment_data["type"] == "index_games" else "Collect Logs"
-            
-            if assignment_data["type"] == "index_games":
-                details = assignment_data["details"]
-                status_text = f"✅ {assignment_type} - Player: {details['player_id']} ({details['estimated_games']} games)"
-            else:
-                details = assignment_data["details"]
-                status_text = f"✅ {assignment_type} - {details['table_count']} tables"
-            
-            self.assignment_status_label.config(text=status_text, foreground="green")
+        if assignment_data and assignment_status in ["ready", "accepted"]:
+            self.current_assignment = assignment_data
+            self._display_assignment()
             self.start_btn.config(state="normal")
             
-            # Store assignment for scraping
-            self.current_assignment = assignment_data
-            
         elif assignment_data and assignment_status == "completed":
-            self.assignment_status_label.config(
-                text="✅ Assignment completed! Get a new assignment to continue.",
-                foreground="blue"
-            )
+            self.current_assignment = assignment_data
+            self._display_assignment()
             self.start_btn.config(state="disabled")
+            self.log_message("✅ Previous assignment completed")
             
         else:
-            self.assignment_status_label.config(
-                text="No assignment loaded. Please get an assignment first.",
-                foreground="orange"
-            )
+            # No assignment
+            self.assignment_details_frame.pack_forget()
+            self.no_assignment_label.pack(expand=True)
             self.start_btn.config(state="disabled")
             self.current_assignment = None
     
     def start_scraping(self):
         """Start the scraping process"""
-        if not hasattr(self, 'current_assignment') or not self.current_assignment:
+        if not self.current_assignment:
             messagebox.showwarning("No Assignment", "Please get an assignment first.")
             return
         
@@ -213,10 +518,17 @@ class ScrapingTab:
             messagebox.showerror("Configuration Error", error_msg)
             return
         
-        # Confirm start
-        assignment_type = "Index Games" if self.current_assignment["type"] == "index_games" else "Collect Logs"
+        # Confirm start with appropriate message based on assignment type
+        assignment_type = self.current_assignment["type"]
+        if assignment_type in ["indexing", "index_games"]:
+            type_name = "Index Games"
+        elif assignment_type in ["replayscraping", "collect_logs"]:
+            type_name = "Replay Scraping"
+        else:
+            type_name = "Scraping"
+        
         if not messagebox.askyesno("Start Scraping", 
-                                  f"Start {assignment_type} scraping?\n\n"
+                                  f"Start {type_name} operation?\n\n"
                                   "This process may take a while to complete."):
             return
         
@@ -226,15 +538,22 @@ class ScrapingTab:
         self.start_time = datetime.now()
         
         # Update UI
+        self.get_assignment_btn.config(state="disabled")
         self.start_btn.config(state="disabled")
         self.stop_btn.config(state="normal")
-        self.refresh_btn.config(state="disabled")
         
-        # Initialize progress
-        if self.current_assignment["type"] == "index_games":
+        # Initialize progress based on assignment type
+        assignment_type = self.current_assignment["type"]
+        if assignment_type == "indexing":
             self.total_items = self.current_assignment["details"]["estimated_games"]
-        else:
+        elif assignment_type == "replayscraping":
+            self.total_items = self.current_assignment["details"]["game_count"]
+        elif assignment_type == "index_games":  # Legacy mock format
+            self.total_items = self.current_assignment["details"]["estimated_games"]
+        elif assignment_type == "collect_logs":  # Legacy mock format
             self.total_items = self.current_assignment["details"]["table_count"]
+        else:
+            self.total_items = 100  # Default fallback
         
         self.completed_items = 0
         self.successful_items = 0
@@ -265,10 +584,16 @@ class ScrapingTab:
         try:
             assignment_type = self.current_assignment["type"]
             
-            if assignment_type == "index_games":
+            # Update assignment status to in_progress
+            self.config_manager.set_value("current_assignment", "status", "in_progress")
+            self.config_manager.save_config()
+            
+            if assignment_type in ["indexing", "index_games"]:
                 self._mock_index_games()
+            elif assignment_type in ["replayscraping", "collect_logs"]:
+                self._mock_replay_scraping()
             else:
-                self._mock_collect_logs()
+                raise ValueError(f"Unknown assignment type: {assignment_type}")
             
             # Mark assignment as completed if not stopped
             if not self.should_stop:
@@ -316,8 +641,46 @@ class ScrapingTab:
                 text=f"Processing game {tid}", foreground="blue"
             ))
     
+    def _mock_replay_scraping(self):
+        """Mock implementation of replay scraping"""
+        assignment_type = self.current_assignment["type"]
+        
+        if assignment_type == "replayscraping":
+            # Real API assignment format
+            games = self.current_assignment["details"]["games"]
+            player_perspective = self.current_assignment["details"]["player_perspective"]
+            
+            self.frame.after(0, lambda: self.log_message(f"📋 Starting to collect logs for {len(games)} games"))
+            
+            for i, game in enumerate(games):
+                if self.should_stop:
+                    break
+                
+                # Simulate processing time (longer for log collection)
+                time.sleep(random.uniform(1.0, 3.0))
+                
+                table_id = game.get("tableId", f"Unknown_{i}")
+                success = random.random() > 0.15  # 85% success rate
+                
+                if success:
+                    self.successful_items += 1
+                    self.frame.after(0, lambda tid=table_id: self.log_message(f"✅ Collected logs for game {tid}"))
+                else:
+                    self.failed_items += 1
+                    self.frame.after(0, lambda tid=table_id: self.log_message(f"❌ Failed to collect logs for game {tid}"))
+                
+                self.completed_items += 1
+                
+                # Update current operation
+                self.frame.after(0, lambda tid=table_id: self.current_op_label.config(
+                    text=f"Processing game {tid}", foreground="blue"
+                ))
+        else:
+            # Legacy format (collect_logs)
+            self._mock_collect_logs()
+    
     def _mock_collect_logs(self):
-        """Mock implementation of collect logs scraping"""
+        """Mock implementation of collect logs scraping (legacy format)"""
         table_ids = self.current_assignment["details"]["table_ids"]
         player_perspective = self.current_assignment["details"]["player_perspective"]
         
@@ -353,9 +716,9 @@ class ScrapingTab:
         self.is_scraping = False
         
         # Update UI
-        self.start_btn.config(state="normal")
+        self.get_assignment_btn.config(state="normal")
+        self.start_btn.config(state="disabled")  # Keep disabled until new assignment
         self.stop_btn.config(state="disabled")
-        self.refresh_btn.config(state="normal")
         
         if self.should_stop:
             self.current_op_label.config(text="Stopped by user", foreground="orange")

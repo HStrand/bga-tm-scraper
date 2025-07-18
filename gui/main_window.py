@@ -9,7 +9,6 @@ from pathlib import Path
 
 from gui.components.config_manager import ConfigManager
 from gui.tabs.settings_tab import SettingsTab
-from gui.tabs.assignment_tab import AssignmentTab
 from gui.tabs.scraping_tab import ScrapingTab
 from gui.tabs.statistics_tab import StatisticsTab
 from gui.tabs.download_tab import DownloadTab
@@ -82,15 +81,13 @@ class MainWindow:
         
         # Create tab instances
         self.settings_tab = SettingsTab(self.notebook, self.config_manager)
-        self.assignment_tab = AssignmentTab(self.notebook, self.config_manager)
         self.scraping_tab = ScrapingTab(self.notebook, self.config_manager)
         self.statistics_tab = StatisticsTab(self.notebook, self.config_manager)
         self.download_tab = DownloadTab(self.notebook, self.config_manager)
         
         # Add tabs to notebook
         self.notebook.add(self.settings_tab.frame, text="⚙️ Settings")
-        self.notebook.add(self.assignment_tab.frame, text="📋 Get Assignment")
-        self.notebook.add(self.scraping_tab.frame, text="🚀 Start Scraping")
+        self.notebook.add(self.scraping_tab.frame, text="🚀 Scraping")
         self.notebook.add(self.statistics_tab.frame, text="📊 Statistics")
         self.notebook.add(self.download_tab.frame, text="💾 Download Data")
         
@@ -162,7 +159,7 @@ class MainWindow:
         
         # Refresh tab content if needed
         current_index = self.notebook.index(selected_tab)
-        if current_index == 3:  # Statistics tab
+        if current_index == 2:  # Statistics tab
             self.statistics_tab.refresh_data()
     
     def update_status(self, message):
