@@ -59,7 +59,6 @@ class Move:
     
     # Detailed action data
     card_played: Optional[str] = None
-    card_cost: Optional[int] = None
     tile_placed: Optional[str] = None
     tile_location: Optional[str] = None
     
@@ -96,13 +95,7 @@ class GameData:
     
     # All moves with game states
     moves: List[Move]
-    
-    # Final game state
-    final_state: GameState
-    
-    # Game progression data
-    parameter_progression: List[Dict[str, Any]]
-    
+
     # Analysis metadata
     metadata: Dict[str, Any]
 
@@ -148,16 +141,7 @@ class Parser:
             
             # Update game states with tracking data
             self._update_game_states_with_tracking(moves_with_states, tracking_progression)
-        
-        # Extract parameter progression
-        parameter_progression = self._extract_parameter_progression(moves_with_states)
-        
-        # Build final game state
-        final_state = moves_with_states[-1].game_state if moves_with_states else GameState(
-            move_number=0, generation=1, temperature=-30, oxygen=0, oceans=0,
-            player_vp={}, milestones={}, awards={}
-        )
-        
+
         # Determine winner
         winner = self._determine_winner(players_info)
         
@@ -177,8 +161,6 @@ class Parser:
             generations=max_generation,
             players=players_info,
             moves=moves_with_states,
-            final_state=final_state,
-            parameter_progression=parameter_progression,
             metadata=metadata
         )
         
@@ -342,7 +324,6 @@ class Parser:
             # Extract action details
             action_type = self._classify_action_type(log_entries, full_description)
             card_played = self._extract_card_played(log_entries)
-            card_cost = self._extract_card_cost(log_entries)
             tile_placed, tile_location = self._extract_tile_placement(log_entries)
             
             move = Move(
@@ -353,7 +334,6 @@ class Parser:
                 action_type=action_type,
                 description=full_description,
                 card_played=card_played,
-                card_cost=card_cost,
                 tile_placed=tile_placed,
                 tile_location=tile_location
             )
@@ -476,17 +456,6 @@ class Parser:
                     match = re.search(r'plays card (.+)', text)
                     if match:
                         return match.group(1).strip()
-        return None
-    
-    def _extract_card_cost(self, log_entries: List[Tag]) -> Optional[int]:
-        """Extract the cost of the card played"""
-        for entry in log_entries:
-            text = entry.get_text()
-            if 'pays' in text and 'M€' in text:
-                # Look for cost pattern
-                cost_match = re.search(r'pays (\d+)', text)
-                if cost_match:
-                    return int(cost_match.group(1))
         return None
     
     def _extract_tile_placement(self, log_entries: List[Tag]) -> Tuple[Optional[str], Optional[str]]:
@@ -1385,22 +1354,6 @@ class Parser:
         
         return vp_progression
     
-    def _extract_parameter_progression(self, moves: List[Move]) -> List[Dict[str, Any]]:
-        """Extract parameter progression from moves"""
-        progression = []
-        
-        for move in moves:
-            if move.game_state:
-                progression.append({
-                    'move_number': move.game_state.move_number,
-                    'generation': move.game_state.generation,
-                    'temperature': move.game_state.temperature,
-                    'oxygen': move.game_state.oxygen,
-                    'oceans': move.game_state.oceans
-                })
-        
-        return progression
-    
     def _extract_vp_data_from_html(self, html_content: str) -> Dict[str, Any]:
         """Extract VP data from HTML - reusing existing logic"""
         pattern = r'"data":\{("(\d+)":\{.*?"total":(\d+).*?\}.*?"(\d+)":\{.*?"total":(\d+).*?\})\}'
@@ -1711,8 +1664,7 @@ class Parser:
         
         return {
             'parsed_at': datetime.now().isoformat(),
-            'total_moves': total_moves,
-            'html_length': len(html_content)
+            'total_moves': total_moves
         }
 
     def _extract_tracker_dictionary_from_html(self, html_content: str) -> Dict[str, str]:
@@ -2220,8 +2172,6 @@ class Parser:
         # Update metadata to indicate ELO data was included
         game_data.metadata['elo_data_included'] = len(elo_data) > 0
         game_data.metadata['elo_players_found'] = len(elo_data)
-        game_data.metadata['has_meaningful_data'] = has_meaningful_data
-        game_data.metadata['elo_only_fallback'] = not has_meaningful_data and len(elo_data) > 0
         
         # If we only have ELO data and no meaningful game data, this should be considered a parsing failure
         if not has_meaningful_data:

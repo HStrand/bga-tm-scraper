@@ -409,7 +409,6 @@ class TMScraper:
                 'table_id': table_id,
                 'url': table_url,
                 'scraped_at': datetime.now().isoformat(),
-                'html_length': len(page_source),
                 'html_content': page_source,
                 'elo_data_found': False
             }
@@ -651,7 +650,6 @@ class TMScraper:
                 'table_id': table_id,
                 'timestamp': timestamp,
                 'gamereview_url': gamereview_url,
-                'html_length': len(html_content),
                 'html_filename': html_filename,
                 'page_characteristics': self._analyze_page_characteristics(html_content),
                 'pattern_analysis': self._analyze_version_patterns(html_content),
@@ -694,7 +692,6 @@ class TMScraper:
             # Check for key elements
             characteristics = {
                 'title': title_text,
-                'html_length': len(html_content),
                 'has_archive_links': 'archive' in html_content.lower(),
                 'has_replay_links': 'replay' in html_content.lower(),
                 'has_table_references': f'table' in html_content.lower(),
@@ -1283,8 +1280,7 @@ class TMScraper:
                     'url': url,
                     'scraped_at': datetime.now().isoformat(),
                     'error': 'replay_limit_reached',
-                    'limit_reached': True,
-                    'html_length': len(page_source)
+                    'limit_reached': True
                 }
             
             # Check for authentication errors - but first check if it's actually a daily limit issue
@@ -1301,8 +1297,7 @@ class TMScraper:
                         'url': url,
                         'scraped_at': datetime.now().isoformat(),
                         'error': 'replay_limit_reached',
-                        'limit_reached': True,
-                        'html_length': len(page_source)
+                        'limit_reached': True
                     }
                 
                 logger.warning("Authentication error detected, attempting re-authentication...")
@@ -1330,8 +1325,7 @@ class TMScraper:
                             'url': url,
                             'scraped_at': datetime.now().isoformat(),
                             'error': 'replay_limit_reached',
-                            'limit_reached': True,
-                            'html_length': len(page_source)
+                            'limit_reached': True
                         }
                     print("❌ Authentication failed even after re-authentication")
                     return None
@@ -1373,7 +1367,6 @@ class TMScraper:
                 'replay_id': replay_id,
                 'url': url,
                 'scraped_at': datetime.now().isoformat(),
-                'html_length': len(page_source),
                 'title': None,
                 'players': [],
                 'game_logs_found': False
@@ -2016,7 +2009,6 @@ class TMScraper:
                     'scraped_at': datetime.now().isoformat(),
                     'error': 'replay_limit_reached',
                     'limit_reached': True,
-                    'html_length': len(page_source),
                     'direct_fetch': True
                 }
             
@@ -2037,7 +2029,6 @@ class TMScraper:
                 'replay_id': table_id,
                 'url': replay_url,
                 'scraped_at': datetime.now().isoformat(),
-                'html_length': len(page_source),
                 'title': None,
                 'players': [],
                 'game_logs_found': False,
@@ -2171,7 +2162,6 @@ class TMScraper:
                 'table_id': table_id,
                 'url': f"https://boardgamearena.com/table?table={table_id}",
                 'scraped_at': datetime.now().isoformat(),
-                'html_length': len(table_html),
                 'html_content': table_html,
                 'players_found': [],
                 'elo_data_found': True,  # Assume true since we have the file
