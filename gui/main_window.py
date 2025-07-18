@@ -43,12 +43,18 @@ class MainWindow:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         
-        # Set window icon (using a simple text-based icon for now)
+        # Set window icon to our custom Mars icon
         try:
-            # This will work on Windows
-            self.root.iconbitmap(default="")
-        except:
-            pass
+            # Try to load the Mars icon
+            self.root.iconbitmap("assets/mars_icon.ico")
+        except Exception as e:
+            # Fallback if icon file is not found
+            print(f"Could not load icon: {e}")
+            try:
+                # Try default system icon as fallback
+                self.root.iconbitmap(default="")
+            except:
+                pass
     
     def create_menu(self):
         """Create the application menu bar"""
