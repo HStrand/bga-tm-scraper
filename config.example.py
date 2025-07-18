@@ -19,7 +19,11 @@ REGISTRY_DATA_DIR = 'data/registry'
 
 # Chrome settings
 CHROME_PATH = r'C:\Program Files\Google\Chrome\Application\chrome.exe'  # Update this path
-CHROMEDRIVER_PATH = r'C:\path\to\chromedriver.exe'  # Update this path - download from https://chromedriver.chromium.org/
+CHROMEDRIVER_PATH = None  # Optional: Set to specific path if you want to use manual ChromeDriver, otherwise webdriver-manager will handle it automatically
+
+# ChromeDriver Management
+USE_WEBDRIVER_MANAGER = True  # Set to False if you prefer manual ChromeDriver management
+WEBDRIVER_MANAGER_CACHE_VALID_RANGE = 7  # Days to consider cached driver valid (optional)
 
 # BGA Login Credentials
 BGA_EMAIL = "your_email@example.com"

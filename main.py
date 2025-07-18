@@ -128,7 +128,7 @@ def update_games(api_data: Dict[str, Any]) -> bool:
 
 def validate_config():
     """Validate that configuration is properly set up"""
-    required_attrs = ['BGA_EMAIL', 'BGA_PASSWORD', 'CHROMEDRIVER_PATH', 'RAW_DATA_DIR', 'PARSED_DATA_DIR']
+    required_attrs = ['BGA_EMAIL', 'BGA_PASSWORD', 'RAW_DATA_DIR', 'PARSED_DATA_DIR']
     
     for attr in required_attrs:
         if not hasattr(config, attr):
@@ -139,9 +139,29 @@ def validate_config():
         logger.error("Please update BGA_EMAIL in config.py with your actual credentials")
         return False
     
-    if 'C:\\path\\to\\chromedriver.exe' in config.CHROMEDRIVER_PATH:
-        logger.error("Please update CHROMEDRIVER_PATH in config.py with the actual path")
-        return False
+    # ChromeDriver validation - now optional with webdriver-manager
+    use_webdriver_manager = getattr(config, 'USE_WEBDRIVER_MANAGER', True)
+    chromedriver_path = getattr(config, 'CHROMEDRIVER_PATH', None)
+    
+    if not use_webdriver_manager:
+        # If webdriver-manager is disabled, require manual ChromeDriver path
+        if not chromedriver_path:
+            logger.error("CHROMEDRIVER_PATH is required when USE_WEBDRIVER_MANAGER is False")
+            return False
+        
+        if not os.path.exists(chromedriver_path):
+            logger.error(f"ChromeDriver not found at: {chromedriver_path}")
+            return False
+    
+    # Check if webdriver-manager is available when needed
+    if use_webdriver_manager and (not chromedriver_path or not os.path.exists(chromedriver_path)):
+        try:
+            import webdriver_manager
+            logger.info("webdriver-manager is available for automatic ChromeDriver management")
+        except ImportError:
+            logger.error("webdriver-manager not installed. Please install it with: pip install webdriver-manager")
+            logger.error("Or set USE_WEBDRIVER_MANAGER=False and provide a manual CHROMEDRIVER_PATH")
+            return False
     
     return True
 
@@ -238,12 +258,13 @@ def update_players_registry(count: int = 1000) -> bool:
         
         logger.info("Updating players registry...")
         
-        # Initialize BGA session
+        # Initialize BGA session with smart ChromeDriver detection
+        chromedriver_path = getattr(config, 'CHROMEDRIVER_PATH', None)
         session = BGASession(
             email=config.BGA_EMAIL,
             password=config.BGA_PASSWORD,
-            chromedriver_path=config.CHROMEDRIVER_PATH,
-            chrome_path=config.CHROME_PATH,
+            chromedriver_path=chromedriver_path,
+            chrome_path=getattr(config, 'CHROME_PATH', None),
             headless=True
         )
         
@@ -278,9 +299,10 @@ def update_players_registry(count: int = 1000) -> bool:
 
 def initialize_scraper() -> TMScraper:
     """Initialize and authenticate the scraper"""
+    chromedriver_path = getattr(config, 'CHROMEDRIVER_PATH', None)
     scraper = TMScraper(
-        chromedriver_path=config.CHROMEDRIVER_PATH,
-        chrome_path=config.CHROME_PATH,
+        chromedriver_path=chromedriver_path,
+        chrome_path=getattr(config, 'CHROME_PATH', None),
         request_delay=getattr(config, 'REQUEST_DELAY', 1),
         headless=True,
         email=config.BGA_EMAIL,

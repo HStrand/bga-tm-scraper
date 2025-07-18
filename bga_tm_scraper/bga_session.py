@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup
 import re
 import logging
 import time
+import os
 from typing import Optional, Dict, Any
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -200,6 +201,41 @@ class BGASession:
             logger.error(f"Error verifying session authentication: {e}")
             return False
     
+    def _setup_chromedriver_service(self) -> Service:
+        """
+        Setup ChromeDriver service with smart detection
+        
+        Returns:
+            Service: Configured ChromeDriver service
+        """
+        # Priority order:
+        # 1. Manual path (if configured and exists)
+        # 2. webdriver-manager (with built-in caching)
+        
+        if (self.chromedriver_path and 
+            self.chromedriver_path != "None" and 
+            os.path.exists(self.chromedriver_path)):
+            
+            logger.info(f"Using manual ChromeDriver path: {self.chromedriver_path}")
+            return Service(self.chromedriver_path)
+        
+        else:
+            logger.info("Using webdriver-manager for ChromeDriver")
+            try:
+                from webdriver_manager.chrome import ChromeDriverManager
+                
+                # This call is fast if driver is cached, only downloads if needed
+                driver_path = ChromeDriverManager().install()
+                logger.info(f"ChromeDriver ready at: {driver_path}")
+                return Service(driver_path)
+                
+            except ImportError:
+                logger.error("webdriver-manager not installed. Please install it with: pip install webdriver-manager")
+                raise RuntimeError("webdriver-manager not available and no manual ChromeDriver path provided")
+            except Exception as e:
+                logger.error(f"webdriver-manager failed: {e}")
+                raise RuntimeError(f"ChromeDriver setup failed: {e}")
+
     def _start_browser(self) -> bool:
         """Start Chrome browser with appropriate options"""
         try:
@@ -226,7 +262,8 @@ class BGASession:
                 # If a custom Chrome path is provided, set it
                 chrome_options.binary_location = self.chrome_path
             
-            service = Service(self.chromedriver_path)
+            # Setup ChromeDriver service with smart detection
+            service = self._setup_chromedriver_service()
             self.driver = webdriver.Chrome(service=service, options=chrome_options)
             
             # Execute script to hide automation indicators
