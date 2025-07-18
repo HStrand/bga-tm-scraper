@@ -10,6 +10,7 @@ import os
 import threading
 import requests
 import sys
+import platform
 from datetime import datetime
 
 # Add the parent directory to the path to import bga_tm_scraper
@@ -210,6 +211,10 @@ class SettingsTab:
                                      variable=self.headless_var)
         headless_cb.pack(anchor="w", pady=2)
         
+        # Chrome status label
+        self.chrome_status_label = ttk.Label(section_frame, text="", foreground="blue")
+        self.chrome_status_label.pack(anchor="w", pady=2)
+        
         # Info label
         info_label = ttk.Label(section_frame, 
                               text="Note: ChromeDriver will be downloaded automatically if not specified",
@@ -244,6 +249,10 @@ class SettingsTab:
         ttk.Label(timeout_frame, text="Timeout (seconds):").pack(side="left", anchor="w")
         timeout_spin = ttk.Spinbox(timeout_frame, from_=10, to=120, textvariable=self.api_timeout_var, width=10)
         timeout_spin.pack(side="right")
+        
+        # API status label
+        self.api_status_label = ttk.Label(section_frame, text="", foreground="blue")
+        self.api_status_label.pack(anchor="w", pady=2)
         
         # Test API button
         test_api_btn = ttk.Button(section_frame, text="Test API Connection", 
@@ -396,6 +405,34 @@ class SettingsTab:
         # Also bind to the main settings area to catch any missed widgets
         canvas.bind("<Enter>", lambda e: canvas.focus_set())
     
+    def detect_chrome_path(self):
+        """Auto-detect Chrome installation path across platforms"""
+        system = platform.system()
+        chrome_paths = []
+        
+        if system == "Windows":
+            chrome_paths = [
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                os.path.expanduser(r"~\AppData\Local\Google\Chrome\Application\chrome.exe"),
+            ]
+        elif system == "Darwin":  # macOS
+            chrome_paths = [
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            ]
+        elif system == "Linux":
+            chrome_paths = [
+                "/usr/bin/google-chrome",
+                "/usr/bin/google-chrome-stable",
+                "/usr/bin/chromium-browser",
+            ]
+        
+        for path in chrome_paths:
+            if os.path.exists(path):
+                return path
+        
+        return None
+    
     def setup_validation(self):
         """Setup real-time validation for form fields"""
         # Bind validation to key events
@@ -411,15 +448,32 @@ class SettingsTab:
         self.email_var.set(email)
         self.password_var.set(password)
         
-        # Browser Settings
+        # Browser Settings with Chrome auto-detection
         browser_settings = self.config_manager.get_section("browser_settings")
-        self.chrome_path_var.set(browser_settings.get("chrome_path", ""))
+        saved_chrome_path = browser_settings.get("chrome_path", "")
+        
+        if saved_chrome_path:
+            # Use saved path, no auto-detection needed
+            self.chrome_path_var.set(saved_chrome_path)
+            self.show_chrome_status("Using saved Chrome path")
+        else:
+            # No saved path, try auto-detection
+            detected_path = self.detect_chrome_path()
+            if detected_path:
+                self.chrome_path_var.set(detected_path)
+                self.show_chrome_status("✅ Chrome found automatically. Save settings to remember this path.")
+            else:
+                self.chrome_path_var.set("")
+                self.show_chrome_status("⚠️ Chrome not found. Please browse for chrome.exe or install Chrome.")
+        
         self.chromedriver_path_var.set(browser_settings.get("chromedriver_path", ""))
         self.headless_var.set(browser_settings.get("headless", True))
         
-        # API Settings
+        # API Settings with default key handling
         api_settings = self.config_manager.get_section("api_settings")
-        self.api_key_var.set(api_settings.get("api_key", ""))
+        api_key = api_settings.get("api_key", "")
+        
+        self.api_key_var.set(api_key)
         self.api_url_var.set(api_settings.get("base_url", ""))
         self.api_timeout_var.set(api_settings.get("timeout", 30))
         
@@ -591,6 +645,14 @@ class SettingsTab:
             is_valid = Path(chrome_path).exists()
             self.chrome_path_valid.set(is_valid)
             self.chrome_indicator.config(foreground="green" if is_valid else "red")
+    
+    def show_chrome_status(self, message):
+        """Display Chrome detection status message"""
+        self.chrome_status_label.config(text=message)
+    
+    def show_api_status(self, message):
+        """Display API key status message"""
+        self.api_status_label.config(text=message)
     
     # UI event handlers
     def toggle_password_visibility(self):
