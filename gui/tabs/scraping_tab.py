@@ -10,7 +10,10 @@ import time
 import random
 import requests
 import json
+import logging
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 class ScrapingTab:
@@ -435,13 +438,13 @@ class ScrapingTab:
                      font=("TkDefaultFont", 9)).pack(anchor="w")
         elif assignment_type == "replayscraping":
             # Replay scraping assignment summary
-            ttk.Label(self.assignment_summary_frame, text=f"Game Count: {details['game_count']}", 
+            ttk.Label(self.assignment_summary_frame, text=f"Game count: {details['game_count']}", 
                      font=("TkDefaultFont", 9)).pack(anchor="w")
             
             # Show player perspective with name and ID
             player_name = details.get('player_perspective_name', 'Unknown')
             player_id = details.get('player_perspective_id', 'Unknown')
-            perspective_text = f"Player Perspective: {player_name} ({player_id})"
+            perspective_text = f"Next player to scrape: {player_name} ({player_id})"
             ttk.Label(self.assignment_summary_frame, text=perspective_text, 
                      font=("TkDefaultFont", 9)).pack(anchor="w")
             
@@ -449,7 +452,7 @@ class ScrapingTab:
             if details.get("games") and len(details["games"]) > 0:
                 sample_games = details["games"][:3]  # Show first 3 games
                 sample_ids = [str(game.get("tableId", "Unknown")) for game in sample_games]
-                sample_text = f"Sample Table IDs: {', '.join(sample_ids)}"
+                sample_text = f"Sample table IDs: {', '.join(sample_ids)}"
                 if len(details["games"]) > 3:
                     sample_text += "..."
                 ttk.Label(self.assignment_summary_frame, text=sample_text, 
@@ -486,6 +489,18 @@ class ScrapingTab:
             self._display_assignment()
             self.start_btn.config(state="normal")
             
+        elif assignment_data and assignment_status == "in_progress":
+            self.current_assignment = assignment_data
+            self._display_assignment()
+            self.start_btn.config(state="normal")
+            self.log_message("⚠️ Assignment was in progress - you can continue or restart")
+            
+        elif assignment_data and assignment_status == "paused_daily_limit":
+            self.current_assignment = assignment_data
+            self._display_assignment()
+            self.start_btn.config(state="normal")
+            self.log_message("⚠️ Assignment paused due to daily limit - you can retry when limit resets")
+            
         elif assignment_data and assignment_status == "completed":
             self.current_assignment = assignment_data
             self._display_assignment()
@@ -518,19 +533,6 @@ class ScrapingTab:
             messagebox.showerror("Configuration Error", error_msg)
             return
         
-        # Confirm start with appropriate message based on assignment type
-        assignment_type = self.current_assignment["type"]
-        if assignment_type in ["indexing", "index_games"]:
-            type_name = "Index Games"
-        elif assignment_type in ["replayscraping", "collect_logs"]:
-            type_name = "Replay Scraping"
-        else:
-            type_name = "Scraping"
-        
-        if not messagebox.askyesno("Start Scraping", 
-                                  f"Start {type_name} operation?\n\n"
-                                  "This process may take a while to complete."):
-            return
         
         # Initialize scraping
         self.is_scraping = True
@@ -580,7 +582,10 @@ class ScrapingTab:
             self.current_op_label.config(text="Stopping...", foreground="orange")
     
     def _scraping_worker(self):
-        """Background worker for scraping (mock implementation)"""
+        """Background worker for real scraping operations"""
+        scraper = None
+        api_client = None
+        
         try:
             assignment_type = self.current_assignment["type"]
             
@@ -588,10 +593,17 @@ class ScrapingTab:
             self.config_manager.set_value("current_assignment", "status", "in_progress")
             self.config_manager.save_config()
             
+            # Initialize API client
+            api_key = self.config_manager.get_value("api_settings", "api_key")
+            api_client = self._create_api_client(api_key)
+            
+            # Initialize scraper
+            scraper = self._create_scraper()
+            
             if assignment_type in ["indexing", "index_games"]:
-                self._mock_index_games()
+                self._real_index_games(scraper, api_client)
             elif assignment_type in ["replayscraping", "collect_logs"]:
-                self._mock_replay_scraping()
+                self._real_replay_scraping(scraper, api_client)
             else:
                 raise ValueError(f"Unknown assignment type: {assignment_type}")
             
@@ -603,80 +615,270 @@ class ScrapingTab:
                 self.frame.after(0, lambda: self.log_message("✅ Assignment completed successfully!"))
             
         except Exception as e:
-            self.frame.after(0, lambda: self.log_message(f"❌ Error during scraping: {str(e)}"))
+            error_msg = str(e)
+            logger.error(f"Error during scraping: {e}")
+            self.frame.after(0, lambda: self.log_message(f"❌ Error during scraping: {error_msg}"))
+            
+            # Show error dialog for critical errors
+            if "Authentication" in error_msg or "login" in error_msg.lower():
+                self.frame.after(0, lambda: messagebox.showerror(
+                    "Authentication Error", 
+                    f"Authentication failed:\n{error_msg}\n\nPlease check your BGA credentials in Settings."
+                ))
+            elif "daily limit" in error_msg.lower() or "limit reached" in error_msg.lower():
+                self.frame.after(0, lambda: messagebox.showwarning(
+                    "Daily Limit Reached", 
+                    f"Daily replay limit reached:\n{error_msg}\n\nPlease try again tomorrow."
+                ))
+            elif "API" in error_msg or "network" in error_msg.lower():
+                self.frame.after(0, lambda: messagebox.showerror(
+                    "Network Error", 
+                    f"Network or API error:\n{error_msg}\n\nPlease check your internet connection."
+                ))
         
         finally:
+            # Clean up scraper
+            if scraper:
+                try:
+                    scraper.close_browser()
+                except:
+                    pass
+            
             # Clean up
             self.frame.after(0, self._scraping_finished)
     
-    def _mock_index_games(self):
-        """Mock implementation of index games scraping"""
+    def _create_api_client(self, api_key):
+        """Create API client instance"""
+        from ..api_client import APIClient
+        return APIClient(api_key)
+    
+    def _create_scraper(self):
+        """Create scraper instance"""
+        from ..scraper_wrapper import create_scraper_from_gui_config
+        
+        def progress_callback(message):
+            self.frame.after(0, lambda: self.log_message(message))
+        
+        return create_scraper_from_gui_config(self.config_manager, progress_callback)
+    
+    def _real_index_games(self, scraper, api_client):
+        """Real implementation of index games scraping"""
         player_id = self.current_assignment["details"]["player_id"]
-        estimated_games = self.current_assignment["details"]["estimated_games"]
         
         self.frame.after(0, lambda: self.log_message(f"🔍 Starting to index games for player {player_id}"))
         
-        for i in range(estimated_games):
-            if self.should_stop:
-                break
-            
-            # Simulate processing time
-            time.sleep(random.uniform(0.5, 2.0))
-            
-            # Mock game processing
-            table_id = random.randint(600000000, 700000000)
-            success = random.random() > 0.1  # 90% success rate
-            
-            if success:
-                self.successful_items += 1
-                self.frame.after(0, lambda tid=table_id: self.log_message(f"✅ Indexed game {tid}"))
-            else:
-                self.failed_items += 1
-                self.frame.after(0, lambda tid=table_id: self.log_message(f"❌ Failed to index game {tid}"))
-            
-            self.completed_items += 1
-            
-            # Update current operation
-            self.frame.after(0, lambda tid=table_id: self.current_op_label.config(
-                text=f"Processing game {tid}", foreground="blue"
+        try:
+            # Start browser and login
+            self.frame.after(0, lambda: self.current_op_label.config(
+                text="Starting browser and logging in...", foreground="blue"
             ))
+            
+            if not scraper.start_browser_and_login():
+                raise RuntimeError("Failed to start browser and login")
+            
+            # Get already indexed games from API
+            self.frame.after(0, lambda: self.current_op_label.config(
+                text="Getting already indexed games...", foreground="blue"
+            ))
+            
+            indexed_games = api_client.get_indexed_games_by_player(player_id)
+            self.frame.after(0, lambda: self.log_message(f"Found {len(indexed_games)} already indexed games"))
+            
+            # Scrape player's game history
+            self.frame.after(0, lambda: self.current_op_label.config(
+                text=f"Scraping player {player_id} game history...", foreground="blue"
+            ))
+            
+            games_data = scraper.scrape_player_game_history(player_id, max_clicks=1000)
+            
+            if not games_data:
+                raise RuntimeError(f"No games found for player {player_id}")
+            
+            self.frame.after(0, lambda: self.log_message(f"Found {len(games_data)} total games for player {player_id}"))
+            
+            # Update total items based on actual games found
+            new_games = [game for game in games_data if game['table_id'] not in indexed_games]
+            self.total_items = len(new_games)
+            self.frame.after(0, self.update_progress)
+            
+            self.frame.after(0, lambda: self.log_message(f"Processing {len(new_games)} new games (skipping {len(indexed_games)} already indexed)"))
+            
+            # Process each game individually
+            for i, game_info in enumerate(new_games):
+                if self.should_stop:
+                    break
+                
+                table_id = game_info['table_id']
+                
+                self.frame.after(0, lambda tid=table_id: self.current_op_label.config(
+                    text=f"Processing game {tid}", foreground="blue"
+                ))
+                
+                try:
+                    # Scrape table only (in memory)
+                    result = scraper.scrape_table_only_memory(table_id, player_id)
+                    
+                    if result and result.get('success'):
+                        game_mode = result.get('game_mode', 'Normal mode')
+                        elo_data = result.get('elo_data', {})
+                        version = result.get('version')
+                        
+                        # Convert EloData objects to dictionaries for JSON serialization
+                        players_list = []
+                        if elo_data:
+                            for player_name, elo_obj in elo_data.items():
+                                player_dict = {
+                                    'player_name': elo_obj.player_name or player_name,
+                                    'player_id': elo_obj.player_id,
+                                    'position': elo_obj.position,
+                                    'arena_points': elo_obj.arena_points,
+                                    'arena_points_change': elo_obj.arena_points_change,
+                                    'game_rank': elo_obj.game_rank,
+                                    'game_rank_change': elo_obj.game_rank_change
+                                }
+                                players_list.append(player_dict)
+                        
+                        # Create game data structure for single game API
+                        game_api_data = {
+                            'table_id': table_id,
+                            'raw_datetime': game_info['raw_datetime'],
+                            'parsed_datetime': game_info['parsed_datetime'],
+                            'game_mode': game_mode,
+                            'version': version,
+                            'player_perspective': player_id,
+                            'scraped_at': result.get('scraped_at'),
+                            'players': players_list
+                        }
+                        
+                        # Upload to API immediately
+                        if api_client.update_single_game(game_api_data):
+                            self.successful_items += 1
+                            self.frame.after(0, lambda tid=table_id, mode=game_mode: 
+                                           self.log_message(f"✅ Game {tid} ({mode}) indexed successfully"))
+                        else:
+                            self.failed_items += 1
+                            self.frame.after(0, lambda tid=table_id: 
+                                           self.log_message(f"❌ Failed to upload game {tid} to API"))
+                    else:
+                        self.failed_items += 1
+                        self.frame.after(0, lambda tid=table_id: 
+                                       self.log_message(f"❌ Failed to scrape game {tid}"))
+                
+                except Exception as e:
+                    self.failed_items += 1
+                    logger.error(f"Error processing game {table_id}: {e}")
+                    self.frame.after(0, lambda tid=table_id, err=str(e): 
+                                   self.log_message(f"❌ Error processing game {tid}: {err}"))
+                
+                self.completed_items += 1
+                
+                # Add delay between games
+                request_delay = self.config_manager.get_value("scraping_settings", "request_delay")
+                if request_delay > 0:
+                    time.sleep(request_delay)
+            
+            # Summary
+            if self.completed_items > 0:
+                self.frame.after(0, lambda: self.log_message(
+                    f"📊 Player {player_id}: {self.successful_items}/{self.completed_items} games indexed successfully"
+                ))
+            else:
+                self.frame.after(0, lambda: self.log_message(f"ℹ️ No new games to process for player {player_id}"))
+                
+        except Exception as e:
+            logger.error(f"Error in index games scraping: {e}")
+            raise
     
-    def _mock_replay_scraping(self):
-        """Mock implementation of replay scraping"""
+    def _real_replay_scraping(self, scraper, api_client):
+        """Real implementation of replay scraping"""
         assignment_type = self.current_assignment["type"]
         
         if assignment_type == "replayscraping":
             # Real API assignment format
             games = self.current_assignment["details"]["games"]
-            player_perspective = self.current_assignment["details"]["player_perspective"]
+            player_perspective_id = self.current_assignment["details"]["player_perspective_id"]
             
             self.frame.after(0, lambda: self.log_message(f"📋 Starting to collect logs for {len(games)} games"))
             
-            for i, game in enumerate(games):
-                if self.should_stop:
-                    break
-                
-                # Simulate processing time (longer for log collection)
-                time.sleep(random.uniform(1.0, 3.0))
-                
-                table_id = game.get("tableId", f"Unknown_{i}")
-                success = random.random() > 0.15  # 85% success rate
-                
-                if success:
-                    self.successful_items += 1
-                    self.frame.after(0, lambda tid=table_id: self.log_message(f"✅ Collected logs for game {tid}"))
-                else:
-                    self.failed_items += 1
-                    self.frame.after(0, lambda tid=table_id: self.log_message(f"❌ Failed to collect logs for game {tid}"))
-                
-                self.completed_items += 1
-                
-                # Update current operation
-                self.frame.after(0, lambda tid=table_id: self.current_op_label.config(
-                    text=f"Processing game {tid}", foreground="blue"
+            try:
+                # Start browser and login
+                self.frame.after(0, lambda: self.current_op_label.config(
+                    text="Starting browser and logging in...", foreground="blue"
                 ))
+                
+                if not scraper.start_browser_and_login():
+                    raise RuntimeError("Failed to start browser and login")
+                
+                # Process each game
+                for i, game in enumerate(games):
+                    if self.should_stop:
+                        break
+                    
+                    table_id = str(game.get("tableId", f"Unknown_{i}"))
+                    
+                    self.frame.after(0, lambda tid=table_id: self.current_op_label.config(
+                        text=f"Processing game {tid}", foreground="blue"
+                    ))
+                    
+                    try:
+                        # Scrape table and replay, parse immediately (in memory)
+                        parsed_game_data = scraper.scrape_table_and_replay_memory(table_id, player_perspective_id)
+                        
+                        # Check for daily limit reached
+                        if parsed_game_data and parsed_game_data.get('daily_limit_reached'):
+                            self.frame.after(0, lambda: self.log_message("🚫 Daily replay limit reached - stopping scraping"))
+                            self.frame.after(0, lambda: self._handle_daily_limit_reached())
+                            break  # Stop processing more games
+                        
+                        if parsed_game_data:
+                            # Upload parsed game data to API via StoreGameLog
+                            if api_client.store_game_log(parsed_game_data):
+                                self.successful_items += 1
+                                self.frame.after(0, lambda tid=table_id: 
+                                               self.log_message(f"✅ Collected and uploaded logs for game {tid}"))
+                            else:
+                                self.failed_items += 1
+                                self.frame.after(0, lambda tid=table_id: 
+                                               self.log_message(f"❌ Failed to upload logs for game {tid} to API"))
+                        else:
+                            self.failed_items += 1
+                            self.frame.after(0, lambda tid=table_id: 
+                                           self.log_message(f"❌ Failed to scrape and parse game {tid}"))
+                    
+                    except Exception as e:
+                        self.failed_items += 1
+                        error_msg = str(e)
+                        
+                        # Check for daily limit in exception message
+                        if "daily limit" in error_msg.lower() or "limit reached" in error_msg.lower():
+                            self.frame.after(0, lambda: self.log_message("🚫 Daily replay limit reached - stopping scraping"))
+                            self.frame.after(0, lambda: self._handle_daily_limit_reached())
+                            break  # Stop processing more games
+                        
+                        logger.error(f"Error processing game {table_id}: {e}")
+                        self.frame.after(0, lambda tid=table_id, err=error_msg: 
+                                       self.log_message(f"❌ Error processing game {tid}: {err}"))
+                    
+                    self.completed_items += 1
+                    
+                    # Add delay between games
+                    request_delay = self.config_manager.get_value("scraping_settings", "request_delay")
+                    if request_delay > 0:
+                        time.sleep(request_delay)
+                
+                # Summary
+                if self.completed_items > 0:
+                    self.frame.after(0, lambda: self.log_message(
+                        f"📊 Replay scraping: {self.successful_items}/{self.completed_items} games processed successfully"
+                    ))
+                else:
+                    self.frame.after(0, lambda: self.log_message("ℹ️ No games were processed"))
+                    
+            except Exception as e:
+                logger.error(f"Error in replay scraping: {e}")
+                raise
         else:
-            # Legacy format (collect_logs)
+            # Legacy format (collect_logs) - use mock for now
             self._mock_collect_logs()
     
     def _mock_collect_logs(self):
@@ -711,6 +913,32 @@ class ScrapingTab:
                 text=f"Processing game {tid}", foreground="blue"
             ))
     
+    def _handle_daily_limit_reached(self):
+        """Handle daily limit reached scenario"""
+        # Stop the scraping process
+        self.should_stop = True
+        
+        # Update UI to show daily limit status
+        self.current_op_label.config(text="Daily limit reached", foreground="red")
+        
+        # Save progress and mark assignment as paused
+        self.config_manager.set_value("current_assignment", "status", "paused_daily_limit")
+        self.config_manager.save_config()
+        
+        # Show user-friendly message
+        elapsed_time = datetime.now() - self.start_time if self.start_time else None
+        elapsed_str = str(elapsed_time).split('.')[0] if elapsed_time else "Unknown"
+        
+        message = "🚫 Daily Replay Limit Reached\n\n"
+        message += "BGA has daily limits on replay access to prevent server overload.\n\n"
+        message += "Progress saved:\n"
+        message += f"• Processed: {self.completed_items} games\n"
+        message += f"• Successful: {self.successful_items} games\n"
+        message += f"• Time elapsed: {elapsed_str}\n\n"
+        message += "You can resume this assignment in ~24 hours when your scraping limit has been reset."
+        
+        messagebox.showwarning("Daily Limit Reached", message)
+    
     def _scraping_finished(self):
         """Clean up after scraping is finished"""
         self.is_scraping = False
@@ -720,29 +948,43 @@ class ScrapingTab:
         self.start_btn.config(state="disabled")  # Keep disabled until new assignment
         self.stop_btn.config(state="disabled")
         
+        # Determine the reason for stopping
         if self.should_stop:
-            self.current_op_label.config(text="Stopped by user", foreground="orange")
-            self.log_message("⏹️ Scraping stopped by user")
+            # Check if it was due to daily limit
+            assignment_status = self.config_manager.get_value("current_assignment", "status")
+            if assignment_status == "paused_daily_limit":
+                self.current_op_label.config(text="Paused - Daily limit reached", foreground="red")
+                self.log_message("🚫 Scraping paused due to daily replay limit")
+            else:
+                self.current_op_label.config(text="Stopped by user", foreground="orange")
+                self.log_message("⏹️ Scraping stopped by user")
         else:
             self.current_op_label.config(text="Completed", foreground="green")
         
         # Refresh assignment status
         self.check_assignment()
         
-        # Show completion summary
-        if not self.should_stop:
+        # Show completion summary (only if not stopped due to daily limit)
+        assignment_status = self.config_manager.get_value("current_assignment", "status")
+        if not self.should_stop or assignment_status != "paused_daily_limit":
             success_rate = (self.successful_items / max(self.completed_items, 1)) * 100
             elapsed_time = datetime.now() - self.start_time if self.start_time else None
             elapsed_str = str(elapsed_time).split('.')[0] if elapsed_time else "Unknown"
             
-            summary = f"Scraping completed!\n\n"
+            if self.should_stop:
+                title = "Scraping Stopped"
+                summary = f"Scraping stopped by user.\n\n"
+            else:
+                title = "Scraping Complete"
+                summary = f"Scraping completed successfully!\n\n"
+            
             summary += f"Total processed: {self.completed_items}\n"
             summary += f"Successful: {self.successful_items}\n"
             summary += f"Failed: {self.failed_items}\n"
             summary += f"Success rate: {success_rate:.1f}%\n"
             summary += f"Time elapsed: {elapsed_str}"
             
-            messagebox.showinfo("Scraping Complete", summary)
+            messagebox.showinfo(title, summary)
     
     def _update_timer(self):
         """Update the elapsed time display"""

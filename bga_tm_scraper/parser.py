@@ -2539,6 +2539,146 @@ class Parser:
             else:
                 logger.warning(f"No ELO data found for player {player.player_name}")
 
+    def parse_replay_with_assignment_metadata(self, replay_html: str, assignment_metadata: Dict[str, Any], table_id: str, player_perspective: str) -> Dict[str, Any]:
+        """
+        Parse replay HTML combined with assignment metadata (for replay scraping assignments)
+        This method uses the ELO data and player info from the assignment instead of scraping table HTML
+        
+        Args:
+            replay_html: HTML content from replay page
+            assignment_metadata: Assignment data containing ELO info, player data, etc.
+            table_id: BGA table ID
+            player_perspective: Player ID whose perspective this is from
+            
+        Returns:
+            dict: Complete parsed game data ready for API upload
+        """
+        try:
+            logger.info(f"Parsing replay with assignment metadata for game {table_id}")
+            
+            # Parse basic game data from replay HTML
+            game_data = self.parse_complete_game(replay_html, table_id, player_perspective)
+            
+            # Extract assignment metadata
+            game_mode = assignment_metadata.get('gameMode', 'Arena mode')
+            version_id = assignment_metadata.get('versionId')
+            players_metadata = assignment_metadata.get('players', [])
+            
+            # Create ELO data from assignment metadata
+            elo_data = {}
+            for player_meta in players_metadata:
+                player_name = player_meta.get('playerName', 'Unknown')
+                player_id = str(player_meta.get('playerId', ''))
+                elo = player_meta.get('elo', 0)
+                position = player_meta.get('position', 1)
+                
+                # Create EloData object from assignment metadata
+                elo_data[player_name] = EloData(
+                    player_name=player_name,
+                    player_id=player_id,
+                    position=position,
+                    arena_points=elo,  # Use ELO as arena points
+                    arena_points_change=0,  # Not available in assignment
+                    game_rank=elo,  # Use ELO as game rank
+                    game_rank_change=0  # Not available in assignment
+                )
+            
+            # If no players were found in replay HTML, create them from assignment metadata
+            if not game_data.players and elo_data:
+                logger.info("No players found in replay HTML, creating from assignment metadata")
+                game_data.players = self._create_players_from_assignment_metadata(elo_data, assignment_metadata, replay_html, table_id)
+            
+            # Merge ELO data into player information
+            self._merge_elo_with_players(game_data.players, elo_data)
+            
+            # Add assignment metadata to game data
+            game_data.metadata['game_mode'] = game_mode
+            game_data.metadata['version_id'] = version_id
+            game_data.metadata['assignment_metadata_used'] = True
+            game_data.metadata['elo_data_included'] = len(elo_data) > 0
+            game_data.metadata['elo_players_found'] = len(elo_data)
+            game_data.metadata['parsed_at'] = datetime.now().isoformat()
+            
+            # Convert to dictionary format for API upload
+            result = self._convert_game_data_to_api_format(game_data, table_id, player_perspective)
+            
+            logger.info(f"Successfully parsed replay with assignment metadata for game {table_id}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error parsing replay with assignment metadata for {table_id}: {e}")
+            return {}
+
+    def _create_players_from_assignment_metadata(self, elo_data: Dict[str, EloData], assignment_metadata: Dict[str, Any], replay_html: str, table_id: str) -> Dict[str, Player]:
+        """Create player objects from assignment metadata"""
+        logger.info(f"Creating players from assignment metadata for {len(elo_data)} players")
+        
+        players = {}
+        soup = BeautifulSoup(replay_html, 'html.parser')
+        
+        # Get VP data for final scores
+        vp_data = self._extract_vp_data_from_html(replay_html)
+        
+        # Get corporations from replay HTML
+        corporations = self._extract_corporations(soup)
+        
+        for player_name, elo_info in elo_data.items():
+            player_id = elo_info.player_id
+            
+            # Get final VP and breakdown
+            final_vp = 0
+            vp_breakdown = {}
+            if player_id in vp_data:
+                final_vp = vp_data[player_id].get('total', 0)
+                vp_breakdown = vp_data[player_id].get('total_details', {})
+            
+            # Create player object
+            player = Player(
+                player_id=player_id,
+                player_name=player_name,
+                corporation=corporations.get(player_name, 'Unknown'),
+                final_vp=final_vp,
+                final_tr=vp_breakdown.get('tr', 20),
+                vp_breakdown=vp_breakdown,
+                cards_played=[],  # Will be populated from moves
+                milestones_claimed=[],  # Will be populated from moves
+                awards_funded=[],  # Will be populated from moves
+                elo_data=elo_info
+            )
+            
+            players[player_id] = player
+            logger.info(f"Created player {player_name} with ID {player_id}")
+        
+        return players
+
+    def _convert_game_data_to_api_format(self, game_data: GameData, table_id: str, player_perspective: str) -> Dict[str, Any]:
+        """Convert GameData object to format expected by StoreGameLog API"""
+        try:
+            # Convert dataclasses to dictionaries for JSON serialization
+            def convert_to_dict(obj):
+                if hasattr(obj, '__dict__'):
+                    return {k: convert_to_dict(v) for k, v in obj.__dict__.items()}
+                elif isinstance(obj, list):
+                    return [convert_to_dict(item) for item in obj]
+                elif isinstance(obj, dict):
+                    return {k: convert_to_dict(v) for k, v in obj.items()}
+                else:
+                    return obj
+            
+            # Convert the entire game data to dictionary
+            result = convert_to_dict(game_data)
+            
+            # Ensure required fields are present
+            result['table_id'] = table_id
+            result['player_perspective'] = player_perspective
+            
+            logger.info(f"Converted game data to API format for {table_id}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error converting game data to API format: {e}")
+            return {}
+
 
     def export_to_json(self, game_data: GameData, output_path: str, player_perspective: str = None):
         """Export game data to JSON with player perspective folder structure"""

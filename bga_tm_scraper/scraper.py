@@ -351,15 +351,21 @@ class TMScraper:
         Returns:
             dict: Table page data or None if failed
         """
-        if raw_data_dir is None:
+        # Handle memory-only mode
+        if raw_data_dir is None and hasattr(config, 'RAW_DATA_DIR'):
             raw_data_dir = config.RAW_DATA_DIR
         
         # Validate player_perspective parameter to prevent os.path.join errors
         if not isinstance(player_perspective, str):
             raise TypeError(f"player_perspective must be a string, got {type(player_perspective).__name__}: {player_perspective}")
-        from config import TABLE_URL_TEMPLATE
         
-        table_url = TABLE_URL_TEMPLATE.format(table_id=table_id)
+        # Get table URL template
+        if hasattr(config, 'TABLE_URL_TEMPLATE'):
+            table_url = config.TABLE_URL_TEMPLATE.format(table_id=table_id)
+        else:
+            # Fallback for memory-only mode
+            table_url = f'https://boardgamearena.com/table?table={table_id}'
+        
         logger.info(f"Scraping table page: {table_url}")
         
         try:
@@ -375,8 +381,8 @@ class TMScraper:
             # Get the page source after content has loaded
             page_source = self.driver.page_source
             
-            # Save raw HTML if requested
-            if save_raw:
+            # Save raw HTML if requested and raw_data_dir is provided
+            if save_raw and raw_data_dir:
                 # Create player perspective directory
                 player_raw_dir = os.path.join(raw_data_dir, player_perspective)
                 os.makedirs(player_raw_dir, exist_ok=True)
@@ -1216,6 +1222,57 @@ class TMScraper:
         # Pass player_perspective to scrape_replay for proper file organization
         return self.scrape_replay(replay_url, save_raw, raw_data_dir, player_perspective)
 
+    def scrape_replay_only_with_metadata(self, table_id: str, version_id: str, player_perspective: str, save_raw: bool = False, raw_data_dir: str = None) -> Optional[Dict]:
+        """
+        Scrape only the replay page using provided metadata (no table scraping needed)
+        Optimized for replay scraping assignments where table data already exists
+        
+        Args:
+            table_id: BGA table ID
+            version_id: Version ID for replay URL (from assignment)
+            player_perspective: Player ID for replay URL construction (from assignment)
+            save_raw: Whether to save raw HTML (default False for memory-only mode)
+            raw_data_dir: Directory to save raw HTML files (optional)
+            
+        Returns:
+            dict: Replay data with daily limit detection, or None if failed
+        """
+        logger.info(f"Scraping replay only for game {table_id} with version {version_id}")
+        
+        try:
+            # Construct replay URL using provided metadata
+            if hasattr(config, 'REPLAY_URL_TEMPLATE'):
+                replay_url = config.REPLAY_URL_TEMPLATE.format(
+                    version_id=version_id, 
+                    table_id=table_id, 
+                    player_id=player_perspective
+                )
+            else:
+                # Fallback URL construction
+                replay_url = f"https://boardgamearena.com/archive/replay/{version_id}/?table={table_id}&player={player_perspective}&comments={player_perspective}"
+            
+            logger.info(f"Constructed replay URL: {replay_url}")
+            
+            # Scrape the replay page directly
+            replay_result = self.scrape_replay(replay_url, save_raw, raw_data_dir, player_perspective)
+            
+            if replay_result:
+                # Add metadata to result for tracking
+                replay_result['table_id'] = table_id
+                replay_result['version_id'] = version_id
+                replay_result['player_perspective'] = player_perspective
+                replay_result['replay_only_mode'] = True
+                
+                logger.info(f"Successfully scraped replay-only for game {table_id}")
+                return replay_result
+            else:
+                logger.warning(f"Failed to scrape replay for game {table_id}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error in replay-only scraping for game {table_id}: {e}")
+            return None
+
     def scrape_replay(self, url: str, save_raw: bool = True, raw_data_dir: str = None, player_perspective: str = None) -> Optional[Dict]:
         """
         Scrape a single replay page
@@ -1229,8 +1286,10 @@ class TMScraper:
         Returns:
             dict: Scraped data or None if failed
         """
-        if raw_data_dir is None:
+        # Handle memory-only mode
+        if raw_data_dir is None and hasattr(config, 'RAW_DATA_DIR'):
             raw_data_dir = config.RAW_DATA_DIR
+            
         if not self.driver:
             raise RuntimeError("Browser not started. Call start_browser() first.")
         
@@ -1320,8 +1379,8 @@ class TMScraper:
                 print("❌ Fatal error on page - replay might not be accessible")
                 return None
             
-            # Save raw HTML if requested
-            if save_raw:
+            # Save raw HTML if requested and raw_data_dir is provided
+            if save_raw and raw_data_dir:
                 # Use provided player_perspective or extract from URL as fallback
                 if not player_perspective:
                     from urllib.parse import urlparse, parse_qs
@@ -1353,7 +1412,8 @@ class TMScraper:
                 'scraped_at': datetime.now().isoformat(),
                 'title': None,
                 'players': [],
-                'game_logs_found': False
+                'game_logs_found': False,
+                'html_content': page_source  # Always include HTML content for memory-only mode
             }
             
             # Try to extract title
