@@ -100,9 +100,35 @@ def get_indexed_games_by_player(player_id: str) -> List[str]:
         return []
 
 
+def update_single_game(game_data: Dict[str, Any]) -> bool:
+    """
+    POST a single game's data to the API
+    
+    Args:
+        game_data: Dictionary containing the single game data to upload
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        url = f"https://bga-tm-scraper-functions.azurewebsites.net/api/UpdateSingleGame?code={config.API_KEY}"
+        response = requests.post(url, json=game_data, timeout=60)
+        response.raise_for_status()
+        
+        logger.info(f"Successfully updated single game {game_data.get('table_id')} for player {game_data.get('player_perspective')}")
+        return True
+        
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error updating single game via API: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error updating single game: {e}")
+        return False
+
+
 def update_games(api_data: Dict[str, Any]) -> bool:
     """
-    POST the scraped games data to the API
+    POST the scraped games data to the API (legacy function for batch updates)
     
     Args:
         api_data: Dictionary containing the games data to upload
@@ -317,7 +343,7 @@ def initialize_scraper() -> TMScraper:
 
 
 def process_single_player(player_id: str, scraper: TMScraper, args) -> None:
-    """Indexes a single player's games - uses API for filtering and saving"""
+    """Indexes a single player's games - uses API for filtering and saving each game individually"""
     
     # Get already indexed games from API
     indexed_games = get_indexed_games_by_player(player_id)
@@ -334,8 +360,10 @@ def process_single_player(player_id: str, scraper: TMScraper, args) -> None:
         logger.warning(f"No games found for player {player_id}")
         return
     
-    # Process each game
-    api_games_data = []
+    # Process each game individually
+    games_processed = 0
+    games_indexed = 0
+    
     for game_info in games_data:
         table_id = game_info['table_id']
         
@@ -367,7 +395,7 @@ def process_single_player(player_id: str, scraper: TMScraper, args) -> None:
                     }
                     players_list.append(player_dict)
                 
-                # Create game data structure for REST API
+                # Create game data structure for single game API
                 game_api_data = {
                     'table_id': table_id,
                     'raw_datetime': game_info['raw_datetime'],
@@ -379,9 +407,16 @@ def process_single_player(player_id: str, scraper: TMScraper, args) -> None:
                     'players': players_list
                 }
                 
-                api_games_data.append(game_api_data)                  
+                # POST single game to API immediately
+                if update_single_game(game_api_data):
+                    games_indexed += 1
+                    logger.info(f"✅ Game {table_id} ({game_mode}) indexed successfully")
+                    print(f"✅ Indexed game {table_id} ({game_mode})")
+                else:
+                    logger.error(f"❌ Failed to index game {table_id} via API")
+                    print(f"❌ Failed to index game {table_id}")
                 
-                logger.info(f"✅ Game {table_id} is {game_mode}")
+                games_processed += 1
             else:
                 logger.warning(f"❌ Failed to process game {table_id}")
         
@@ -391,22 +426,13 @@ def process_single_player(player_id: str, scraper: TMScraper, args) -> None:
         # Add delay between games
         time.sleep(getattr(config, 'REQUEST_DELAY', 1))
     
-    # POST results to API
-    if api_games_data:
-        api_data = {
-            'player_id': player_id,
-            'scraped_at': datetime.now().isoformat(),
-            'total_games': len(api_games_data),
-            'arena_games': len([g for g in api_games_data if g['game_mode'] == 'Arena mode']),
-            'games': api_games_data
-        }
-        
-        if update_games(api_data):
-            logger.info(f"Successfully updated {len(api_games_data)} games for player {player_id} via API")
-            print(f"✅ Updated API: {len(api_games_data)} games for player {player_id}")
-        else:
-            logger.error(f"Failed to update games for player {player_id} via API")
-            print(f"❌ Failed to update API for player {player_id}")
+    # Summary for this player
+    if games_processed > 0:
+        logger.info(f"Player {player_id} summary: {games_indexed}/{games_processed} games indexed successfully")
+        print(f"📊 Player {player_id}: {games_indexed}/{games_processed} games indexed")
+    else:
+        logger.info(f"No new games to process for player {player_id}")
+        print(f"ℹ️  No new games for player {player_id}")
 
 
 def handle_scrape_tables(args) -> None:
