@@ -232,7 +232,6 @@ You will be assigned either to index games or collect game logs based on current
         if self.current_assignment["type"] == "index_games":
             details_text += f"Player ID: {details['player_id']}\n"
             details_text += f"Player Name: {details['player_name']}\n"
-            details_text += f"Estimated Games: {details['estimated_games']}\n"
         else:
             details_text += f"Table Count: {details['table_count']}\n"
             details_text += f"Player Perspective: {details['player_perspective']}\n"

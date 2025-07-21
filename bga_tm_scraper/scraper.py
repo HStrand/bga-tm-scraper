@@ -215,7 +215,6 @@ class TMScraper:
 
             # Step 3: Check game mode
             game_mode = parser.parse_game_mode(table_data['html_content'])
-            is_arena_mode = game_mode == "Arena mode"
             
             # Extract player IDs from ELO data (they're already included now)
             player_ids = []

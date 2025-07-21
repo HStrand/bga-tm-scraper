@@ -131,24 +131,12 @@ class SettingsTab:
         section_frame.pack(fill="x", padx=10, pady=5)
         
         # Email field
-        email_frame = ttk.Frame(section_frame)
-        email_frame.pack(fill="x", pady=2)
-        
-        ttk.Label(email_frame, text="Email:").pack(side="left", anchor="w")
-        self.email_indicator = ttk.Label(email_frame, text="●", foreground="red")
-        self.email_indicator.pack(side="right")
-        
+        ttk.Label(section_frame, text="Email:").pack(anchor="w", pady=(0, 2))
         email_entry = ttk.Entry(section_frame, textvariable=self.email_var, width=50)
         email_entry.pack(fill="x", pady=(0, 5))
         
         # Password field
-        password_frame = ttk.Frame(section_frame)
-        password_frame.pack(fill="x", pady=2)
-        
-        ttk.Label(password_frame, text="Password:").pack(side="left", anchor="w")
-        self.password_indicator = ttk.Label(password_frame, text="●", foreground="red")
-        self.password_indicator.pack(side="right")
-        
+        ttk.Label(section_frame, text="Password:").pack(anchor="w", pady=(0, 2))
         password_entry_frame = ttk.Frame(section_frame)
         password_entry_frame.pack(fill="x", pady=(0, 5))
         
@@ -162,6 +150,10 @@ class SettingsTab:
                                           command=self.toggle_password_visibility)
         show_password_cb.pack(side="right", padx=(5, 0))
         
+        # BGA connection status
+        self.bga_status_label = ttk.Label(section_frame, text="", foreground="green")
+        self.bga_status_label.pack(anchor="w", pady=2)
+        
         # Test connection button
         test_btn = ttk.Button(section_frame, text="Test Connection", 
                              command=self.test_bga_connection)
@@ -173,13 +165,7 @@ class SettingsTab:
         section_frame.pack(fill="x", padx=10, pady=5)
         
         # Chrome path
-        chrome_frame = ttk.Frame(section_frame)
-        chrome_frame.pack(fill="x", pady=2)
-        
-        ttk.Label(chrome_frame, text="Chrome Path:").pack(side="left", anchor="w")
-        self.chrome_indicator = ttk.Label(chrome_frame, text="●", foreground="red")
-        self.chrome_indicator.pack(side="right")
-        
+        ttk.Label(section_frame, text="Chrome Path:").pack(anchor="w", pady=(0, 2))
         chrome_path_frame = ttk.Frame(section_frame)
         chrome_path_frame.pack(fill="x", pady=(0, 5))
         
@@ -227,13 +213,7 @@ class SettingsTab:
         section_frame.pack(fill="x", padx=10, pady=5)
         
         # API Key
-        api_key_frame = ttk.Frame(section_frame)
-        api_key_frame.pack(fill="x", pady=2)
-        
-        ttk.Label(api_key_frame, text="API Key:").pack(side="left", anchor="w")
-        self.api_key_indicator = ttk.Label(api_key_frame, text="●", foreground="orange")
-        self.api_key_indicator.pack(side="right")
-        
+        ttk.Label(section_frame, text="API Key:").pack(anchor="w", pady=(0, 2))
         api_key_entry = ttk.Entry(section_frame, textvariable=self.api_key_var, width=50, show="*")
         api_key_entry.pack(fill="x", pady=(0, 5))
         
@@ -250,8 +230,8 @@ class SettingsTab:
         timeout_spin = ttk.Spinbox(timeout_frame, from_=10, to=120, textvariable=self.api_timeout_var, width=10)
         timeout_spin.pack(side="right")
         
-        # API status label
-        self.api_status_label = ttk.Label(section_frame, text="", foreground="blue")
+        # API connection status
+        self.api_status_label = ttk.Label(section_frame, text="", foreground="green")
         self.api_status_label.pack(anchor="w", pady=2)
         
         # Test API button
@@ -612,39 +592,33 @@ class SettingsTab:
             else:
                 messagebox.showwarning("Validation Warnings", message)
     
-    # Validation methods
+    # Validation methods (simplified - no more visual indicators)
     def validate_email(self, *args):
         """Validate email field"""
         email = self.email_var.get()
         is_valid = "@" in email and "." in email and len(email) > 5
         self.email_valid.set(is_valid)
-        self.email_indicator.config(foreground="green" if is_valid else "red")
     
     def validate_password(self, *args):
         """Validate password field"""
         password = self.password_var.get()
         is_valid = len(password) > 0
         self.password_valid.set(is_valid)
-        self.password_indicator.config(foreground="green" if is_valid else "red")
     
     def validate_api_key(self, *args):
         """Validate API key field"""
         api_key = self.api_key_var.get()
         is_valid = len(api_key) > 10 and api_key != "your_api_key_here"
         self.api_key_valid.set(is_valid)
-        self.api_key_indicator.config(foreground="green" if is_valid else "orange")
     
     def validate_chrome_path(self, *args):
         """Validate Chrome path field"""
         chrome_path = self.chrome_path_var.get()
         if not chrome_path:
-            # Chrome path is required
             self.chrome_path_valid.set(False)
-            self.chrome_indicator.config(foreground="red")
         else:
             is_valid = Path(chrome_path).exists()
             self.chrome_path_valid.set(is_valid)
-            self.chrome_indicator.config(foreground="green" if is_valid else "red")
     
     def show_chrome_status(self, message):
         """Display Chrome detection status message"""
@@ -872,6 +846,10 @@ class SettingsTab:
         
         if success:
             auth_status = result
+            # Show green success text
+            self.bga_status_label.config(text="✅ BGA connection verified", foreground="green")
+            
+            # Also show detailed dialog
             message = "✅ BGA Connection Successful!\n\n"
             message += f"Session authenticated: {auth_status.get('session_authenticated', False)}\n"
             message += f"Browser authenticated: {auth_status.get('browser_authenticated', False)}\n"
@@ -880,6 +858,9 @@ class SettingsTab:
             
             messagebox.showinfo("BGA Connection Test", message)
         else:
+            # Clear any previous success message
+            self.bga_status_label.config(text="", foreground="green")
+            
             error_msg = str(result)
             message = "❌ BGA Connection Failed\n\n"
             message += f"Error: {error_msg}\n\n"
@@ -893,12 +874,19 @@ class SettingsTab:
             progress_dialog.destroy()
         
         if success:
+            # Show green success text
+            self.api_status_label.config(text="✅ API connection verified", foreground="green")
+            
+            # Also show detailed dialog
             message = "✅ API Connection Successful!\n\n"
             message += f"HelloWorldFunction response:\n{str(result)}\n\n"
             message += "Your API key and endpoint are working correctly."
             
             messagebox.showinfo("API Connection Test", message)
         else:
+            # Clear any previous success message
+            self.api_status_label.config(text="", foreground="green")
+            
             error_msg = str(result)
             message = "❌ API Connection Failed\n\n"
             message += f"Error: {error_msg}\n\n"

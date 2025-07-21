@@ -107,14 +107,6 @@ class MainWindow:
             anchor=tk.W
         )
         self.status_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        
-        # Connection status indicator
-        self.connection_status = ttk.Label(
-            self.status_frame,
-            text="● Disconnected",
-            foreground="red"
-        )
-        self.connection_status.pack(side=tk.RIGHT, padx=(10, 0))
     
     def load_window_state(self):
         """Load saved window state from config"""
@@ -166,13 +158,6 @@ class MainWindow:
         """Update the status bar message"""
         self.status_label.config(text=message)
         self.root.update_idletasks()
-    
-    def update_connection_status(self, connected=False):
-        """Update the connection status indicator"""
-        if connected:
-            self.connection_status.config(text="● Connected", foreground="green")
-        else:
-            self.connection_status.config(text="● Disconnected", foreground="red")
     
     def import_config(self):
         """Import configuration from JSON file"""

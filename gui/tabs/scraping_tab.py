@@ -434,8 +434,6 @@ class ScrapingTab:
                      font=("TkDefaultFont", 9)).pack(anchor="w")
             ttk.Label(self.assignment_summary_frame, text=f"Player Name: {details['player_name']}", 
                      font=("TkDefaultFont", 9)).pack(anchor="w")
-            ttk.Label(self.assignment_summary_frame, text=f"Estimated Games: {details['estimated_games']}", 
-                     font=("TkDefaultFont", 9)).pack(anchor="w")
         elif assignment_type == "replayscraping":
             # Replay scraping assignment summary
             ttk.Label(self.assignment_summary_frame, text=f"Game count: {details['game_count']}", 
@@ -461,8 +459,6 @@ class ScrapingTab:
             # Legacy format support (for mock assignments)
             if assignment_type == "index_games":
                 ttk.Label(self.assignment_summary_frame, text=f"Player ID: {details['player_id']}", 
-                         font=("TkDefaultFont", 9)).pack(anchor="w")
-                ttk.Label(self.assignment_summary_frame, text=f"Estimated Games: {details['estimated_games']}", 
                          font=("TkDefaultFont", 9)).pack(anchor="w")
             elif assignment_type == "collect_logs":
                 ttk.Label(self.assignment_summary_frame, text=f"Table Count: {details['table_count']}", 
