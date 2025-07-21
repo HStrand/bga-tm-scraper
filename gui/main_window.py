@@ -88,8 +88,8 @@ class MainWindow:
         # Add tabs to notebook
         self.notebook.add(self.settings_tab.frame, text="⚙️ Settings")
         self.notebook.add(self.scraping_tab.frame, text="🚀 Scraping")
-        self.notebook.add(self.statistics_tab.frame, text="📊 Statistics")
         self.notebook.add(self.download_tab.frame, text="💾 Download Data")
+        self.notebook.add(self.statistics_tab.frame, text="📊 Statistics")
         
         # Bind tab change event
         self.notebook.bind("<<NotebookTabChanged>>", self.on_tab_changed)
@@ -151,7 +151,7 @@ class MainWindow:
         
         # Refresh tab content if needed
         current_index = self.notebook.index(selected_tab)
-        if current_index == 2:  # Statistics tab
+        if current_index == 3:  # Statistics tab
             self.statistics_tab.refresh_data()
     
     def update_status(self, message):

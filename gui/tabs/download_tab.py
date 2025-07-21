@@ -1,19 +1,19 @@
 """
 Download Tab for BGA TM Scraper GUI
-Handles downloading scraped data from the central registry
+Handles downloading the complete dataset from Google Drive
 """
 
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import threading
 import time
-import random
 import os
+import gdown
 from datetime import datetime, timedelta
 
 
 class DownloadTab:
-    """Download tab for retrieving scraped data"""
+    """Download tab for retrieving the complete dataset from Google Drive"""
     
     def __init__(self, parent, config_manager):
         self.parent = parent
@@ -21,6 +21,10 @@ class DownloadTab:
         
         # Create main frame
         self.frame = ttk.Frame(parent)
+        
+        # Google Drive file configuration
+        self.file_id = "1DSaPGKnp196yY3PhZ7gSFHdUOmmc-Jxu"
+        self.file_url = f"https://drive.google.com/uc?id={self.file_id}"
         
         # Download state
         self.is_downloading = False
@@ -32,6 +36,8 @@ class DownloadTab:
         self.downloaded_size = 0
         self.download_speed = 0
         self.start_time = None
+        self.last_update_time = None
+        self.last_downloaded_size = 0
         
         # Create the UI
         self.create_widgets()
@@ -43,100 +49,29 @@ class DownloadTab:
         main_frame.pack(fill="both", expand=True, padx=20, pady=20)
         
         # Title
-        title_label = ttk.Label(main_frame, text="Download Data", 
+        title_label = ttk.Label(main_frame, text="Download Complete Dataset", 
                                font=("TkDefaultFont", 16, "bold"))
         title_label.pack(pady=(0, 20))
         
         # Description
-        desc_text = """Download scraped game data from the central registry.
-All data is packaged in a convenient ZIP file for analysis and research."""
+        desc_text = """Download the complete BGA Terraforming Mars dataset.
+This includes all indexed games with metadata and detailed game logs."""
         
         desc_label = ttk.Label(main_frame, text=desc_text, justify="center")
         desc_label.pack(pady=(0, 30))
         
-        # Download options frame
-        options_frame = ttk.LabelFrame(main_frame, text="Download Options", padding=15)
-        options_frame.pack(fill="x", pady=(0, 20))
+        # Dataset info frame
+        info_frame = ttk.LabelFrame(main_frame, text="Dataset Information", padding=15)
+        info_frame.pack(fill="x", pady=(0, 20))
         
-        # Dataset selection
-        dataset_frame = ttk.Frame(options_frame)
-        dataset_frame.pack(fill="x", pady=(0, 15))
+        info_text = """• Complete dataset with all available games
+• Game metadata and player information
+• Detailed move-by-move game logs
+• ZIP format for easy extraction
+• Updated regularly with new data"""
         
-        ttk.Label(dataset_frame, text="Dataset:", font=("TkDefaultFont", 10, "bold")).pack(anchor="w", pady=(0, 5))
-        
-        self.dataset_var = tk.StringVar(value="complete")
-        
-        complete_rb = ttk.Radiobutton(
-            dataset_frame,
-            text="Complete Dataset (All games and logs)",
-            variable=self.dataset_var,
-            value="complete"
-        )
-        complete_rb.pack(anchor="w", pady=2)
-        
-        games_only_rb = ttk.Radiobutton(
-            dataset_frame,
-            text="Games Index Only (Metadata only, smaller file)",
-            variable=self.dataset_var,
-            value="games_only"
-        )
-        games_only_rb.pack(anchor="w", pady=2)
-        
-        logs_only_rb = ttk.Radiobutton(
-            dataset_frame,
-            text="Game Logs Only (Detailed replay data)",
-            variable=self.dataset_var,
-            value="logs_only"
-        )
-        logs_only_rb.pack(anchor="w", pady=2)
-        
-        # Format selection
-        format_frame = ttk.Frame(options_frame)
-        format_frame.pack(fill="x", pady=(0, 15))
-        
-        ttk.Label(format_frame, text="Format:", font=("TkDefaultFont", 10, "bold")).pack(anchor="w", pady=(0, 5))
-        
-        self.format_var = tk.StringVar(value="json")
-        
-        json_rb = ttk.Radiobutton(
-            format_frame,
-            text="JSON (Structured data, recommended)",
-            variable=self.format_var,
-            value="json"
-        )
-        json_rb.pack(anchor="w", pady=2)
-        
-        csv_rb = ttk.Radiobutton(
-            format_frame,
-            text="CSV (Spreadsheet compatible, flattened data)",
-            variable=self.format_var,
-            value="csv"
-        )
-        csv_rb.pack(anchor="w", pady=2)
-        
-        # Filters section (placeholder for future)
-        filters_frame = ttk.Frame(options_frame)
-        filters_frame.pack(fill="x")
-        
-        ttk.Label(filters_frame, text="Filters (Coming Soon):", font=("TkDefaultFont", 10, "bold")).pack(anchor="w", pady=(0, 5))
-        
-        self.date_filter_var = tk.BooleanVar()
-        date_cb = ttk.Checkbutton(
-            filters_frame,
-            text="Filter by date range",
-            variable=self.date_filter_var,
-            state="disabled"
-        )
-        date_cb.pack(anchor="w", pady=2)
-        
-        self.player_filter_var = tk.BooleanVar()
-        player_cb = ttk.Checkbutton(
-            filters_frame,
-            text="Filter by specific players",
-            variable=self.player_filter_var,
-            state="disabled"
-        )
-        player_cb.pack(anchor="w", pady=2)
+        info_label = ttk.Label(info_frame, text=info_text, justify="left")
+        info_label.pack(anchor="w")
         
         # Download location frame
         location_frame = ttk.LabelFrame(main_frame, text="Download Location", padding=15)
@@ -161,7 +96,7 @@ All data is packaged in a convenient ZIP file for analysis and research."""
         # File info
         self.file_info_label = ttk.Label(
             location_frame,
-            text="File will be saved as: tm_scraper_data_YYYYMMDD_HHMMSS.zip",
+            text="File will be saved as: bga-tm-games_YYYYMMDD_HHMMSS.zip",
             foreground="gray",
             font=("TkDefaultFont", 9)
         )
@@ -192,8 +127,8 @@ All data is packaged in a convenient ZIP file for analysis and research."""
         # Get info button
         info_btn = ttk.Button(
             controls_frame,
-            text="ℹ️ Dataset Info",
-            command=self.show_dataset_info
+            text="ℹ️ Dataset Details",
+            command=self.show_dataset_details
         )
         info_btn.pack(side="left")
         
@@ -219,7 +154,7 @@ All data is packaged in a convenient ZIP file for analysis and research."""
         stats_frame = ttk.Frame(progress_frame)
         stats_frame.pack(fill="x", pady=(0, 10))
         
-        self.size_label = ttk.Label(stats_frame, text="Size: 0 MB / 0 MB")
+        self.size_label = ttk.Label(stats_frame, text="Size: Calculating...")
         self.size_label.pack(side="left")
         
         self.time_label = ttk.Label(stats_frame, text="")
@@ -250,7 +185,7 @@ All data is packaged in a convenient ZIP file for analysis and research."""
         log_scrollbar.pack(side="right", fill="y")
         
         # Initial log message
-        self.log_message("Ready to download data from the central registry")
+        self.log_message("Ready to download complete dataset from Google Drive")
     
     def browse_location(self):
         """Browse for download location"""
@@ -261,38 +196,40 @@ All data is packaged in a convenient ZIP file for analysis and research."""
         if folder:
             self.location_var.set(folder)
     
-    def show_dataset_info(self):
-        """Show information about available datasets"""
-        info_text = """Dataset Information:
+    def show_dataset_details(self):
+        """Show detailed information about the dataset"""
+        info_text = """BGA Terraforming Mars Complete Dataset
 
-Complete Dataset:
-• All indexed games with metadata
-• Full game logs with move-by-move data
-• Player statistics and ELO data
-• Estimated size: 500-2000 MB
-• Best for comprehensive analysis
+Content:
+• All indexed games from BoardGameArena
+• Complete game metadata (players, ELO, dates, etc.)
+• Detailed move-by-move game logs
+• Player statistics and performance data
+• Corporation and card usage statistics
 
-Games Index Only:
-• Game metadata and basic information
-• Player lists and ELO changes
-• No detailed move data
-• Estimated size: 50-200 MB
-• Good for statistical analysis
+Format:
+• ZIP archive containing JSON files
+• Structured data ready for analysis
+• Compatible with data analysis tools
 
-Game Logs Only:
-• Detailed replay data
-• Move-by-move game progression
-• Resource and VP tracking
-• Estimated size: 400-1800 MB
-• Best for game mechanics analysis
+File Size:
+• Large file (several hundred MB to GB)
+• Download time depends on internet speed
+• Requires stable internet connection
 
-Format Options:
-• JSON: Structured, hierarchical data
-• CSV: Flattened data for spreadsheets
+Updates:
+• Dataset is updated regularly
+• Contains the most recent game data available
+• Historical data preserved
 
-Note: Actual file sizes depend on the amount of data available in the registry."""
+Usage:
+• Extract ZIP file after download
+• Use JSON files for data analysis
+• Compatible with Python, R, and other tools
+
+Note: This download uses Google Drive and may show a virus scan warning for large files. This is normal and safe to proceed."""
         
-        messagebox.showinfo("Dataset Information", info_text)
+        messagebox.showinfo("Dataset Details", info_text)
     
     def start_download(self):
         """Start the download process"""
@@ -310,27 +247,19 @@ Note: Actual file sizes depend on the amount of data available in the registry."
             messagebox.showerror("Permission Error", "Cannot write to the selected location.")
             return
         
-        # Get dataset info
-        dataset_type = self.dataset_var.get()
-        format_type = self.format_var.get()
-        
-        dataset_names = {
-            "complete": "Complete Dataset",
-            "games_only": "Games Index Only",
-            "logs_only": "Game Logs Only"
-        }
-        
         # Confirm download
-        dataset_name = dataset_names[dataset_type]
         if not messagebox.askyesno("Start Download", 
-                                  f"Download {dataset_name} in {format_type.upper()} format?\n\n"
-                                  f"This may take several minutes depending on file size."):
+                                  "Download the complete BGA Terraforming Mars dataset?\n\n"
+                                  "This is a large file and may take several minutes to download.\n"
+                                  "You may see a virus scan warning from Google Drive - this is normal."):
             return
         
         # Initialize download
         self.is_downloading = True
         self.should_stop = False
         self.start_time = datetime.now()
+        self.last_update_time = self.start_time
+        self.last_downloaded_size = 0
         
         # Update UI
         self.download_btn.config(state="disabled")
@@ -338,22 +267,17 @@ Note: Actual file sizes depend on the amount of data available in the registry."
         
         # Generate filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"tm_scraper_{dataset_type}_{format_type}_{timestamp}.zip"
+        filename = f"bga-tm-games_{timestamp}.zip"
         self.download_path = os.path.join(location, filename)
         
-        # Mock file sizes (in MB)
-        size_ranges = {
-            "complete": (500, 2000),
-            "games_only": (50, 200),
-            "logs_only": (400, 1800)
-        }
-        
-        self.total_size = random.randint(*size_ranges[dataset_type])
+        # Reset progress tracking
+        self.total_size = 0
         self.downloaded_size = 0
+        self.download_speed = 0
         
-        self.log_message(f"Starting download of {dataset_name}")
+        self.log_message("Starting download from Google Drive")
         self.log_message(f"File: {filename}")
-        self.log_message(f"Estimated size: {self.total_size} MB")
+        self.log_message("Connecting to Google Drive...")
         
         # Start download in background thread
         self.download_thread = threading.Thread(target=self._download_worker, daemon=True)
@@ -372,59 +296,64 @@ Note: Actual file sizes depend on the amount of data available in the registry."
             self.log_message("Cancelling download...")
     
     def _download_worker(self):
-        """Background worker for download (mock implementation)"""
+        """Background worker for actual Google Drive download"""
         try:
-            # Simulate download with progress updates
-            chunk_size = 5  # MB per chunk
-            chunks = self.total_size // chunk_size
-            
-            for i in range(chunks + 1):
+            # Download with progress callback
+            def progress_callback(current, total):
                 if self.should_stop:
-                    break
+                    return False  # Signal to stop download
                 
-                # Simulate download time
-                time.sleep(random.uniform(0.5, 2.0))
+                self.total_size = total
+                self.downloaded_size = current
                 
-                # Update progress
-                chunk_downloaded = min(chunk_size, self.total_size - self.downloaded_size)
-                self.downloaded_size += chunk_downloaded
+                # Calculate download speed
+                now = datetime.now()
+                if self.last_update_time:
+                    time_diff = (now - self.last_update_time).total_seconds()
+                    if time_diff >= 1.0:  # Update speed every second
+                        size_diff = current - self.last_downloaded_size
+                        if time_diff > 0:
+                            self.download_speed = size_diff / time_diff
+                        self.last_update_time = now
+                        self.last_downloaded_size = current
                 
-                # Calculate speed
-                if self.start_time:
-                    elapsed = (datetime.now() - self.start_time).total_seconds()
-                    if elapsed > 0:
-                        self.download_speed = self.downloaded_size / elapsed
-                
-                # Log progress occasionally
-                if i % 5 == 0 or self.downloaded_size >= self.total_size:
-                    progress_percent = (self.downloaded_size / self.total_size) * 100
-                    self.frame.after(0, lambda p=progress_percent: self.log_message(f"Downloaded {p:.1f}%"))
-                
-                if self.downloaded_size >= self.total_size:
-                    break
+                return True  # Continue download
             
-            # Simulate file finalization
-            if not self.should_stop:
-                self.frame.after(0, lambda: self.log_message("Finalizing download..."))
-                time.sleep(1)
-                
-                # Create a placeholder file (in real implementation, this would be the actual download)
-                try:
-                    with open(self.download_path, 'w') as f:
-                        f.write(f"# BGA TM Scraper Data Export\n")
-                        f.write(f"# Generated: {datetime.now()}\n")
-                        f.write(f"# Dataset: {self.dataset_var.get()}\n")
-                        f.write(f"# Format: {self.format_var.get()}\n")
-                        f.write(f"# This is a placeholder file for the GUI demo\n")
-                    
-                    self.frame.after(0, lambda: self.log_message("✅ Download completed successfully!"))
-                    self.frame.after(0, self._download_completed)
-                    
-                except Exception as e:
-                    self.frame.after(0, lambda: self.log_message(f"❌ Error saving file: {str(e)}"))
+            self.frame.after(0, lambda: self.log_message("Downloading file..."))
             
+            # Use gdown to download the file
+            success = gdown.download(
+                url=self.file_url,
+                output=self.download_path,
+                quiet=False,
+                fuzzy=True,
+                resume=True,
+                use_cookies=False
+            )
+            
+            if success and not self.should_stop:
+                # Get final file size
+                if os.path.exists(self.download_path):
+                    self.total_size = os.path.getsize(self.download_path)
+                    self.downloaded_size = self.total_size
+                
+                self.frame.after(0, lambda: self.log_message("✅ Download completed successfully!"))
+                self.frame.after(0, self._download_completed)
+            elif self.should_stop:
+                self.frame.after(0, lambda: self.log_message("❌ Download cancelled"))
+            else:
+                self.frame.after(0, lambda: self.log_message("❌ Download failed"))
+                
         except Exception as e:
-            self.frame.after(0, lambda: self.log_message(f"❌ Download error: {str(e)}"))
+            error_msg = str(e)
+            if "quota" in error_msg.lower():
+                error_msg = "Google Drive download quota exceeded. Please try again later."
+            elif "network" in error_msg.lower() or "connection" in error_msg.lower():
+                error_msg = "Network connection error. Please check your internet connection."
+            elif "permission" in error_msg.lower():
+                error_msg = "Permission denied. Please check the download location."
+            
+            self.frame.after(0, lambda: self.log_message(f"❌ Download error: {error_msg}"))
         
         finally:
             # Clean up
@@ -432,17 +361,21 @@ Note: Actual file sizes depend on the amount of data available in the registry."
     
     def _download_completed(self):
         """Handle successful download completion"""
-        # Show completion dialog
+        # Calculate final stats
+        file_size_mb = self.total_size / (1024 * 1024) if self.total_size > 0 else 0
+        
         message = f"Download completed successfully!\n\n"
         message += f"File saved to:\n{self.download_path}\n\n"
-        message += f"Size: {self.total_size} MB\n"
+        message += f"Size: {file_size_mb:.1f} MB\n"
         
         if self.start_time:
             elapsed = datetime.now() - self.start_time
             elapsed_str = str(elapsed).split('.')[0]
             message += f"Time: {elapsed_str}\n"
-        
-        message += f"Speed: {self.download_speed:.1f} MB/s"
+            
+            if elapsed.total_seconds() > 0:
+                avg_speed = file_size_mb / elapsed.total_seconds()
+                message += f"Average speed: {avg_speed:.1f} MB/s"
         
         result = messagebox.askquestion(
             "Download Complete", 
@@ -476,8 +409,9 @@ Note: Actual file sizes depend on the amount of data available in the registry."
             if hasattr(self, 'download_path') and os.path.exists(self.download_path):
                 try:
                     os.remove(self.download_path)
-                except:
-                    pass
+                    self.log_message("Cleaned up partial download file")
+                except Exception as e:
+                    self.log_message(f"Could not clean up file: {str(e)}")
         else:
             self.progress_label.config(text="Download completed")
     
@@ -492,28 +426,42 @@ Note: Actual file sizes depend on the amount of data available in the registry."
                 self.progress_label.config(
                     text=f"Downloading... {progress_percent:.1f}%"
                 )
+            else:
+                # Indeterminate progress while we don't know the total size
+                self.progress_label.config(text="Connecting and starting download...")
             
             # Update size info
-            self.size_label.config(
-                text=f"Size: {self.downloaded_size:.1f} MB / {self.total_size:.1f} MB"
-            )
+            if self.total_size > 0:
+                downloaded_mb = self.downloaded_size / (1024 * 1024)
+                total_mb = self.total_size / (1024 * 1024)
+                self.size_label.config(
+                    text=f"Size: {downloaded_mb:.1f} MB / {total_mb:.1f} MB"
+                )
+            else:
+                downloaded_mb = self.downloaded_size / (1024 * 1024)
+                self.size_label.config(text=f"Downloaded: {downloaded_mb:.1f} MB")
             
             # Update speed info
             if self.download_speed > 0:
-                self.speed_label.config(text=f"Speed: {self.download_speed:.1f} MB/s")
+                speed_mb = self.download_speed / (1024 * 1024)
+                self.speed_label.config(text=f"Speed: {speed_mb:.1f} MB/s")
                 
                 # Calculate ETA
-                remaining_mb = self.total_size - self.downloaded_size
-                if remaining_mb > 0:
-                    eta_seconds = remaining_mb / self.download_speed
-                    eta_str = str(timedelta(seconds=int(eta_seconds)))
-                    self.time_label.config(text=f"ETA: {eta_str}")
+                if self.total_size > 0:
+                    remaining_bytes = self.total_size - self.downloaded_size
+                    if remaining_bytes > 0 and self.download_speed > 0:
+                        eta_seconds = remaining_bytes / self.download_speed
+                        eta_str = str(timedelta(seconds=int(eta_seconds)))
+                        self.time_label.config(text=f"ETA: {eta_str}")
             
             # Schedule next update
             self.frame.after(1000, self._update_progress_timer)
         else:
             # Final update
-            self.progress_bar["value"] = 100 if not self.should_stop else 0
+            if not self.should_stop and self.total_size > 0:
+                self.progress_bar["value"] = 100
+            else:
+                self.progress_bar["value"] = 0
             self.speed_label.config(text="")
             self.time_label.config(text="")
     
