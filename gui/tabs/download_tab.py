@@ -8,7 +8,7 @@ from tkinter import ttk, filedialog, messagebox
 import threading
 import time
 import os
-import gdown
+import subprocess
 from datetime import datetime, timedelta
 
 
@@ -142,23 +142,6 @@ This includes all indexed games with metadata and detailed game logs."""
         
         self.progress_label = ttk.Label(progress_info_frame, text="Ready to download")
         self.progress_label.pack(side="left")
-        
-        self.speed_label = ttk.Label(progress_info_frame, text="")
-        self.speed_label.pack(side="right")
-        
-        # Progress bar
-        self.progress_bar = ttk.Progressbar(progress_frame, mode="determinate")
-        self.progress_bar.pack(fill="x", pady=(0, 15))
-        
-        # Download stats
-        stats_frame = ttk.Frame(progress_frame)
-        stats_frame.pack(fill="x", pady=(0, 10))
-        
-        self.size_label = ttk.Label(stats_frame, text="Size: Calculating...")
-        self.size_label.pack(side="left")
-        
-        self.time_label = ttk.Label(stats_frame, text="")
-        self.time_label.pack(side="right")
         
         # Status log
         log_frame = ttk.Frame(progress_frame)
@@ -296,42 +279,48 @@ Note: This download uses Google Drive and may show a virus scan warning for larg
             self.log_message("Cancelling download...")
     
     def _download_worker(self):
-        """Background worker for actual Google Drive download"""
+        """Background worker for actual Google Drive download using subprocess to capture output"""
         try:
-            # Download with progress callback
-            def progress_callback(current, total):
-                if self.should_stop:
-                    return False  # Signal to stop download
-                
-                self.total_size = total
-                self.downloaded_size = current
-                
-                # Calculate download speed
-                now = datetime.now()
-                if self.last_update_time:
-                    time_diff = (now - self.last_update_time).total_seconds()
-                    if time_diff >= 1.0:  # Update speed every second
-                        size_diff = current - self.last_downloaded_size
-                        if time_diff > 0:
-                            self.download_speed = size_diff / time_diff
-                        self.last_update_time = now
-                        self.last_downloaded_size = current
-                
-                return True  # Continue download
+            self.frame.after(0, lambda: self.log_message("Starting gdown process..."))
             
-            self.frame.after(0, lambda: self.log_message("Downloading file..."))
+            # Use subprocess to run gdown and capture its output
+            cmd = [
+                'python', '-m', 'gdown',
+                self.file_url,
+                '-O', self.download_path,
+                '--fuzzy'
+            ]
             
-            # Use gdown to download the file
-            success = gdown.download(
-                url=self.file_url,
-                output=self.download_path,
-                quiet=False,
-                fuzzy=True,
-                resume=True,
-                use_cookies=False
+            # Start the subprocess
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                universal_newlines=True,
+                bufsize=1
             )
             
-            if success and not self.should_stop:
+            # Read output line by line and pipe to status log
+            while True:
+                if self.should_stop:
+                    process.terminate()
+                    break
+                
+                output = process.stdout.readline()
+                if output == '' and process.poll() is not None:
+                    break
+                
+                if output:
+                    # Clean up the output line and add to log
+                    line = output.strip()
+                    if line:
+                        # Add the gdown output directly to the status log
+                        self.frame.after(0, lambda msg=line: self.log_message_raw(msg))
+            
+            # Wait for process to complete
+            return_code = process.poll()
+            
+            if return_code == 0 and not self.should_stop:
                 # Get final file size
                 if os.path.exists(self.download_path):
                     self.total_size = os.path.getsize(self.download_path)
@@ -352,6 +341,8 @@ Note: This download uses Google Drive and may show a virus scan warning for larg
                 error_msg = "Network connection error. Please check your internet connection."
             elif "permission" in error_msg.lower():
                 error_msg = "Permission denied. Please check the download location."
+            elif "not found" in error_msg.lower():
+                error_msg = "gdown not found. Please install it with: pip install gdown"
             
             self.frame.after(0, lambda: self.log_message(f"❌ Download error: {error_msg}"))
         
@@ -418,57 +409,28 @@ Note: This download uses Google Drive and may show a virus scan warning for larg
     def _update_progress_timer(self):
         """Update progress indicators"""
         if self.is_downloading:
-            # Update progress bar
-            if self.total_size > 0:
-                progress_percent = (self.downloaded_size / self.total_size) * 100
-                self.progress_bar["value"] = progress_percent
-                
-                self.progress_label.config(
-                    text=f"Downloading... {progress_percent:.1f}%"
-                )
-            else:
-                # Indeterminate progress while we don't know the total size
-                self.progress_label.config(text="Connecting and starting download...")
-            
-            # Update size info
-            if self.total_size > 0:
-                downloaded_mb = self.downloaded_size / (1024 * 1024)
-                total_mb = self.total_size / (1024 * 1024)
-                self.size_label.config(
-                    text=f"Size: {downloaded_mb:.1f} MB / {total_mb:.1f} MB"
-                )
-            else:
-                downloaded_mb = self.downloaded_size / (1024 * 1024)
-                self.size_label.config(text=f"Downloaded: {downloaded_mb:.1f} MB")
-            
-            # Update speed info
-            if self.download_speed > 0:
-                speed_mb = self.download_speed / (1024 * 1024)
-                self.speed_label.config(text=f"Speed: {speed_mb:.1f} MB/s")
-                
-                # Calculate ETA
-                if self.total_size > 0:
-                    remaining_bytes = self.total_size - self.downloaded_size
-                    if remaining_bytes > 0 and self.download_speed > 0:
-                        eta_seconds = remaining_bytes / self.download_speed
-                        eta_str = str(timedelta(seconds=int(eta_seconds)))
-                        self.time_label.config(text=f"ETA: {eta_str}")
+            # Update progress label
+            self.progress_label.config(text="Downloading...")
             
             # Schedule next update
             self.frame.after(1000, self._update_progress_timer)
         else:
-            # Final update
-            if not self.should_stop and self.total_size > 0:
-                self.progress_bar["value"] = 100
-            else:
-                self.progress_bar["value"] = 0
-            self.speed_label.config(text="")
-            self.time_label.config(text="")
+            # Final update - progress is shown in the status log now
+            pass
     
     def log_message(self, message):
-        """Add a message to the status log"""
+        """Add a message to the status log with timestamp"""
         timestamp = datetime.now().strftime("%H:%M:%S")
         log_entry = f"[{timestamp}] {message}\n"
+        
+        self.log_text.config(state=tk.NORMAL)
+        self.log_text.insert(tk.END, log_entry)
+        self.log_text.see(tk.END)  # Auto-scroll to bottom
+        self.log_text.config(state=tk.DISABLED)
+    
+    def log_message_raw(self, message):
+        """Add a raw message to the status log without timestamp (for gdown output)"""
+        log_entry = f"{message}\n"
         
         self.log_text.config(state=tk.NORMAL)
         self.log_text.insert(tk.END, log_entry)
