@@ -239,6 +239,31 @@ class APIClient:
             logger.error(f"Error getting assignment for {email}: {e}")
             return None
     
+    def get_statistics(self, email: str) -> Optional[Dict[str, Any]]:
+        """
+        Get statistics for a user
+        
+        Args:
+            email: User's BGA email
+            
+        Returns:
+            dict: Statistics data or None if failed
+        """
+        try:
+            params = {'email': email}
+            response = self._make_request("GetStatistics", params=params)
+            
+            if response:
+                logger.info(f"Got statistics from API for {email}")
+                return response
+            else:
+                logger.info(f"No statistics available for {email}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error getting statistics for {email}: {e}")
+            return None
+    
     def test_connection(self) -> bool:
         """
         Test the API connection
