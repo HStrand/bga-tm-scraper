@@ -4,6 +4,7 @@ Handles all API communication with the central registry
 """
 
 import requests
+import json
 import logging
 from typing import List, Optional, Dict, Any
 
@@ -51,7 +52,13 @@ class APIClient:
             if method.upper() == "GET":
                 response = requests.get(url, params=params, timeout=self.timeout)
             elif method.upper() == "POST":
-                response = requests.post(url, params=params, json=data, timeout=self.timeout)
+                if data is not None:
+                    # Use explicit JSON serialization with ensure_ascii=False to preserve Unicode characters
+                    headers = {'Content-Type': 'application/json; charset=utf-8'}
+                    json_data = json.dumps(data, ensure_ascii=False, separators=(',', ':'))
+                    response = requests.post(url, params=params, data=json_data, headers=headers, timeout=self.timeout)
+                else:
+                    response = requests.post(url, params=params, timeout=self.timeout)
             else:
                 raise ValueError(f"Unsupported HTTP method: {method}")
             
