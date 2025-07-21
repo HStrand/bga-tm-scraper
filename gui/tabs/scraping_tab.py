@@ -914,8 +914,11 @@ class ScrapingTab:
                             break  # Stop processing more games
                         
                         if parsed_game_data:
+                            # Get BGA email for scrapedBy parameter
+                            bga_email = self.config_manager.get_value("bga_credentials", "email", "")
+                            
                             # Upload parsed game data to API via StoreGameLog
-                            if api_client.store_game_log(parsed_game_data):
+                            if api_client.store_game_log(parsed_game_data, bga_email):
                                 success = True
                                 self.successful_items += 1
                                 self.frame.after(0, lambda tid=table_id: 

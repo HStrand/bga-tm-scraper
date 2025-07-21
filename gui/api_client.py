@@ -158,18 +158,24 @@ class APIClient:
             logger.error(f"Error updating single game: {e}")
             return False
     
-    def store_game_log(self, game_log_data: Dict[str, Any]) -> bool:
+    def store_game_log(self, game_log_data: Dict[str, Any], scraped_by_email: str = None) -> bool:
         """
         POST parsed game log data to the API
         
         Args:
             game_log_data: Dictionary containing the parsed game data
+            scraped_by_email: BGA email of the user who scraped this game
             
         Returns:
             bool: True if successful, False otherwise
         """
         try:
-            response = self._make_request("StoreGameLog", method="POST", data=game_log_data)
+            # Add scrapedBy parameter if email is provided
+            params = {}
+            if scraped_by_email:
+                params['scrapedBy'] = scraped_by_email
+            
+            response = self._make_request("StoreGameLog", method="POST", data=game_log_data, params=params)
             
             if response is not None:
                 table_id = game_log_data.get('table_id', 'unknown')
