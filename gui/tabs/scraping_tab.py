@@ -41,6 +41,10 @@ class ScrapingTab:
         self.failed_items = 0
         self.start_time = None
         
+        # Progress persistence
+        self.current_assignment_id = None
+        self.existing_progress = None
+        
         # Create the UI
         self.create_widgets()
         
@@ -275,8 +279,15 @@ class ScrapingTab:
             else:
                 raise ValueError(f"Unknown assignment type: {assignment_type}")
             
+            # Generate assignment ID and check for existing progress
+            self.current_assignment_id = self.config_manager.generate_assignment_id(self.current_assignment)
+            self.existing_progress = self.config_manager.load_assignment_progress(self.current_assignment_id)
+            
             # Show assignment
             self._display_assignment()
+            
+            # Update start button text based on existing progress
+            self._update_start_button_text()
             
             # Enable start button
             self.start_btn.config(state="normal")
@@ -289,7 +300,12 @@ class ScrapingTab:
             self.config_manager.set_value("current_assignment", "status", "ready")
             self.config_manager.save_config()
             
-            self.log_message("✅ New assignment received and ready to start")
+            if self.existing_progress:
+                completed = len(self.existing_progress.get("completed_games", []))
+                failed = len(self.existing_progress.get("failed_games", []))
+                self.log_message(f"✅ Assignment received - Found existing progress: {completed} completed, {failed} failed")
+            else:
+                self.log_message("✅ New assignment received and ready to start")
             
         except Exception as e:
             self._show_api_error(f"Failed to process assignment: {str(e)}")
@@ -482,18 +498,39 @@ class ScrapingTab:
         
         if assignment_data and assignment_status in ["ready", "accepted"]:
             self.current_assignment = assignment_data
+            # Generate assignment ID and check for existing progress
+            self.current_assignment_id = self.config_manager.generate_assignment_id(self.current_assignment)
+            self.existing_progress = self.config_manager.load_assignment_progress(self.current_assignment_id)
+            
             self._display_assignment()
+            self._update_start_button_text()
             self.start_btn.config(state="normal")
+            
+            if self.existing_progress:
+                completed = len(self.existing_progress.get("completed_games", []))
+                failed = len(self.existing_progress.get("failed_games", []))
+                if completed > 0 or failed > 0:
+                    self.log_message(f"📊 Found existing progress: {completed} completed, {failed} failed")
             
         elif assignment_data and assignment_status == "in_progress":
             self.current_assignment = assignment_data
+            # Generate assignment ID and check for existing progress
+            self.current_assignment_id = self.config_manager.generate_assignment_id(self.current_assignment)
+            self.existing_progress = self.config_manager.load_assignment_progress(self.current_assignment_id)
+            
             self._display_assignment()
+            self._update_start_button_text()
             self.start_btn.config(state="normal")
             self.log_message("⚠️ Assignment was in progress - you can continue or restart")
             
         elif assignment_data and assignment_status == "paused_daily_limit":
             self.current_assignment = assignment_data
+            # Generate assignment ID and check for existing progress
+            self.current_assignment_id = self.config_manager.generate_assignment_id(self.current_assignment)
+            self.existing_progress = self.config_manager.load_assignment_progress(self.current_assignment_id)
+            
             self._display_assignment()
+            self._update_start_button_text()
             self.start_btn.config(state="normal")
             self.log_message("⚠️ Assignment paused due to daily limit - you can retry when limit resets")
             
@@ -509,6 +546,9 @@ class ScrapingTab:
             self.no_assignment_label.pack(expand=True)
             self.start_btn.config(state="disabled")
             self.current_assignment = None
+        
+        # Clean up old progress data (older than 7 days)
+        self.config_manager.cleanup_old_progress(days_old=7)
     
     def start_scraping(self):
         """Start the scraping process"""
@@ -553,12 +593,28 @@ class ScrapingTab:
         else:
             self.total_items = 100  # Default fallback
         
-        self.completed_items = 0
-        self.successful_items = 0
-        self.failed_items = 0
+        # Generate assignment ID if not already done
+        if not self.current_assignment_id:
+            self.current_assignment_id = self.config_manager.generate_assignment_id(self.current_assignment)
+            self.existing_progress = self.config_manager.load_assignment_progress(self.current_assignment_id)
+        
+        # Initialize or restore progress
+        if self.existing_progress:
+            self._restore_progress_from_existing()
+        else:
+            self.completed_items = 0
+            self.successful_items = 0
+            self.failed_items = 0
+        
+        # Initialize progress tracking
+        self._initialize_progress_tracking()
         
         self.update_progress()
-        self.log_message("🚀 Starting scraping operation...")
+        
+        if self.existing_progress and len(self.existing_progress.get("completed_games", [])) > 0:
+            self.log_message("🔄 Resuming scraping operation...")
+        else:
+            self.log_message("🚀 Starting scraping operation...")
         
         # Start scraping in background thread
         self.scraping_thread = threading.Thread(target=self._scraping_worker, daemon=True)
@@ -805,18 +861,36 @@ class ScrapingTab:
                 if not scraper.start_browser_and_login():
                     raise RuntimeError("Failed to start browser and login")
                 
+                # Filter games to only process those not already completed
+                games_to_process = self._get_games_to_process(games)
+                
+                if len(games_to_process) < len(games):
+                    skipped_count = len(games) - len(games_to_process)
+                    self.frame.after(0, lambda: self.log_message(f"📊 Skipping {skipped_count} already processed games"))
+                
+                # Update total items to reflect actual games to process
+                self.total_items = len(games_to_process)
+                self.frame.after(0, self.update_progress)
+                
                 # Process each game
-                for i, game in enumerate(games):
+                for i, game in enumerate(games_to_process):
                     if self.should_stop:
                         break
                     
                     table_id = str(game.get("tableId", f"Unknown_{i}"))
                     version_id = str(game.get("versionId", ""))
                     
+                    # Skip if already processed (double-check)
+                    if self._is_game_already_processed(table_id):
+                        self.frame.after(0, lambda tid=table_id: 
+                                       self.log_message(f"⏭️ Skipping already processed game {tid}"))
+                        continue
+                    
                     self.frame.after(0, lambda tid=table_id: self.current_op_label.config(
                         text=f"Processing game {tid}", foreground="blue"
                     ))
                     
+                    success = False
                     try:
                         # Build assignment metadata for this game using actual assignment data
                         assignment_metadata = {
@@ -842,6 +916,7 @@ class ScrapingTab:
                         if parsed_game_data:
                             # Upload parsed game data to API via StoreGameLog
                             if api_client.store_game_log(parsed_game_data):
+                                success = True
                                 self.successful_items += 1
                                 self.frame.after(0, lambda tid=table_id: 
                                                self.log_message(f"✅ Collected and uploaded logs for game {tid}"))
@@ -867,6 +942,9 @@ class ScrapingTab:
                         logger.error(f"Error processing game {table_id}: {e}")
                         self.frame.after(0, lambda tid=table_id, err=error_msg: 
                                        self.log_message(f"❌ Error processing game {tid}: {err}"))
+                    
+                    # Update progress tracking for this game
+                    self._update_progress_tracking(table_id, success)
                     
                     self.completed_items += 1
                     
@@ -1041,6 +1119,103 @@ class ScrapingTab:
         self.log_text.config(state=tk.NORMAL)
         self.log_text.delete(1.0, tk.END)
         self.log_text.config(state=tk.DISABLED)
+    
+    def _update_start_button_text(self):
+        """Update start button text based on existing progress"""
+        if self.existing_progress:
+            completed = len(self.existing_progress.get("completed_games", []))
+            failed = len(self.existing_progress.get("failed_games", []))
+            total_processed = completed + failed
+            if total_processed > 0:
+                self.start_btn.config(text=f"🔄 Resume Scraping ({total_processed} done)")
+            else:
+                self.start_btn.config(text="🚀 Start Scraping")
+        else:
+            self.start_btn.config(text="🚀 Start Scraping")
+    
+    def _restore_progress_from_existing(self):
+        """Restore progress counters from existing progress data"""
+        if self.existing_progress:
+            counters = self.existing_progress.get("counters", {})
+            self.completed_items = counters.get("completed_items", 0)
+            self.successful_items = counters.get("successful_items", 0)
+            self.failed_items = counters.get("failed_items", 0)
+            
+            # Update total items if available
+            if counters.get("total_items", 0) > 0:
+                self.total_items = counters["total_items"]
+            
+            self.log_message(f"📊 Restored progress: {self.successful_items} successful, {self.failed_items} failed")
+    
+    def _initialize_progress_tracking(self):
+        """Initialize progress tracking for the current assignment"""
+        if not self.current_assignment_id:
+            return
+        
+        # Initialize progress data if it doesn't exist
+        if not self.existing_progress:
+            from datetime import datetime
+            self.existing_progress = {
+                "completed_games": [],
+                "failed_games": [],
+                "last_processed_index": -1,
+                "counters": {
+                    "total_items": self.total_items,
+                    "completed_items": 0,
+                    "successful_items": 0,
+                    "failed_items": 0
+                },
+                "timestamps": {
+                    "started_at": datetime.now().isoformat(),
+                    "last_updated": datetime.now().isoformat()
+                }
+            }
+            self.config_manager.save_assignment_progress(self.current_assignment_id, self.existing_progress)
+        else:
+            # Update total items in existing progress
+            self.existing_progress["counters"]["total_items"] = self.total_items
+            self.config_manager.save_assignment_progress(self.current_assignment_id, self.existing_progress)
+    
+    def _update_progress_tracking(self, table_id: str, success: bool):
+        """Update progress tracking for a completed game"""
+        if self.current_assignment_id:
+            self.config_manager.update_game_completion(self.current_assignment_id, table_id, success)
+            # Reload progress to get updated data
+            self.existing_progress = self.config_manager.load_assignment_progress(self.current_assignment_id)
+    
+    def _is_game_already_processed(self, table_id: str) -> bool:
+        """Check if a game has already been processed"""
+        if not self.existing_progress:
+            return False
+        
+        table_id_str = str(table_id)
+        completed_games = self.existing_progress.get("completed_games", [])
+        failed_games = self.existing_progress.get("failed_games", [])
+        
+        return table_id_str in completed_games or table_id_str in failed_games
+    
+    def _get_games_to_process(self, all_games):
+        """Filter games to only include those not already processed"""
+        if not self.existing_progress:
+            return all_games
+        
+        completed_games = set(self.existing_progress.get("completed_games", []))
+        failed_games = set(self.existing_progress.get("failed_games", []))
+        processed_games = completed_games | failed_games
+        
+        # Filter out already processed games
+        games_to_process = []
+        for game in all_games:
+            if isinstance(game, dict):
+                table_id = str(game.get("tableId", ""))
+            else:
+                # Handle other game data formats
+                table_id = str(getattr(game, 'table_id', ''))
+            
+            if table_id and table_id not in processed_games:
+                games_to_process.append(game)
+        
+        return games_to_process
     
     def stop_scraping_if_running(self):
         """Stop scraping if it's currently running (called on app close)"""

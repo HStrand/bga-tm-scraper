@@ -220,7 +220,7 @@ class InMemoryScraper:
             logger.info(f"Starting scrape_table_and_replay for game {table_id}")
             
             # Scrape table and replay without saving raw HTML
-            result = self.scraper.scrape_table_and_replay(table_id, player_id, save_raw=False, raw_data_dir=None)
+            result = self.scraper.scrape_table_and_replay(table_id, player_id, save_raw=True, raw_data_dir=None)
             
             logger.info(f"Scraper returned result for {table_id}: {type(result)}")
             if result:

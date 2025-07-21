@@ -247,3 +247,129 @@ class ConfigManager:
         profile_name = self.get_value("scraping_settings", "speed_profile", "NORMAL")
         profiles = self.get_speed_profiles()
         return profiles.get(profile_name, profiles["NORMAL"])
+    
+    def generate_assignment_id(self, assignment_data: Dict[str, Any]) -> str:
+        """Generate a unique ID for an assignment"""
+        import hashlib
+        
+        # Create a string representation of key assignment data
+        assignment_type = assignment_data.get("type", "unknown")
+        details = assignment_data.get("details", {})
+        
+        if assignment_type == "replayscraping":
+            # For replay assignments, use player perspective + game count + first few table IDs
+            player_id = details.get("player_perspective_id", "unknown")
+            game_count = details.get("game_count", 0)
+            games = details.get("games", [])
+            first_games = [str(g.get("tableId", "")) for g in games[:3]]  # First 3 games as identifier
+            id_string = f"{assignment_type}_{player_id}_{game_count}_{'-'.join(first_games)}"
+        elif assignment_type == "indexing":
+            # For indexing assignments, use player ID
+            player_id = details.get("player_id", "unknown")
+            id_string = f"{assignment_type}_{player_id}"
+        else:
+            # Fallback for other assignment types
+            id_string = f"{assignment_type}_{str(details)}"
+        
+        # Create hash for consistent ID
+        return hashlib.md5(id_string.encode()).hexdigest()[:16]
+    
+    def save_assignment_progress(self, assignment_id: str, progress_data: Dict[str, Any]):
+        """Save progress data for an assignment"""
+        if "assignment_progress" not in self.config_data:
+            self.config_data["assignment_progress"] = {}
+        
+        self.config_data["assignment_progress"][assignment_id] = progress_data
+        self.save_config()
+    
+    def load_assignment_progress(self, assignment_id: str) -> Optional[Dict[str, Any]]:
+        """Load progress data for an assignment"""
+        return self.config_data.get("assignment_progress", {}).get(assignment_id)
+    
+    def update_game_completion(self, assignment_id: str, table_id: str, success: bool):
+        """Update completion status for a specific game"""
+        from datetime import datetime
+        
+        progress = self.load_assignment_progress(assignment_id)
+        if not progress:
+            # Initialize progress if it doesn't exist
+            progress = {
+                "completed_games": [],
+                "failed_games": [],
+                "last_processed_index": -1,
+                "counters": {
+                    "total_items": 0,
+                    "completed_items": 0,
+                    "successful_items": 0,
+                    "failed_items": 0
+                },
+                "timestamps": {
+                    "started_at": datetime.now().isoformat(),
+                    "last_updated": datetime.now().isoformat()
+                }
+            }
+        
+        # Update game completion
+        table_id_str = str(table_id)
+        if success:
+            if table_id_str not in progress["completed_games"]:
+                progress["completed_games"].append(table_id_str)
+                progress["counters"]["successful_items"] += 1
+            # Remove from failed if it was there
+            if table_id_str in progress["failed_games"]:
+                progress["failed_games"].remove(table_id_str)
+                progress["counters"]["failed_items"] -= 1
+        else:
+            if table_id_str not in progress["failed_games"]:
+                progress["failed_games"].append(table_id_str)
+                progress["counters"]["failed_items"] += 1
+            # Remove from completed if it was there
+            if table_id_str in progress["completed_games"]:
+                progress["completed_games"].remove(table_id_str)
+                progress["counters"]["successful_items"] -= 1
+        
+        # Update counters
+        progress["counters"]["completed_items"] = len(progress["completed_games"]) + len(progress["failed_games"])
+        progress["timestamps"]["last_updated"] = datetime.now().isoformat()
+        
+        # Save updated progress
+        self.save_assignment_progress(assignment_id, progress)
+    
+    def clear_assignment_progress(self, assignment_id: str):
+        """Clear progress data for an assignment"""
+        if "assignment_progress" in self.config_data:
+            self.config_data["assignment_progress"].pop(assignment_id, None)
+            self.save_config()
+    
+    def get_all_assignment_progress(self) -> Dict[str, Dict[str, Any]]:
+        """Get all assignment progress data"""
+        return self.config_data.get("assignment_progress", {})
+    
+    def cleanup_old_progress(self, days_old: int = 7):
+        """Clean up progress data older than specified days"""
+        from datetime import datetime, timedelta
+        
+        if "assignment_progress" not in self.config_data:
+            return
+        
+        cutoff_date = datetime.now() - timedelta(days=days_old)
+        progress_data = self.config_data["assignment_progress"]
+        
+        # Find old progress entries
+        old_assignments = []
+        for assignment_id, progress in progress_data.items():
+            try:
+                last_updated = datetime.fromisoformat(progress.get("timestamps", {}).get("last_updated", ""))
+                if last_updated < cutoff_date:
+                    old_assignments.append(assignment_id)
+            except (ValueError, TypeError):
+                # If we can't parse the date, consider it old
+                old_assignments.append(assignment_id)
+        
+        # Remove old progress entries
+        for assignment_id in old_assignments:
+            progress_data.pop(assignment_id, None)
+        
+        if old_assignments:
+            self.save_config()
+            print(f"Cleaned up {len(old_assignments)} old progress entries")
