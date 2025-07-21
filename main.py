@@ -372,7 +372,7 @@ def process_single_player(player_id: str, scraper: TMScraper, args) -> None:
             continue
         
         try:
-            result = scraper.scrape_table_only(table_id, player_id, save_raw=False, 
+            result = scraper.scrape_table_only(table_id, player_id, save_raw=True, 
                                              raw_data_dir=config.RAW_DATA_DIR)
             
             if result and result.get('success'):
@@ -553,7 +553,7 @@ def handle_scrape_complete(args) -> None:
                     continue
                 
                 try:
-                    result = scraper.scrape_table_and_replay(table_id, player_id, save_raw=False,
+                    result = scraper.scrape_table_and_replay(table_id, player_id, save_raw=True,
                                                            raw_data_dir=config.RAW_DATA_DIR)
                     
                     if result and result.get('success'):
@@ -719,7 +719,7 @@ def handle_scrape_replays(args) -> None:
                     replay_exists = True
                 else:
                     # Scrape replay only (table HTML already exists)
-                    replay_result = scraper.scrape_replay_from_table(table_id, player_perspective, save_raw=False,
+                    replay_result = scraper.scrape_replay_from_table(table_id, player_perspective, save_raw=True,
                                                                    raw_data_dir=config.RAW_DATA_DIR, version_id=version, 
                                                                    player_perspective=player_perspective)
                     
