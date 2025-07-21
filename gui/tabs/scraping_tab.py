@@ -811,14 +811,27 @@ class ScrapingTab:
                         break
                     
                     table_id = str(game.get("tableId", f"Unknown_{i}"))
+                    version_id = str(game.get("versionId", ""))
                     
                     self.frame.after(0, lambda tid=table_id: self.current_op_label.config(
                         text=f"Processing game {tid}", foreground="blue"
                     ))
                     
                     try:
-                        # Scrape table and replay, parse immediately (in memory)
-                        parsed_game_data = scraper.scrape_table_and_replay_memory(table_id, player_perspective_id)
+                        # Build assignment metadata for this game using actual assignment data
+                        assignment_metadata = {
+                            'gameMode': game.get('gameMode', 'Arena mode'),
+                            'versionId': version_id,
+                            'players': game.get('players', [])  # Use the actual players array from assignment
+                        }
+                        
+                        # Scrape replay only with assignment metadata (more efficient)
+                        parsed_game_data = scraper.scrape_replay_only_with_assignment_metadata(
+                            table_id=table_id,
+                            version_id=version_id,
+                            player_perspective=player_perspective_id,
+                            assignment_metadata=assignment_metadata
+                        )
                         
                         # Check for daily limit reached
                         if parsed_game_data and parsed_game_data.get('daily_limit_reached'):

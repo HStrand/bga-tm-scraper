@@ -2570,17 +2570,20 @@ class Parser:
                 player_name = player_meta.get('playerName', 'Unknown')
                 player_id = str(player_meta.get('playerId', ''))
                 elo = player_meta.get('elo', 0)
+                elo_change = player_meta.get('eloChange', 0)
+                arena_points = player_meta.get('arenaPoints')
+                arena_points_change = player_meta.get('arenaPointsChange')
                 position = player_meta.get('position', 1)
                 
-                # Create EloData object from assignment metadata
+                # Create EloData object from assignment metadata with full data
                 elo_data[player_name] = EloData(
                     player_name=player_name,
                     player_id=player_id,
                     position=position,
-                    arena_points=elo,  # Use ELO as arena points
-                    arena_points_change=0,  # Not available in assignment
-                    game_rank=elo,  # Use ELO as game rank
-                    game_rank_change=0  # Not available in assignment
+                    arena_points=arena_points,
+                    arena_points_change=arena_points_change,
+                    game_rank=elo,
+                    game_rank_change=elo_change
                 )
             
             # If no players were found in replay HTML, create them from assignment metadata
