@@ -892,6 +892,9 @@ class ScrapingTab:
                     
                     success = False
                     try:
+                        # Get the correct player perspective for THIS specific game
+                        game_player_perspective = str(game.get("playerPerspective"))
+                        
                         # Build assignment metadata for this game using actual assignment data
                         assignment_metadata = {
                             'gameMode': game.get('gameMode', 'Arena mode'),
@@ -903,7 +906,7 @@ class ScrapingTab:
                         parsed_game_data = scraper.scrape_replay_only_with_assignment_metadata(
                             table_id=table_id,
                             version_id=version_id,
-                            player_perspective=player_perspective_id,
+                            player_perspective=game_player_perspective,
                             assignment_metadata=assignment_metadata
                         )
                         

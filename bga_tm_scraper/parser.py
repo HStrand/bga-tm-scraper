@@ -2205,7 +2205,7 @@ class Parser:
             for entry in score_entries:
                 player_elo = self._parse_player_from_score_entry(entry)
                 if player_elo and 'player_name' in player_elo:
-                    player_name = player_elo.pop('player_name')
+                    player_name = player_elo['player_name']  # Don't pop, keep it in the dict
                     elo_data[player_name] = EloData(**player_elo)
                     logger.info(f"Parsed ELO data for {player_name}")
             
