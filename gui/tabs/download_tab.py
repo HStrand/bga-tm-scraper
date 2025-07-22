@@ -54,8 +54,7 @@ class DownloadTab:
         title_label.pack(pady=(0, 20))
         
         # Description
-        desc_text = """Download the complete BGA Terraforming Mars dataset.
-This includes all indexed games with metadata and detailed game logs."""
+        desc_text = """Download the complete BGA Terraforming Mars dataset."""
         
         desc_label = ttk.Label(main_frame, text=desc_text, justify="center")
         desc_label.pack(pady=(0, 30))
@@ -64,11 +63,11 @@ This includes all indexed games with metadata and detailed game logs."""
         info_frame = ttk.LabelFrame(main_frame, text="Dataset Information", padding=15)
         info_frame.pack(fill="x", pady=(0, 20))
         
-        info_text = """• Complete dataset with all available games
-• Game metadata and player information
+        info_text = """• A single ZIP file with all games
+• One JSON file per game
 • Detailed move-by-move game logs
-• ZIP format for easy extraction
-• Updated regularly with new data"""
+• NB: The ZIP archive is generated periodically to reduce server costs and might not contain all the latest games
+"""
         
         info_label = ttk.Label(info_frame, text=info_text, justify="left")
         info_label.pack(anchor="w")
@@ -124,14 +123,6 @@ This includes all indexed games with metadata and detailed game logs."""
         )
         self.cancel_btn.pack(side="left", padx=(0, 10))
         
-        # Get info button
-        info_btn = ttk.Button(
-            controls_frame,
-            text="ℹ️ Dataset Details",
-            command=self.show_dataset_details
-        )
-        info_btn.pack(side="left")
-        
         # Progress section
         progress_frame = ttk.LabelFrame(main_frame, text="Download Progress", padding=15)
         progress_frame.pack(fill="both", expand=True)
@@ -179,41 +170,6 @@ This includes all indexed games with metadata and detailed game logs."""
         if folder:
             self.location_var.set(folder)
     
-    def show_dataset_details(self):
-        """Show detailed information about the dataset"""
-        info_text = """BGA Terraforming Mars Complete Dataset
-
-Content:
-• All indexed games from BoardGameArena
-• Complete game metadata (players, ELO, dates, etc.)
-• Detailed move-by-move game logs
-• Player statistics and performance data
-• Corporation and card usage statistics
-
-Format:
-• ZIP archive containing JSON files
-• Structured data ready for analysis
-• Compatible with data analysis tools
-
-File Size:
-• Large file (several hundred MB to GB)
-• Download time depends on internet speed
-• Requires stable internet connection
-
-Updates:
-• Dataset is updated regularly
-• Contains the most recent game data available
-• Historical data preserved
-
-Usage:
-• Extract ZIP file after download
-• Use JSON files for data analysis
-• Compatible with Python, R, and other tools
-
-Note: This download uses Google Drive and may show a virus scan warning for large files. This is normal and safe to proceed."""
-        
-        messagebox.showinfo("Dataset Details", info_text)
-    
     def start_download(self):
         """Start the download process"""
         if self.is_downloading:
@@ -233,8 +189,7 @@ Note: This download uses Google Drive and may show a virus scan warning for larg
         # Confirm download
         if not messagebox.askyesno("Start Download", 
                                   "Download the complete BGA Terraforming Mars dataset?\n\n"
-                                  "This is a large file and may take several minutes to download.\n"
-                                  "You may see a virus scan warning from Google Drive - this is normal."):
+                                  "This is a large file and may take several minutes to download."):
             return
         
         # Initialize download

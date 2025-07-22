@@ -108,7 +108,6 @@ class SettingsTab:
         self.create_browser_section(scrollable_frame)
         self.create_api_section(scrollable_frame)
         self.create_scraping_section(scrollable_frame)
-        self.create_email_section(scrollable_frame)
         
         # Add a visual separator
         separator = ttk.Separator(main_container, orient="horizontal")
@@ -271,53 +270,6 @@ class SettingsTab:
                                   values=["FAST", "NORMAL", "SLOW"], state="readonly", width=15)
         speed_combo.pack(side="right")
     
-    def create_email_section(self, parent):
-        """Create email notification settings section"""
-        section_frame = ttk.LabelFrame(parent, text="Email Notifications", padding=10)
-        section_frame.pack(fill="x", padx=10, pady=5)
-        
-        # Enable notifications
-        enable_cb = ttk.Checkbutton(section_frame, text="Enable email notifications", 
-                                   variable=self.email_enabled_var,
-                                   command=self.toggle_email_settings)
-        enable_cb.pack(anchor="w", pady=2)
-        
-        # Email settings frame (will be enabled/disabled)
-        self.email_settings_frame = ttk.Frame(section_frame)
-        self.email_settings_frame.pack(fill="x", pady=5)
-        
-        # Sender email
-        ttk.Label(self.email_settings_frame, text="Sender Email (Gmail):").pack(anchor="w", pady=(0, 2))
-        sender_entry = ttk.Entry(self.email_settings_frame, textvariable=self.sender_email_var, width=50)
-        sender_entry.pack(fill="x", pady=(0, 5))
-        
-        # App password
-        ttk.Label(self.email_settings_frame, text="Gmail App Password:").pack(anchor="w", pady=(0, 2))
-        app_password_entry = ttk.Entry(self.email_settings_frame, textvariable=self.app_password_var, 
-                                      width=50, show="*")
-        app_password_entry.pack(fill="x", pady=(0, 5))
-        
-        # Recipient email
-        ttk.Label(self.email_settings_frame, text="Recipient Email (optional):").pack(anchor="w", pady=(0, 2))
-        recipient_entry = ttk.Entry(self.email_settings_frame, textvariable=self.recipient_email_var, width=50)
-        recipient_entry.pack(fill="x", pady=(0, 5))
-        
-        # Notification triggers
-        ttk.Label(self.email_settings_frame, text="Send notifications for:", 
-                 font=("TkDefaultFont", 9, "bold")).pack(anchor="w", pady=(5, 2))
-        
-        completion_cb = ttk.Checkbutton(self.email_settings_frame, text="Scraping completion", 
-                                       variable=self.notify_completion_var)
-        completion_cb.pack(anchor="w", pady=1)
-        
-        error_cb = ttk.Checkbutton(self.email_settings_frame, text="Errors", 
-                                  variable=self.notify_error_var)
-        error_cb.pack(anchor="w", pady=1)
-        
-        limit_cb = ttk.Checkbutton(self.email_settings_frame, text="Daily limit reached", 
-                                  variable=self.notify_limit_var)
-        limit_cb.pack(anchor="w", pady=1)
-    
     def create_buttons_section(self, parent):
         """Create action buttons section"""
         # Create a horizontal button layout for bottom panel
@@ -462,19 +414,6 @@ class SettingsTab:
         self.request_delay_var.set(scraping_settings.get("request_delay", 1.0))
         self.max_retries_var.set(scraping_settings.get("max_retries", 3))
         self.speed_profile_var.set(scraping_settings.get("speed_profile", "FAST"))
-        
-        # Email Settings
-        email_settings = self.config_manager.get_section("email_settings")
-        self.email_enabled_var.set(email_settings.get("enabled", False))
-        self.sender_email_var.set(email_settings.get("sender_email", ""))
-        self.app_password_var.set(email_settings.get("app_password", ""))
-        self.recipient_email_var.set(email_settings.get("recipient_email", ""))
-        self.notify_completion_var.set(email_settings.get("notify_on_completion", True))
-        self.notify_error_var.set(email_settings.get("notify_on_error", True))
-        self.notify_limit_var.set(email_settings.get("notify_on_daily_limit", True))
-        
-        # Update email settings state
-        self.toggle_email_settings()
     
     def save_settings(self):
         """Save current settings to config manager"""

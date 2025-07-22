@@ -399,13 +399,13 @@ class StatisticsTab:
             motivation_frame = ttk.Frame(self.personal_stats_frame)
             motivation_frame.pack(fill="x", pady=(15, 0))
             
-            if personal_games >= 100:
+            if personal_games >= 2000:
                 message = "🌟 Amazing contributor! Thank you for your dedication!"
                 color = "#059669"
-            elif personal_games >= 50:
+            elif personal_games >= 1000:
                 message = "🚀 Great work! You're making a real impact!"
                 color = "#2563eb"
-            elif personal_games >= 10:
+            elif personal_games >= 150:
                 message = "👍 Nice progress! Keep up the good work!"
                 color = "#7c3aed"
             else:
