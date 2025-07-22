@@ -5,6 +5,7 @@ Main Window for BGA TM Scraper GUI Application
 import tkinter as tk
 from tkinter import ttk, messagebox
 import sys
+import os
 from pathlib import Path
 
 from gui.components.config_manager import ConfigManager
@@ -32,6 +33,17 @@ class MainWindow:
         # Handle window closing
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
     
+    def get_resource_path(self, relative_path):
+        """Get absolute path to resource, works for dev and for PyInstaller"""
+        try:
+            # PyInstaller creates a temp folder and stores path in _MEIPASS
+            base_path = sys._MEIPASS
+        except Exception:
+            # If not running as PyInstaller bundle, use the script directory
+            base_path = os.path.abspath(".")
+        
+        return os.path.join(base_path, relative_path)
+    
     def setup_window(self):
         """Configure the main window"""
         self.root.title("BGA TM Scraper")
@@ -42,18 +54,81 @@ class MainWindow:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         
-        # Set window icon to our custom Mars icon
+        # Set window and taskbar icon to our custom Mars icon
+        self._set_window_icon()
+    
+    def _set_window_icon(self):
+        """Set both window and taskbar icons"""
+        icon_paths_to_try = []
+        
+        # Try bundled resource path first (for PyInstaller)
         try:
-            # Try to load the Mars icon
-            self.root.iconbitmap("assets/mars_icon.ico")
-        except Exception as e:
-            # Fallback if icon file is not found
-            print(f"Could not load icon: {e}")
+            bundled_path = self.get_resource_path("assets/mars_icon.ico")
+            if os.path.exists(bundled_path):
+                icon_paths_to_try.append(bundled_path)
+        except:
+            pass
+        
+        # Try relative path (for development)
+        if os.path.exists("assets/mars_icon.ico"):
+            icon_paths_to_try.append("assets/mars_icon.ico")
+        
+        # Try to set the icon using available paths
+        icon_set = False
+        for icon_path in icon_paths_to_try:
             try:
-                # Try default system icon as fallback
+                # Set both window icon and taskbar icon
+                self.root.iconbitmap(icon_path)
+                # Also try wm_iconbitmap for better Windows compatibility
+                self.root.wm_iconbitmap(icon_path)
+                print(f"Successfully set icon using: {icon_path}")
+                icon_set = True
+                break
+            except Exception as e:
+                print(f"Failed to set icon with {icon_path}: {e}")
+                continue
+        
+        if not icon_set:
+            print("Could not set custom icon, using default")
+            try:
+                # Try default system icon as final fallback
                 self.root.iconbitmap(default="")
             except:
                 pass
+        
+        # Force icon update after window is shown
+        self.root.after(100, self._force_icon_update)
+    
+    def _force_icon_update(self):
+        """Force update the taskbar icon after window is fully initialized"""
+        try:
+            # Try to refresh the icon after the window is shown
+            icon_paths_to_try = []
+            
+            # Try bundled resource path first
+            try:
+                bundled_path = self.get_resource_path("assets/mars_icon.ico")
+                if os.path.exists(bundled_path):
+                    icon_paths_to_try.append(bundled_path)
+            except:
+                pass
+            
+            # Try relative path
+            if os.path.exists("assets/mars_icon.ico"):
+                icon_paths_to_try.append("assets/mars_icon.ico")
+            
+            for icon_path in icon_paths_to_try:
+                try:
+                    # Force update both window and taskbar icon
+                    self.root.iconbitmap(icon_path)
+                    self.root.wm_iconbitmap(icon_path)
+                    # Update window to force taskbar refresh
+                    self.root.update_idletasks()
+                    break
+                except:
+                    continue
+        except:
+            pass
     
     def create_menu(self):
         """Create the application menu bar"""
