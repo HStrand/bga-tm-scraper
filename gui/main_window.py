@@ -162,11 +162,13 @@ class MainWindow:
         self.download_tab = DownloadTab(self.notebook, self.config_manager)
         self.analysis_tab = AnalysisTab(self.notebook, self.config_manager)
 
+
         # Add tabs to notebook
         self.notebook.add(self.settings_tab.frame, text="⚙️ Settings")
         self.notebook.add(self.scraping_tab.frame, text="🚀 Scraping")
         self.notebook.add(self.download_tab.frame, text="💾 Download Data")
         self.notebook.add(self.statistics_tab.frame, text="📊 Statistics")
+        self.notebook.add(self.analysis_tab.frame, text="📈 Analysis")
         
         # Bind tab change event
         self.notebook.bind("<<NotebookTabChanged>>", self.on_tab_changed)
