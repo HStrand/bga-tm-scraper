@@ -264,6 +264,86 @@ class APIClient:
             logger.error(f"Error getting statistics for {email}: {e}")
             return None
     
+    def get_latest_zip_info(self) -> Optional[Dict[str, Any]]:
+        """
+        Get information about the latest ZIP file from the API
+        
+        Returns:
+            dict: File information with keys: success, fileName, sizeInBytes, sizeFormatted
+                  or None if failed
+        """
+        try:
+            logger.info("Getting latest ZIP file information from API")
+            
+            response = self._make_request("GetLatestZipSize")
+            
+            if response and response.get('success'):
+                logger.info(f"Got file info: {response.get('fileName')} ({response.get('sizeFormatted')})")
+                return response
+            else:
+                logger.error("API returned success=false for file info request")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Unexpected error getting file info: {e}")
+            return None
+    
+    def download_latest_zip(self, file_path: str, progress_callback=None, total_size=None) -> bool:
+        """
+        Download the latest ZIP file from the API
+        
+        Args:
+            file_path: Local path where the file should be saved
+            progress_callback: Optional callback function(downloaded_bytes, total_bytes)
+            total_size: Optional total file size (if known from get_latest_zip_info)
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            # Build URL with API key using the configured base URL and API key
+            url = f"{self.base_url}/DownloadLatestZip"
+            params = {'code': self.api_key}
+            
+            logger.info(f"Starting download from API to {file_path}")
+            
+            # Make request with streaming to handle large files
+            response = requests.get(url, params=params, stream=True, timeout=300)  # 5 minute timeout
+            response.raise_for_status()
+            
+            # If total_size wasn't provided, try to get it from response headers
+            if total_size is None:
+                content_length = response.headers.get('content-length')
+                if content_length:
+                    total_size = int(content_length)
+                    logger.info(f"File size from headers: {total_size} bytes")
+            else:
+                logger.info(f"Using provided file size: {total_size} bytes")
+            
+            # Write the file in chunks with progress tracking
+            downloaded_size = 0
+            chunk_size = 8192
+            
+            with open(file_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=chunk_size):
+                    if chunk:  # Filter out keep-alive chunks
+                        f.write(chunk)
+                        downloaded_size += len(chunk)
+                        
+                        # Call progress callback if provided
+                        if progress_callback:
+                            progress_callback(downloaded_size, total_size)
+            
+            logger.info(f"Successfully downloaded file to {file_path}")
+            return True
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Download request failed: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error during download: {e}")
+            return False
+    
     def test_connection(self) -> bool:
         """
         Test the API connection

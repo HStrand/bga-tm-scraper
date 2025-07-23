@@ -1,19 +1,17 @@
 """
 Download Tab for BGA TM Scraper GUI
-Handles downloading the complete dataset from Google Drive
+Handles downloading the complete dataset from the API
 """
 
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import threading
-import time
 import os
-import subprocess
 from datetime import datetime, timedelta
 
 
 class DownloadTab:
-    """Download tab for retrieving the complete dataset from Google Drive"""
+    """Download tab for retrieving the complete dataset from the API"""
     
     def __init__(self, parent, config_manager):
         self.parent = parent
@@ -21,10 +19,6 @@ class DownloadTab:
         
         # Create main frame
         self.frame = ttk.Frame(parent)
-        
-        # Google Drive file configuration
-        self.file_id = "1DSaPGKnp196yY3PhZ7gSFHdUOmmc-Jxu"
-        self.file_url = f"https://drive.google.com/uc?id={self.file_id}"
         
         # Download state
         self.is_downloading = False
@@ -127,12 +121,32 @@ class DownloadTab:
         progress_frame = ttk.LabelFrame(main_frame, text="Download Progress", padding=15)
         progress_frame.pack(fill="both", expand=True)
         
+        # Progress bar
+        progress_bar_frame = ttk.Frame(progress_frame)
+        progress_bar_frame.pack(fill="x", pady=(0, 10))
+        
+        self.progress_bar = ttk.Progressbar(
+            progress_bar_frame,
+            mode='determinate',
+            length=400
+        )
+        self.progress_bar.pack(fill="x", pady=(0, 5))
+        
         # Progress info
         progress_info_frame = ttk.Frame(progress_frame)
         progress_info_frame.pack(fill="x", pady=(0, 10))
         
         self.progress_label = ttk.Label(progress_info_frame, text="Ready to download")
         self.progress_label.pack(side="left")
+        
+        # Progress details (size, speed, ETA)
+        self.progress_details_label = ttk.Label(
+            progress_frame,
+            text="",
+            font=("TkDefaultFont", 9),
+            foreground="gray"
+        )
+        self.progress_details_label.pack(anchor="w", pady=(0, 10))
         
         # Status log
         log_frame = ttk.Frame(progress_frame)
@@ -159,7 +173,7 @@ class DownloadTab:
         log_scrollbar.pack(side="right", fill="y")
         
         # Initial log message
-        self.log_message("Ready to download complete dataset from Google Drive")
+        self.log_message("Ready to download complete dataset from API")
     
     def browse_location(self):
         """Browse for download location"""
@@ -213,9 +227,9 @@ class DownloadTab:
         self.downloaded_size = 0
         self.download_speed = 0
         
-        self.log_message("Starting download from Google Drive")
+        self.log_message("Starting download from API")
         self.log_message(f"File: {filename}")
-        self.log_message("Connecting to Google Drive...")
+        self.log_message("Connecting to API...")
         
         # Start download in background thread
         self.download_thread = threading.Thread(target=self._download_worker, daemon=True)
@@ -233,51 +247,137 @@ class DownloadTab:
             self.should_stop = True
             self.log_message("Cancelling download...")
     
+    def _progress_callback(self, downloaded_bytes, total_bytes):
+        """Progress callback function called by the API client"""
+        if self.should_stop:
+            return
+        
+        # Update progress data
+        self.downloaded_size = downloaded_bytes
+        if total_bytes:
+            self.total_size = total_bytes
+        
+        # Calculate speed and ETA
+        current_time = datetime.now()
+        if self.last_update_time and (current_time - self.last_update_time).total_seconds() >= 0.5:
+            # Update speed calculation every 0.5 seconds
+            time_diff = (current_time - self.last_update_time).total_seconds()
+            bytes_diff = downloaded_bytes - self.last_downloaded_size
+            
+            if time_diff > 0:
+                self.download_speed = bytes_diff / time_diff
+            
+            self.last_update_time = current_time
+            self.last_downloaded_size = downloaded_bytes
+        elif self.last_update_time is None:
+            self.last_update_time = current_time
+            self.last_downloaded_size = downloaded_bytes
+        
+        # Schedule UI update on main thread
+        self.frame.after(0, self._update_progress_ui)
+    
+    def _update_progress_ui(self):
+        """Update the progress UI elements (called on main thread)"""
+        if not self.is_downloading:
+            return
+        
+        # Update progress bar
+        if self.total_size and self.total_size > 0:
+            progress_percent = (self.downloaded_size / self.total_size) * 100
+            self.progress_bar['value'] = progress_percent
+            self.progress_bar['mode'] = 'determinate'
+        else:
+            # Indeterminate mode if we don't know total size
+            self.progress_bar['mode'] = 'indeterminate'
+            if not hasattr(self, '_indeterminate_started'):
+                self.progress_bar.start(10)
+                self._indeterminate_started = True
+        
+        # Update progress label
+        if self.total_size and self.total_size > 0:
+            downloaded_mb = self.downloaded_size / (1024 * 1024)
+            total_mb = self.total_size / (1024 * 1024)
+            progress_percent = (self.downloaded_size / self.total_size) * 100
+            self.progress_label.config(text=f"Downloading... {progress_percent:.1f}%")
+            
+            # Update details label
+            details = f"Downloaded {downloaded_mb:.1f} MB / {total_mb:.1f} MB"
+            
+            if self.download_speed > 0:
+                speed_mb = self.download_speed / (1024 * 1024)
+                details += f" - Speed: {speed_mb:.1f} MB/s"
+                
+                # Calculate ETA
+                remaining_bytes = self.total_size - self.downloaded_size
+                if remaining_bytes > 0:
+                    eta_seconds = remaining_bytes / self.download_speed
+                    if eta_seconds < 60:
+                        eta_str = f"{int(eta_seconds)}s"
+                    elif eta_seconds < 3600:
+                        eta_str = f"{int(eta_seconds // 60)}m {int(eta_seconds % 60)}s"
+                    else:
+                        hours = int(eta_seconds // 3600)
+                        minutes = int((eta_seconds % 3600) // 60)
+                        eta_str = f"{hours}h {minutes}m"
+                    details += f" - ETA: {eta_str}"
+            
+            self.progress_details_label.config(text=details)
+        else:
+            self.progress_label.config(text="Downloading...")
+            downloaded_mb = self.downloaded_size / (1024 * 1024)
+            self.progress_details_label.config(text=f"Downloaded {downloaded_mb:.1f} MB")
+    
     def _download_worker(self):
-        """Background worker for actual Google Drive download using subprocess to capture output"""
+        """Background worker for API download"""
         try:
-            self.frame.after(0, lambda: self.log_message("Starting gdown process..."))
+            from gui.api_client import APIClient
             
-            # Use subprocess to run gdown and capture its output
-            cmd = [
-                'python', '-m', 'gdown',
-                self.file_url,
-                '-O', self.download_path,
-                '--fuzzy'
-            ]
+            self.frame.after(0, lambda: self.log_message("Getting file information..."))
             
-            # Start the subprocess
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                universal_newlines=True,
-                bufsize=1
+            # Get API key from config
+            api_key = self.config_manager.get_value("api_settings", "api_key", "")
+            
+            if not api_key:
+                self.frame.after(0, lambda: self.log_message("❌ API key not configured. Please set it in Settings."))
+                return
+            
+            # Create API client
+            from gui.api_client import APIClient
+            api_client = APIClient(api_key)
+            
+            # Check if download should be cancelled before starting
+            if self.should_stop:
+                self.frame.after(0, lambda: self.log_message("❌ Download cancelled"))
+                return
+            
+            # First, get file information
+            file_info = api_client.get_latest_zip_info()
+            if file_info and file_info.get('success'):
+                # Set the total size from the API response
+                self.total_size = file_info.get('sizeInBytes', 0)
+                file_name = file_info.get('fileName', 'unknown')
+                size_formatted = file_info.get('sizeFormatted', 'unknown size')
+                
+                self.frame.after(0, lambda: self.log_message(f"File: {file_name} ({size_formatted})"))
+                self.frame.after(0, lambda: self.log_message("Starting download..."))
+            else:
+                self.frame.after(0, lambda: self.log_message("⚠️ Could not get file info, proceeding with download..."))
+            
+            # Check again if download should be cancelled
+            if self.should_stop:
+                self.frame.after(0, lambda: self.log_message("❌ Download cancelled"))
+                return
+            
+            # Perform the download with progress callback and known file size
+            success = api_client.download_latest_zip(
+                self.download_path, 
+                self._progress_callback, 
+                self.total_size if self.total_size > 0 else None
             )
             
-            # Read output line by line and pipe to status log
-            while True:
-                if self.should_stop:
-                    process.terminate()
-                    break
-                
-                output = process.stdout.readline()
-                if output == '' and process.poll() is not None:
-                    break
-                
-                if output:
-                    # Clean up the output line and add to log
-                    line = output.strip()
-                    if line:
-                        # Add the gdown output directly to the status log
-                        self.frame.after(0, lambda msg=line: self.log_message_raw(msg))
-            
-            # Wait for process to complete
-            return_code = process.poll()
-            
-            if return_code == 0 and not self.should_stop:
-                # Get final file size
-                if os.path.exists(self.download_path):
+            if success and not self.should_stop:
+                # Get final file size if not already set
+                if os.path.exists(self.download_path) and self.total_size == 0:
                     self.total_size = os.path.getsize(self.download_path)
                     self.downloaded_size = self.total_size
                 
@@ -290,14 +390,14 @@ class DownloadTab:
                 
         except Exception as e:
             error_msg = str(e)
-            if "quota" in error_msg.lower():
-                error_msg = "Google Drive download quota exceeded. Please try again later."
+            if "timeout" in error_msg.lower():
+                error_msg = "Download timeout. The file may be very large. Please try again."
             elif "network" in error_msg.lower() or "connection" in error_msg.lower():
                 error_msg = "Network connection error. Please check your internet connection."
             elif "permission" in error_msg.lower():
                 error_msg = "Permission denied. Please check the download location."
-            elif "not found" in error_msg.lower():
-                error_msg = "gdown not found. Please install it with: pip install gdown"
+            elif "404" in error_msg or "not found" in error_msg.lower():
+                error_msg = "File not found on server. Please try again later."
             
             self.frame.after(0, lambda: self.log_message(f"❌ Download error: {error_msg}"))
         
@@ -343,12 +443,19 @@ class DownloadTab:
         """Clean up after download is finished"""
         self.is_downloading = False
         
+        # Stop indeterminate progress bar if it was started
+        if hasattr(self, '_indeterminate_started'):
+            self.progress_bar.stop()
+            delattr(self, '_indeterminate_started')
+        
         # Update UI
         self.download_btn.config(state="normal")
         self.cancel_btn.config(state="disabled")
         
         if self.should_stop:
             self.progress_label.config(text="Download cancelled")
+            self.progress_details_label.config(text="")
+            self.progress_bar['value'] = 0
             self.log_message("❌ Download cancelled by user")
             
             # Clean up partial file
@@ -360,6 +467,17 @@ class DownloadTab:
                     self.log_message(f"Could not clean up file: {str(e)}")
         else:
             self.progress_label.config(text="Download completed")
+            # Keep progress bar at 100% and details showing final stats
+            if self.total_size > 0:
+                self.progress_bar['value'] = 100
+                downloaded_mb = self.total_size / (1024 * 1024)
+                if self.start_time:
+                    elapsed = datetime.now() - self.start_time
+                    if elapsed.total_seconds() > 0:
+                        avg_speed = downloaded_mb / elapsed.total_seconds()
+                        self.progress_details_label.config(
+                            text=f"Downloaded {downloaded_mb:.1f} MB - Average speed: {avg_speed:.1f} MB/s"
+                        )
     
     def _update_progress_timer(self):
         """Update progress indicators"""
@@ -377,15 +495,6 @@ class DownloadTab:
         """Add a message to the status log with timestamp"""
         timestamp = datetime.now().strftime("%H:%M:%S")
         log_entry = f"[{timestamp}] {message}\n"
-        
-        self.log_text.config(state=tk.NORMAL)
-        self.log_text.insert(tk.END, log_entry)
-        self.log_text.see(tk.END)  # Auto-scroll to bottom
-        self.log_text.config(state=tk.DISABLED)
-    
-    def log_message_raw(self, message):
-        """Add a raw message to the status log without timestamp (for gdown output)"""
-        log_entry = f"{message}\n"
         
         self.log_text.config(state=tk.NORMAL)
         self.log_text.insert(tk.END, log_entry)

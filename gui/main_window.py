@@ -182,6 +182,25 @@ class MainWindow:
             anchor=tk.W
         )
         self.status_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        # Version label
+        try:
+            from gui.version import BUILD_VERSION
+            version_string = BUILD_VERSION
+        except ImportError:
+            # Fallback for development (when version.py doesn't exist)
+            from datetime import datetime, timezone
+            version_string = datetime.now(timezone.utc).strftime("v%Y.%m.%d.%H%M-dev")
+        
+        self.version_label = ttk.Label(
+            self.status_frame,
+            text=version_string,
+            relief=tk.SUNKEN,
+            anchor=tk.E,
+            font=("TkDefaultFont", 8),
+            foreground="gray"
+        )
+        self.version_label.pack(side=tk.RIGHT, padx=(5, 0))
     
     def load_window_state(self):
         """Load saved window state from config"""
