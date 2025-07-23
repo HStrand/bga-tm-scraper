@@ -143,7 +143,8 @@ class AnalysisTab:
             "Player max. Elo": self.create_filter_field(filter_frame, "Player max. Elo"),
             "Opponent min. Elo": self.create_filter_field(filter_frame, "Opponent min. Elo"),
             "Opponent max. Elo": self.create_filter_field(filter_frame, "Opponent max. Elo"),
-            "Corporation": self.create_filter_field(filter_frame, "Corporation", values=self.corporations)
+            "Corporation": self.create_filter_field(filter_frame, "Corporation", values=self.corporations),
+            "Opponent Corporation": self.create_filter_field(filter_frame, "Opponent Corporation", values=self.corporations)
             #"Starting Hand Option": self.create_filter_field(filter_frame, "Starting Hand Option"),
             #"Card Played": self.create_filter_field(filter_frame, "Card Played")
         }
@@ -354,6 +355,17 @@ class AnalysisTab:
                                 corporation = self.filters["Corporation"]["value"].get()
                                 player_perspective = data.get("player_perspective")
                                 if corporation != data.get("players").get(player_perspective).get("corporation"):
+                                    continue
+
+                            # Opponent corporation filter
+                            if self.filters["Opponent Corporation"]["enabled"].get():
+                                player_perspective = data.get("player_perspective")
+                                players = data.get("players")
+                                opponent_corporation = ""
+                                for player in players:
+                                    if player != player_perspective:
+                                        opponent_corporation = players.get(player).get("corporation")
+                                if opponent_corporation != self.filters["Opponent Corporation"]["value"].get():
                                     continue
 
                             # If all filters pass, analyze the game
