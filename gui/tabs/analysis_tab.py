@@ -176,8 +176,8 @@ class AnalysisTab:
         analysis_frame.pack(fill=tk.X, padx=5, pady=5)
 
         # Analyze button
-        analyze_button = ttk.Button(analysis_frame, text="Analyze!", command=self.run_analysis)
-        analyze_button.pack(fill=tk.X, pady=5)
+        self.analyze_button = ttk.Button(analysis_frame, text="Analyze!", command=self.run_analysis)
+        self.analyze_button.pack(fill=tk.X, pady=5)
 
         # Progress section
         progress_frame = ttk.Frame(analysis_frame)
@@ -229,6 +229,9 @@ class AnalysisTab:
         if not self.file_path_var.get():
             tk.messagebox.showerror("Error", "Please select a data source ZIP file first")
             return
+
+        # Disable analyze button
+        self.analyze_button.configure(state='disabled')
 
         # Reset progress
         self.progress_bar["value"] = 0
@@ -424,6 +427,10 @@ class AnalysisTab:
 
     def _update_results(self, total_games, wins, total_elo_change, matching_replay_ids, card_wins, card_games):
         """Update all results in the GUI - called from the main thread"""
+        # Re-enable analyze button
+        self.analyze_button.configure(state='normal')
+        
+        # Rest of the method remains the same...
         # Win rate
         if total_games > 0:
             win_rate = (wins / total_games) * 100
