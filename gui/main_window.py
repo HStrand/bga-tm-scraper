@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from gui.components.config_manager import ConfigManager
+from gui.tabs.analysis_tab import AnalysisTab
 from gui.tabs.settings_tab import SettingsTab
 from gui.tabs.scraping_tab import ScrapingTab
 from gui.tabs.statistics_tab import StatisticsTab
@@ -84,7 +85,8 @@ class MainWindow:
         self.scraping_tab = ScrapingTab(self.notebook, self.config_manager)
         self.statistics_tab = StatisticsTab(self.notebook, self.config_manager)
         self.download_tab = DownloadTab(self.notebook, self.config_manager)
-        
+        self.analysis_tab = AnalysisTab(self.notebook, self.config_manager)
+
         # Add tabs to notebook
         self.notebook.add(self.settings_tab.frame, text="⚙️ Settings")
         self.notebook.add(self.scraping_tab.frame, text="🚀 Scraping")
