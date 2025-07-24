@@ -111,7 +111,7 @@ def update_single_game(game_data: Dict[str, Any]) -> bool:
         bool: True if successful, False otherwise
     """
     try:
-        url = f"http://localhost:7184/api/UpdateSingleGame?code={config.API_KEY}"
+        url = f"https://bga-tm-scraper-functions.azurewebsites.net/api/UpdateSingleGame?code={config.API_KEY}"
         response = requests.post(url, json=game_data, timeout=60)
         response.raise_for_status()
         
