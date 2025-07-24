@@ -333,7 +333,7 @@ class AnalysisTab:
                                 else:
                                     print("Opponent Elo OK")
 
-                            #Opponent max. Elo filter
+                            # Opponent max. Elo filter
                             if self.filters["Opponent max. Elo"]["enabled"].get():
                                 max_elo = int(self.filters["Opponent max. Elo"]["value"].get())
                                 player_perspective = str(data.get("player_perspective"))
@@ -379,11 +379,13 @@ class AnalysisTab:
                             # Get card keeps
                             keeps = []
                             if data.get("moves") and len(data.get("moves")) > 1: # Game can end without moves
-                                description = str(data.get("moves")[1]) # Get description of 2nd move
+                                description = str(data.get("moves")[1].get("description")) # Get description of 2nd move
                                 for string in description.split(" | "):
                                     if string.startswith("You buy"):
                                         keeps.append(string[8:])
                             for keep in keeps:
+                                if "Wild tags" in keep:
+                                    print("WILD TAGS FOUND")
                                 if keep not in card_games:
                                     card_games[keep] = 0
                                 card_games[keep] += 1
