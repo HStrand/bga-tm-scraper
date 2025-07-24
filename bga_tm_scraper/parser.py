@@ -34,6 +34,7 @@ class AssignmentMetadata:
     corporate_era_on: Optional[bool] = None
     draft_on: Optional[bool] = None
     beginners_corporations_on: Optional[bool] = None
+    game_speed: Optional[str] = None
     game_mode: Optional[str] = None
     version_id: Optional[str] = None
     players: Optional[List[Dict[str, Any]]] = None
@@ -111,6 +112,7 @@ class GameData:
     corporate_era_on: Optional[bool] = None
     draft_on: Optional[bool] = None
     beginners_corporations_on: Optional[bool] = None
+    game_speed: Optional[str] = None
     
     # Players
     players: Dict[str, Player] = None  # player_id -> Player
@@ -196,6 +198,7 @@ class Parser:
             corporate_era_on=assignment_metadata.corporate_era_on if assignment_metadata else None,
             draft_on=assignment_metadata.draft_on if assignment_metadata else None,
             beginners_corporations_on=assignment_metadata.beginners_corporations_on if assignment_metadata else None,
+            game_speed=assignment_metadata.game_speed if assignment_metadata else None,
             players=players_info,
             moves=moves_with_states,
             metadata=metadata
@@ -2611,6 +2614,7 @@ class Parser:
                 corporate_era_on=assignment_metadata.get('corporateEraOn'),
                 draft_on=assignment_metadata.get('draftOn'),
                 beginners_corporations_on=assignment_metadata.get('beginnersCorporationsOn'),
+                game_speed=assignment_metadata.get('gameSpeed'),
                 game_mode=assignment_metadata.get('gameMode', 'Arena mode'),
                 version_id=assignment_metadata.get('versionId'),
                 players=assignment_metadata.get('players', [])
