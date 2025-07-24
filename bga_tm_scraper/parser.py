@@ -25,6 +25,21 @@ class EloData:
     position: Optional[int] = None
 
 @dataclass
+class AssignmentMetadata:
+    """Represents metadata from assignment for replay scraping"""
+    played_at: Optional[str] = None  # ISO timestamp when game was played
+    map: Optional[str] = None
+    prelude_on: Optional[bool] = None
+    colonies_on: Optional[bool] = None
+    corporate_era_on: Optional[bool] = None
+    draft_on: Optional[bool] = None
+    beginners_corporations_on: Optional[bool] = None
+    game_speed: Optional[str] = None
+    game_mode: Optional[str] = None
+    version_id: Optional[str] = None
+    players: Optional[List[Dict[str, Any]]] = None
+
+@dataclass
 class GameState:
     """Represents the game state at a specific point in time"""
     move_number: int
@@ -90,14 +105,31 @@ class GameData:
     winner: str
     generations: int
     
+    # New assignment metadata fields (top-level)
+    map: Optional[str] = None
+    prelude_on: Optional[bool] = None
+    colonies_on: Optional[bool] = None
+    corporate_era_on: Optional[bool] = None
+    draft_on: Optional[bool] = None
+    beginners_corporations_on: Optional[bool] = None
+    game_speed: Optional[str] = None
+    
     # Players
-    players: Dict[str, Player]  # player_id -> Player
+    players: Dict[str, Player] = None  # player_id -> Player
     
     # All moves with game states
-    moves: List[Move]
+    moves: List[Move] = None
 
     # Analysis metadata
-    metadata: Dict[str, Any]
+    metadata: Dict[str, Any] = None
+    
+    def __post_init__(self):
+        if self.players is None:
+            self.players = {}
+        if self.moves is None:
+            self.moves = []
+        if self.metadata is None:
+            self.metadata = {}
 
 class Parser:
     """Comprehensive Terraforming Mars game log parser for BoardGameArena replays"""
@@ -105,7 +137,7 @@ class Parser:
     def __init__(self):
         pass
     
-    def parse_complete_game(self, html_content: str, replay_id: str, player_perspective: str) -> GameData:
+    def parse_complete_game(self, html_content: str, replay_id: str, player_perspective: str, assignment_metadata: Optional[AssignmentMetadata] = None) -> GameData:
         """Parse a complete game and return comprehensive data structure"""
         logger.info(f"Starting parsing for game {replay_id}")
         
@@ -151,14 +183,22 @@ class Parser:
         # Calculate max generation from vp_progression or moves
         max_generation = self._calculate_max_generation(vp_progression, moves_with_states)
         
-        # Create game data
+        # Create game data with assignment metadata fields
         game_data = GameData(
             replay_id=replay_id,
             player_perspective=player_perspective,
-            game_date=self._extract_game_date(soup),
+            game_date=self._extract_game_date(soup, assignment_metadata),
             game_duration=self._calculate_game_duration(moves_with_states),
             winner=winner,
             generations=max_generation,
+            # Add assignment metadata fields to top level
+            map=assignment_metadata.map if assignment_metadata else None,
+            prelude_on=assignment_metadata.prelude_on if assignment_metadata else None,
+            colonies_on=assignment_metadata.colonies_on if assignment_metadata else None,
+            corporate_era_on=assignment_metadata.corporate_era_on if assignment_metadata else None,
+            draft_on=assignment_metadata.draft_on if assignment_metadata else None,
+            beginners_corporations_on=assignment_metadata.beginners_corporations_on if assignment_metadata else None,
+            game_speed=assignment_metadata.game_speed if assignment_metadata else None,
             players=players_info,
             moves=moves_with_states,
             metadata=metadata
@@ -1585,9 +1625,18 @@ class Parser:
         
         return winners[0] if winners else "Unknown"
     
-    def _extract_game_date(self, soup: BeautifulSoup) -> str:
-        """Extract game date from HTML"""
-        # Look for date information in the HTML
+    def _extract_game_date(self, soup: BeautifulSoup, assignment_metadata: Optional[AssignmentMetadata] = None) -> str:
+        """Extract game date from HTML or assignment metadata"""
+        # If assignment metadata is provided and has playedAt timestamp, use it
+        if assignment_metadata and assignment_metadata.played_at:
+            try:
+                # Parse the ISO timestamp and convert to date
+                played_at_dt = datetime.fromisoformat(assignment_metadata.played_at.replace('Z', '+00:00'))
+                return played_at_dt.strftime("%Y-%m-%d")
+            except (ValueError, AttributeError) as e:
+                logger.warning(f"Failed to parse playedAt timestamp '{assignment_metadata.played_at}': {e}")
+        
+        # Fallback: Look for date information in the HTML
         # This would need to be customized based on BGA's HTML structure
         return datetime.now().strftime("%Y-%m-%d")
     
@@ -2556,10 +2605,25 @@ class Parser:
         try:
             logger.info(f"Parsing replay with assignment metadata for game {table_id}")
             
-            # Parse basic game data from replay HTML
-            game_data = self.parse_complete_game(replay_html, table_id, player_perspective)
+            # Create AssignmentMetadata object from the raw assignment data
+            assignment_meta_obj = AssignmentMetadata(
+                played_at=assignment_metadata.get('playedAt'),
+                map=assignment_metadata.get('map'),
+                prelude_on=assignment_metadata.get('preludeOn'),
+                colonies_on=assignment_metadata.get('coloniesOn'),
+                corporate_era_on=assignment_metadata.get('corporateEraOn'),
+                draft_on=assignment_metadata.get('draftOn'),
+                beginners_corporations_on=assignment_metadata.get('beginnersCorporationsOn'),
+                game_speed=assignment_metadata.get('gameSpeed'),
+                game_mode=assignment_metadata.get('gameMode', 'Arena mode'),
+                version_id=assignment_metadata.get('versionId'),
+                players=assignment_metadata.get('players', [])
+            )
             
-            # Extract assignment metadata
+            # Parse basic game data from replay HTML with assignment metadata
+            game_data = self.parse_complete_game(replay_html, table_id, player_perspective, assignment_meta_obj)
+            
+            # Extract assignment metadata for ELO processing
             game_mode = assignment_metadata.get('gameMode', 'Arena mode')
             version_id = assignment_metadata.get('versionId')
             players_metadata = assignment_metadata.get('players', [])

@@ -342,6 +342,90 @@ def initialize_scraper() -> TMScraper:
     return scraper
 
 
+def process_single_game(table_id: str, player_perspective: str, scraper: TMScraper, game_info: Dict[str, Any] = None) -> bool:
+    """
+    Process a single game - scrape table and submit to API
+    
+    Args:
+        table_id: BGA table ID
+        player_perspective: Player ID whose perspective this is from
+        scraper: Initialized TMScraper instance
+        game_info: Optional game info dict with raw_datetime and parsed_datetime
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        result = scraper.scrape_table_only(table_id, player_perspective, save_raw=True, 
+                                         raw_data_dir=config.RAW_DATA_DIR)
+        
+        if result and result.get('success'):
+            game_mode = result.get('game_mode', 'Normal mode')
+            map_name = result.get('map')
+            corporate_era_on = result.get('corporate_era_on')
+            prelude_on = result.get('prelude_on')
+            draft_on = result.get('draft_on')
+            colonies_on = result.get('colonies_on')
+            beginners_corporations_on = result.get('beginners_corporations_on')
+            game_speed = result.get('game_speed')
+            elo_data = result.get('elo_data', {})
+            version = result.get('version')
+            
+            # Convert EloData objects to dictionaries for JSON serialization
+            players_list = []
+            for player_name, elo_obj in elo_data.items():
+                player_dict = {
+                    'player_name': elo_obj.player_name or player_name,
+                    'player_id': elo_obj.player_id,
+                    'position': elo_obj.position,
+                    'arena_points': elo_obj.arena_points,
+                    'arena_points_change': elo_obj.arena_points_change,
+                    'game_rank': elo_obj.game_rank,
+                    'game_rank_change': elo_obj.game_rank_change
+                }
+                players_list.append(player_dict)
+            
+            # Create game data structure for single game API
+            game_api_data = {
+                'table_id': table_id,
+                'raw_datetime': game_info.get('raw_datetime') if game_info else 'unknown',
+                'parsed_datetime': game_info.get('parsed_datetime') if game_info else None,
+                'game_mode': game_mode,
+                'map': map_name,
+                'corporate_era_on': corporate_era_on,
+                'prelude_on': prelude_on,
+                'draft_on': draft_on,
+                'colonies_on': colonies_on,
+                'beginners_corporations_on': beginners_corporations_on,
+                'game_speed': game_speed,
+                'version': version,
+                'player_perspective': player_perspective,
+                'scraped_at': result.get('scraped_at'),
+                'players': players_list
+            }
+            
+            # POST single game to API immediately
+            if update_single_game(game_api_data):
+                logger.info(f"✅ Game {table_id} ({game_mode}) indexed successfully")
+                print(f"✅ Indexed game {table_id} ({game_mode})")
+                if map_name:
+                    print(f"   Map: {map_name}")
+                return True
+            else:
+                logger.error(f"❌ Failed to index game {table_id} via API")
+                print(f"❌ Failed to index game {table_id}")
+                return False
+        else:
+            logger.warning(f"❌ Failed to scrape game {table_id}")
+            print(f"❌ Failed to scrape game {table_id}")
+            return False
+    
+    except Exception as e:
+        logger.error(f"Error processing game {table_id}: {e}")
+        print(f"❌ Error processing game {table_id}: {e}")
+        return False
+
+
 def process_single_player(player_id: str, scraper: TMScraper, args) -> None:
     """Indexes a single player's games - uses API for filtering and saving each game individually"""
     
@@ -359,68 +443,24 @@ def process_single_player(player_id: str, scraper: TMScraper, args) -> None:
         logger.warning(f"No games found for player {player_id}")
         return
     
-    # Process each game individually
+    # Process each game individually using the reusable method
     games_processed = 0
     games_indexed = 0
     
     for game_info in games_data:
         table_id = game_info['table_id']
         
-        # Skip already indexed games
-        if table_id in indexed_games:
-            logger.info(f"Skipping already indexed game {table_id}")
-            continue
+        # TEMPORARY DON'T SKIP INDEXED GAMES
         
-        try:
-            result = scraper.scrape_table_only(table_id, player_id, save_raw=True, 
-                                             raw_data_dir=config.RAW_DATA_DIR)
-            
-            if result and result.get('success'):
-                game_mode = result.get('game_mode', 'Normal mode')
-                elo_data = result.get('elo_data', {})
-                version = result.get('version')
-                
-                # Convert EloData objects to dictionaries for JSON serialization
-                players_list = []
-                for player_name, elo_obj in elo_data.items():
-                    player_dict = {
-                        'player_name': elo_obj.player_name or player_name,
-                        'player_id': elo_obj.player_id,
-                        'position': elo_obj.position,
-                        'arena_points': elo_obj.arena_points,
-                        'arena_points_change': elo_obj.arena_points_change,
-                        'game_rank': elo_obj.game_rank,
-                        'game_rank_change': elo_obj.game_rank_change
-                    }
-                    players_list.append(player_dict)
-                
-                # Create game data structure for single game API
-                game_api_data = {
-                    'table_id': table_id,
-                    'raw_datetime': game_info['raw_datetime'],
-                    'parsed_datetime': game_info['parsed_datetime'],
-                    'game_mode': game_mode,
-                    'version': version,
-                    'player_perspective': player_id,
-                    'scraped_at': result.get('scraped_at'),
-                    'players': players_list
-                }
-                
-                # POST single game to API immediately
-                if update_single_game(game_api_data):
-                    games_indexed += 1
-                    logger.info(f"✅ Game {table_id} ({game_mode}) indexed successfully")
-                    print(f"✅ Indexed game {table_id} ({game_mode})")
-                else:
-                    logger.error(f"❌ Failed to index game {table_id} via API")
-                    print(f"❌ Failed to index game {table_id}")
-                
-                games_processed += 1
-            else:
-                logger.warning(f"❌ Failed to process game {table_id}")
+        # # Skip already indexed games
+        # if table_id in indexed_games:
+        #     logger.info(f"Skipping already indexed game {table_id}")
+        #     continue
         
-        except Exception as e:
-            logger.error(f"Error processing game {table_id}: {e}")
+        if process_single_game(table_id, player_id, scraper, game_info):
+            games_indexed += 1
+        
+        games_processed += 1
         
         # Add delay between games
         time.sleep(getattr(config, 'REQUEST_DELAY', 1))
@@ -432,6 +472,44 @@ def process_single_player(player_id: str, scraper: TMScraper, args) -> None:
     else:
         logger.info(f"No new games to process for player {player_id}")
         print(f"ℹ️  No new games for player {player_id}")
+
+
+def handle_scrape_table(args) -> None:
+    """Handle scrape-table command for single game"""
+    composite_key = args.game
+    logger.info(f"Starting single table scraping for: {composite_key}")
+    
+    # Parse the composite key
+    if ':' not in composite_key:
+        logger.error(f"Invalid composite key format: {composite_key}. Expected format: table_id:player_perspective")
+        print(f"❌ Invalid format. Use: table_id:player_perspective")
+        return
+    
+    table_id, player_perspective = composite_key.split(':', 1)
+    table_id = table_id.strip()
+    player_perspective = player_perspective.strip()
+    
+    logger.info(f"Processing single game: table_id={table_id}, player_perspective={player_perspective}")
+    print(f"🎯 Processing game {table_id} from perspective of player {player_perspective}")
+    
+    # Initialize scraper
+    scraper = initialize_scraper()
+    
+    try:
+        # Process the single game
+        success = process_single_game(table_id, player_perspective, scraper)
+        
+        if success:
+            logger.info(f"✅ Successfully processed game {table_id}")
+            print(f"✅ Game {table_id} processed successfully!")
+        else:
+            logger.error(f"❌ Failed to process game {table_id}")
+            print(f"❌ Failed to process game {table_id}")
+            
+    finally:
+        scraper.close_browser()
+    
+    logger.info("Single table scraping completed")
 
 
 def handle_scrape_tables(args) -> None:
@@ -1069,6 +1147,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  python main.py scrape-table 670153426:91334215  # Single game - table_id:player_perspective
   python main.py scrape-tables                    # API mode - gets players from API
   python main.py scrape-tables 12345678 87654321  # Manual mode - specific players
   python main.py scrape-complete 12345678 87654321
@@ -1084,6 +1163,12 @@ Examples:
     
     # Subcommands
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
+    
+    # scrape-table command (single game)
+    scrape_table_parser = subparsers.add_parser('scrape-table', 
+                                               help='Scrape single table and submit to API')
+    scrape_table_parser.add_argument('game', 
+                                    help='Composite key in format table_id:player_perspective')
     
     # scrape-tables command
     scrape_tables_parser = subparsers.add_parser('scrape-tables', 
@@ -1144,7 +1229,9 @@ Examples:
     
     # Route to appropriate handler
     try:
-        if args.command == 'scrape-tables':
+        if args.command == 'scrape-table':
+            handle_scrape_table(args)
+        elif args.command == 'scrape-tables':
             handle_scrape_tables(args)
         elif args.command == 'scrape-complete':
             handle_scrape_complete(args)

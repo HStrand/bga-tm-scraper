@@ -216,6 +216,76 @@ class TMScraper:
             # Step 3: Check game mode
             game_mode = parser.parse_game_mode(table_data['html_content'])
             
+            # Step 4: Extract map from table page
+            logger.info("Extracting map...")
+            map_name = self._extract_map_from_table(table_data['html_content'])
+            if map_name:
+                logger.info(f"Successfully extracted map: {map_name}")
+                print(f"✅ Map extracted: {map_name}")
+            else:
+                logger.debug("Could not extract map")
+                print("⚠️  Could not extract map")
+            
+            # Step 5: Extract Corporate Era setting from table page
+            logger.info("Extracting Corporate Era setting...")
+            corporate_era_on = self._extract_corporate_era_from_table(table_data['html_content'])
+            if corporate_era_on is not None:
+                logger.info(f"Successfully extracted Corporate Era: {corporate_era_on}")
+                print(f"✅ Corporate Era extracted: {'On' if corporate_era_on else 'Off'}")
+            else:
+                logger.debug("Could not extract Corporate Era setting")
+                print("⚠️  Could not extract Corporate Era setting")
+            
+            # Step 6: Extract Prelude setting from table page
+            logger.info("Extracting Prelude setting...")
+            prelude_on = self._extract_prelude_from_table(table_data['html_content'])
+            if prelude_on is not None:
+                logger.info(f"Successfully extracted Prelude: {prelude_on}")
+                print(f"✅ Prelude extracted: {'On' if prelude_on else 'Off'}")
+            else:
+                logger.debug("Could not extract Prelude setting")
+                print("⚠️  Could not extract Prelude setting")
+            
+            # Step 7: Extract Draft setting from table page
+            logger.info("Extracting Draft setting...")
+            draft_on = self._extract_draft_from_table(table_data['html_content'])
+            if draft_on is not None:
+                logger.info(f"Successfully extracted Draft: {draft_on}")
+                print(f"✅ Draft extracted: {'Yes' if draft_on else 'No'}")
+            else:
+                logger.debug("Could not extract Draft setting")
+                print("⚠️  Could not extract Draft setting")
+            
+            # Step 8: Extract Colonies setting from table page
+            logger.info("Extracting Colonies setting...")
+            colonies_on = self._extract_colonies_from_table(table_data['html_content'])
+            if colonies_on is not None:
+                logger.info(f"Successfully extracted Colonies: {colonies_on}")
+                print(f"✅ Colonies extracted: {'On' if colonies_on else 'Off'}")
+            else:
+                logger.debug("Could not extract Colonies setting")
+                print("⚠️  Could not extract Colonies setting")
+            
+            # Step 9: Extract Beginners Corporations setting from table page
+            logger.info("Extracting Beginners Corporations setting...")
+            beginners_corporations_on = self._extract_beginners_corporations_from_table(table_data['html_content'])
+            if beginners_corporations_on is not None:
+                logger.info(f"Successfully extracted Beginners Corporations: {beginners_corporations_on}")
+                print(f"✅ Beginners Corporations extracted: {'Yes' if beginners_corporations_on else 'No'}")
+            else:
+                logger.debug("Could not extract Beginners Corporations setting")
+                print("⚠️  Could not extract Beginners Corporations setting")
+            
+            # Step 10: Extract Game Speed setting from table page
+            logger.info("Extracting Game Speed setting...")
+            game_speed = self._extract_game_speed_from_table(table_data['html_content'])
+            if game_speed:
+                logger.info(f"Successfully extracted Game Speed: {game_speed}")
+                print(f"✅ Game Speed extracted: {game_speed}")
+            else:
+                logger.debug("Could not extract Game Speed setting")
+                print("⚠️  Could not extract Game Speed setting")
+            
             # Extract player IDs from ELO data (they're already included now)
             player_ids = []
             if elo_data:
@@ -224,7 +294,7 @@ class TMScraper:
             else:
                 logger.warning("No ELO data found - cannot extract player IDs")
             
-            # Step 4: Extract version number from gamereview page
+            # Step 11: Extract version number from gamereview page
             logger.info("Extracting version number...")
             version = self.extract_version_from_gamereview(table_id)
             if version:
@@ -234,13 +304,20 @@ class TMScraper:
                 logger.warning("Could not extract version number")
                 print("⚠️  Could not extract version number")
 
-            # Step 5: Combine results
+            # Step 12: Combine results
             result_data = {
                 'table_id': table_id,
                 'table_data': table_data,
                 'scraped_at': datetime.now().isoformat(),
                 'success': True,
                 'game_mode': game_mode,
+                'map': map_name,
+                'corporate_era_on': corporate_era_on,
+                'prelude_on': prelude_on,
+                'draft_on': draft_on,
+                'colonies_on': colonies_on,
+                'beginners_corporations_on': beginners_corporations_on,
+                'game_speed': game_speed,
                 'player_ids': player_ids,
                 'elo_data': elo_data,
                 'version': version,
@@ -2492,6 +2569,207 @@ class TMScraper:
             logger.error(f"Error checking Arena season for game {table_id}: {e}")
             return False
 
+
+    def _extract_map_from_table(self, html_content: str) -> Optional[str]:
+        """
+        Extract the selected map from table page HTML
+        
+        Args:
+            html_content: HTML content of the table page
+            
+        Returns:
+            str: Map name (e.g., "Tharsis") or None if not found
+        """
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            # Look for the specific map element
+            map_element = soup.find('span', id='gameoption_107_displayed_value')
+            
+            if map_element:
+                map_name = map_element.get_text().strip()
+                logger.info(f"Extracted map: {map_name}")
+                return map_name
+            else:
+                logger.debug("Map element not found in table HTML")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error extracting map from table HTML: {e}")
+            return None
+
+    def _extract_corporate_era_from_table(self, html_content: str) -> Optional[bool]:
+        """
+        Extract the Corporate Era setting from table page HTML
+        
+        Args:
+            html_content: HTML content of the table page
+            
+        Returns:
+            bool: True if Corporate Era is On, False if Off, None if not found
+        """
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            # Look for the specific Corporate Era element
+            corporate_era_element = soup.find('span', id='mob_gameoption_101_displayed_value')
+            
+            if corporate_era_element:
+                corporate_era_text = corporate_era_element.get_text().strip()
+                corporate_era_on = corporate_era_text.lower() == 'on'
+                logger.info(f"Extracted Corporate Era: {corporate_era_text} -> {corporate_era_on}")
+                return corporate_era_on
+            else:
+                logger.debug("Corporate Era element not found in table HTML")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error extracting Corporate Era from table HTML: {e}")
+            return None
+
+    def _extract_prelude_from_table(self, html_content: str) -> Optional[bool]:
+        """
+        Extract the Prelude setting from table page HTML
+        
+        Args:
+            html_content: HTML content of the table page
+            
+        Returns:
+            bool: True if Prelude is On, False if Off, None if not found
+        """
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            # Look for the specific Prelude element
+            prelude_element = soup.find('span', id='mob_gameoption_104_displayed_value')
+            
+            if prelude_element:
+                prelude_text = prelude_element.get_text().strip()
+                prelude_on = prelude_text.lower() == 'on'
+                logger.info(f"Extracted Prelude: {prelude_text} -> {prelude_on}")
+                return prelude_on
+            else:
+                logger.debug("Prelude element not found in table HTML")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error extracting Prelude from table HTML: {e}")
+            return None
+
+    def _extract_draft_from_table(self, html_content: str) -> Optional[bool]:
+        """
+        Extract the Draft setting from table page HTML
+        
+        Args:
+            html_content: HTML content of the table page
+            
+        Returns:
+            bool: True if Draft is Yes, False if No, None if not found
+        """
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            # Look for the specific Draft element
+            draft_element = soup.find('span', id='mob_gameoption_103_displayed_value')
+            
+            if draft_element:
+                draft_text = draft_element.get_text().strip()
+                draft_on = draft_text.lower() == 'yes'
+                logger.info(f"Extracted Draft: {draft_text} -> {draft_on}")
+                return draft_on
+            else:
+                logger.debug("Draft element not found in table HTML")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error extracting Draft from table HTML: {e}")
+            return None
+
+    def _extract_colonies_from_table(self, html_content: str) -> Optional[bool]:
+        """
+        Extract the Colonies setting from table page HTML
+        
+        Args:
+            html_content: HTML content of the table page
+            
+        Returns:
+            bool: True if Colonies is On, False if Off, None if not found
+        """
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            # Look for the specific Colonies element
+            colonies_element = soup.find('span', id='mob_gameoption_108_displayed_value')
+            
+            if colonies_element:
+                colonies_text = colonies_element.get_text().strip()
+                colonies_on = colonies_text.lower() == 'on'
+                logger.info(f"Extracted Colonies: {colonies_text} -> {colonies_on}")
+                return colonies_on
+            else:
+                logger.debug("Colonies element not found in table HTML")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error extracting Colonies from table HTML: {e}")
+            return None
+
+    def _extract_beginners_corporations_from_table(self, html_content: str) -> Optional[bool]:
+        """
+        Extract the Beginners Corporations setting from table page HTML
+        
+        Args:
+            html_content: HTML content of the table page
+            
+        Returns:
+            bool: True if Beginners Corporations is Yes, False if No, None if not found
+        """
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            # Look for the specific Beginners Corporations element
+            beginners_corps_element = soup.find('span', id='gameoption_100_displayed_value')
+            
+            if beginners_corps_element:
+                beginners_corps_text = beginners_corps_element.get_text().strip()
+                beginners_corps_on = beginners_corps_text.lower() == 'yes'
+                logger.info(f"Extracted Beginners Corporations: {beginners_corps_text} -> {beginners_corps_on}")
+                return beginners_corps_on
+            else:
+                logger.debug("Beginners Corporations element not found in table HTML")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error extracting Beginners Corporations from table HTML: {e}")
+            return None
+
+    def _extract_game_speed_from_table(self, html_content: str) -> Optional[str]:
+        """
+        Extract the Game Speed setting from table page HTML
+        
+        Args:
+            html_content: HTML content of the table page
+            
+        Returns:
+            str: Game speed text (e.g., "Real-time • Fast paced") or None if not found
+        """
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            # Look for the specific Game Speed element
+            game_speed_element = soup.find('span', id='gameoption_200_displayed_value')
+            
+            if game_speed_element:
+                game_speed_text = game_speed_element.get_text().strip()
+                logger.info(f"Extracted Game Speed: {game_speed_text}")
+                return game_speed_text
+            else:
+                logger.debug("Game Speed element not found in table HTML")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error extracting Game Speed from table HTML: {e}")
+            return None
 
     def _extract_player_ids_simple(self, html_content: str, player_names: List[str]) -> Dict[str, str]:
         """

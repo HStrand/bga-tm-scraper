@@ -869,7 +869,12 @@ class ScrapingTab:
                     self.frame.after(0, lambda: self.log_message(f"📊 Skipping {skipped_count} already processed games"))
                 
                 # Update total items to reflect actual games to process
-                self.total_items = len(games_to_process)
+                # Only update total_items if we don't have existing progress
+                if not self.existing_progress:
+                    self.total_items = len(games_to_process)
+                else:
+                    # Keep the original total from the assignment when resuming
+                    self.total_items = len(games)
                 self.frame.after(0, self.update_progress)
                 
                 # Process each game
