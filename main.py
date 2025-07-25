@@ -475,41 +475,62 @@ def process_single_player(player_id: str, scraper: TMScraper, args) -> None:
 
 
 def handle_scrape_table(args) -> None:
-    """Handle scrape-table command for single game"""
-    composite_key = args.game
-    logger.info(f"Starting single table scraping for: {composite_key}")
+    """Handle scrape-table command for single or multiple games"""
+    composite_keys = args.games
+    logger.info(f"Starting table scraping for {len(composite_keys)} game(s): {composite_keys}")
     
-    # Parse the composite key
-    if ':' not in composite_key:
-        logger.error(f"Invalid composite key format: {composite_key}. Expected format: table_id:player_perspective")
-        print(f"❌ Invalid format. Use: table_id:player_perspective")
+    # Parse the composite keys
+    target_games = parse_composite_keys(composite_keys)
+    if not target_games:
+        logger.error("No valid composite keys provided")
+        print("❌ No valid composite keys provided")
         return
     
-    table_id, player_perspective = composite_key.split(':', 1)
-    table_id = table_id.strip()
-    player_perspective = player_perspective.strip()
-    
-    logger.info(f"Processing single game: table_id={table_id}, player_perspective={player_perspective}")
-    print(f"🎯 Processing game {table_id} from perspective of player {player_perspective}")
+    logger.info(f"Processing {len(target_games)} games")
+    print(f"🎯 Processing {len(target_games)} games")
     
     # Initialize scraper
     scraper = initialize_scraper()
     
     try:
-        # Process the single game
-        success = process_single_game(table_id, player_perspective, scraper)
+        successful_games = 0
+        failed_games = 0
         
-        if success:
-            logger.info(f"✅ Successfully processed game {table_id}")
-            print(f"✅ Game {table_id} processed successfully!")
-        else:
-            logger.error(f"❌ Failed to process game {table_id}")
-            print(f"❌ Failed to process game {table_id}")
+        for i, game in enumerate(target_games, 1):
+            table_id = game['table_id']
+            player_perspective = game['player_perspective']
+            
+            logger.info(f"Processing game {i}/{len(target_games)}: table_id={table_id}, player_perspective={player_perspective}")
+            print(f"\n🎯 Processing game {i}/{len(target_games)}: {table_id} from perspective of player {player_perspective}")
+            
+            # Process the game
+            success = process_single_game(table_id, player_perspective, scraper)
+            
+            if success:
+                successful_games += 1
+                logger.info(f"✅ Successfully processed game {table_id}")
+                print(f"✅ Game {table_id} processed successfully!")
+            else:
+                failed_games += 1
+                logger.error(f"❌ Failed to process game {table_id}")
+                print(f"❌ Failed to process game {table_id}")
+            
+            # Add delay between games (except for the last one)
+            if i < len(target_games):
+                delay = getattr(config, 'REQUEST_DELAY', 1)
+                print(f"⏱️  Waiting {delay}s before next game...")
+                time.sleep(delay)
+        
+        # Summary
+        logger.info(f"Table scraping completed: {successful_games}/{len(target_games)} games processed successfully")
+        print(f"\n📊 Summary: {successful_games}/{len(target_games)} games processed successfully")
+        if failed_games > 0:
+            print(f"❌ {failed_games} games failed")
             
     finally:
         scraper.close_browser()
     
-    logger.info("Single table scraping completed")
+    logger.info("Table scraping completed")
 
 
 def handle_scrape_tables(args) -> None:
@@ -1147,9 +1168,10 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python main.py scrape-table 670153426:91334215  # Single game - table_id:player_perspective
-  python main.py scrape-tables                    # API mode - gets players from API
-  python main.py scrape-tables 12345678 87654321  # Manual mode - specific players
+  python main.py scrape-table 670153426:91334215                           # Single game
+  python main.py scrape-table 670153426:91334215 665079560:86296239        # Multiple games
+  python main.py scrape-tables                                             # API mode - gets players from API
+  python main.py scrape-tables 12345678 87654321                           # Manual mode - specific players
   python main.py scrape-complete 12345678 87654321
   python main.py scrape-replays 123456789:12345678 987654321:87654321
   python main.py parse
@@ -1164,11 +1186,11 @@ Examples:
     # Subcommands
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
     
-    # scrape-table command (single game)
+    # scrape-table command (single or multiple games)
     scrape_table_parser = subparsers.add_parser('scrape-table', 
-                                               help='Scrape single table and submit to API')
-    scrape_table_parser.add_argument('game', 
-                                    help='Composite key in format table_id:player_perspective')
+                                               help='Scrape table(s) and submit to API')
+    scrape_table_parser.add_argument('games', nargs='+',
+                                    help='One or more composite keys in format table_id:player_perspective')
     
     # scrape-tables command
     scrape_tables_parser = subparsers.add_parser('scrape-tables', 
