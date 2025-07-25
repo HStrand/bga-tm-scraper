@@ -904,7 +904,15 @@ class ScrapingTab:
                         assignment_metadata = {
                             'gameMode': game.get('gameMode', 'Arena mode'),
                             'versionId': version_id,
-                            'players': game.get('players', [])  # Use the actual players array from assignment
+                            'players': game.get('players', []),  # Use the actual players array from assignment
+                            'map': game.get('map'),
+                            'preludeOn': game.get('preludeOn'),
+                            'coloniesOn': game.get('coloniesOn'),
+                            'corporateEraOn': game.get('corporateEraOn'),
+                            'draftOn': game.get('draftOn'),
+                            'beginnersCorporationsOn': game.get('beginnersCorporationsOn'),
+                            'gameSpeed': game.get('gameSpeed'),
+                            'playedAt': game.get('playedAt')
                         }
                         
                         # Scrape replay only with assignment metadata (more efficient)
