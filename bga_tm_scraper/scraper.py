@@ -294,7 +294,13 @@ class TMScraper:
             else:
                 logger.warning("No ELO data found - cannot extract player IDs")
             
-            # Step 11: Extract version number from gamereview page
+            # Step 11: Extract game date from table page using parser
+            logger.info("Extracting game date...")
+            from .parser import Parser
+            parser = Parser()
+            game_date_info = parser._extract_game_date_from_table(table_data['html_content'])
+            
+            # Step 12: Extract version number from gamereview page
             logger.info("Extracting version number...")
             version = self.extract_version_from_gamereview(table_id)
             if version:
@@ -304,7 +310,7 @@ class TMScraper:
                 logger.warning("Could not extract version number")
                 print("⚠️  Could not extract version number")
 
-            # Step 12: Combine results
+            # Step 13: Combine results
             result_data = {
                 'table_id': table_id,
                 'table_data': table_data,
@@ -321,6 +327,7 @@ class TMScraper:
                 'player_ids': player_ids,
                 'elo_data': elo_data,
                 'version': version,
+                'game_date_info': game_date_info,  # Include extracted game date
                 'table_only': True  # Flag to indicate this was table-only scraping
             }
             

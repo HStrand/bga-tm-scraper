@@ -372,6 +372,162 @@ class Parser:
         except Exception as e:
             logger.error(f"Error extracting Game Speed from table HTML: {e}")
             return None
+
+    def _extract_game_date_from_table(self, table_html: str) -> Optional[Dict]:
+        """
+        Extract the game creation date from table page HTML
+        
+        Args:
+            table_html: HTML content of the table page
+            
+        Returns:
+            dict: Dictionary with raw_datetime, parsed_datetime, and date_type, or None if not found
+        """
+        try:
+            soup = BeautifulSoup(table_html, 'html.parser')
+            
+            # Look for the creationtime div
+            creationtime_element = soup.find('div', id='creationtime')
+            
+            if creationtime_element:
+                creation_text = creationtime_element.get_text().strip()
+                logger.info(f"Found creation time text: {creation_text}")
+                
+                # Extract the date part after "Created "
+                if creation_text.startswith('Created '):
+                    date_text = creation_text[8:]  # Remove "Created " prefix
+                    
+                    # Use the existing _parse_game_datetime method to handle both relative and absolute dates
+                    datetime_info = self._parse_game_datetime(date_text)
+                    
+                    if datetime_info:
+                        logger.info(f"Successfully extracted game date from table: {datetime_info['raw_datetime']}")
+                        return datetime_info
+                    else:
+                        logger.warning(f"Could not parse date from: {date_text}")
+                else:
+                    logger.warning(f"Unexpected creation time format: {creation_text}")
+            else:
+                logger.debug("Creation time element not found in table HTML")
+            
+            return None
+                
+        except Exception as e:
+            logger.error(f"Error extracting game date from table HTML: {e}")
+            return None
+
+    def _parse_game_datetime(self, text: str) -> Optional[Dict]:
+        """
+        Parse datetime from text, handling both relative and absolute dates
+        
+        Args:
+            text: Text that may contain datetime information
+            
+        Returns:
+            dict: Dictionary with raw_datetime, parsed_datetime, and date_type, or None if not found
+        """
+        try:
+            # Pattern 1: Relative dates like "yesterday at 00:08"
+            relative_pattern = r'(yesterday|today)\s+at\s+(\d{1,2}:\d{2})'
+            relative_match = re.search(relative_pattern, text.lower())
+            
+            if relative_match:
+                relative_word = relative_match.group(1)
+                time_str = relative_match.group(2)
+                
+                # Calculate the actual date
+                current_date = datetime.now()
+                if relative_word == 'yesterday':
+                    target_date = current_date - timedelta(days=1)
+                else:  # today
+                    target_date = current_date
+                
+                # Parse the time
+                time_parts = time_str.split(':')
+                hour = int(time_parts[0])
+                minute = int(time_parts[1])
+                
+                # Create the full datetime
+                parsed_datetime = target_date.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                
+                return {
+                    'raw_datetime': f"{relative_word} at {time_str}",
+                    'parsed_datetime': parsed_datetime.isoformat(),
+                    'date_type': 'relative'
+                }
+            
+            # Pattern 2: Absolute dates like "2025-06-15 at 00:29"
+            absolute_pattern = r'(\d{4}-\d{2}-\d{2})\s+at\s+(\d{1,2}:\d{2})'
+            absolute_match = re.search(absolute_pattern, text)
+            
+            if absolute_match:
+                date_str = absolute_match.group(1)
+                time_str = absolute_match.group(2)
+                
+                # Parse the full datetime
+                datetime_str = f"{date_str} {time_str}:00"
+                parsed_datetime = datetime.strptime(datetime_str, "%Y-%m-%d %H:%M:%S")
+                
+                return {
+                    'raw_datetime': f"{date_str} at {time_str}",
+                    'parsed_datetime': parsed_datetime.isoformat(),
+                    'date_type': 'absolute'
+                }
+            
+            # Pattern 3: Alternative absolute format like "15/06/2025 at 00:29"
+            alt_absolute_pattern = r'(\d{1,2}/\d{1,2}/\d{4})\s+at\s+(\d{1,2}:\d{2})'
+            alt_absolute_match = re.search(alt_absolute_pattern, text)
+            
+            if alt_absolute_match:
+                date_str = alt_absolute_match.group(1)
+                time_str = alt_absolute_match.group(2)
+                
+                # Parse the date (assuming DD/MM/YYYY format)
+                date_parts = date_str.split('/')
+                day = int(date_parts[0])
+                month = int(date_parts[1])
+                year = int(date_parts[2])
+                
+                # Parse the time
+                time_parts = time_str.split(':')
+                hour = int(time_parts[0])
+                minute = int(time_parts[1])
+                
+                # Create the datetime
+                parsed_datetime = datetime(year, month, day, hour, minute, 0)
+                
+                return {
+                    'raw_datetime': f"{date_str} at {time_str}",
+                    'parsed_datetime': parsed_datetime.isoformat(),
+                    'date_type': 'absolute'
+                }
+            
+            # Pattern 4: Just time like "00:08" (assume today)
+            time_only_pattern = r'\b(\d{1,2}:\d{2})\b'
+            time_only_match = re.search(time_only_pattern, text)
+            
+            if time_only_match:
+                time_str = time_only_match.group(1)
+                
+                # Parse the time and assume today
+                time_parts = time_str.split(':')
+                hour = int(time_parts[0])
+                minute = int(time_parts[1])
+                
+                current_date = datetime.now()
+                parsed_datetime = current_date.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                
+                return {
+                    'raw_datetime': time_str,
+                    'parsed_datetime': parsed_datetime.isoformat(),
+                    'date_type': 'time_only'
+                }
+            
+            return None
+            
+        except Exception as e:
+            logger.debug(f"Error parsing datetime from text '{text}': {e}")
+            return None
     
     def parse_complete_game(self, replay_html: str, game_metadata: GameMetadata, table_id: str, player_perspective: str) -> GameData:
         """Unified parsing method that takes GameMetadata instead of separate parameters"""

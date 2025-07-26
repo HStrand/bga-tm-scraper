@@ -436,10 +436,24 @@ def process_single_game(table_id: str, player_perspective: str, scraper: TMScrap
                 players_list.append(player_dict)
             
             # Create game data structure for single game API
+            # Use extracted game date from table if available, otherwise fall back to game_info
+            raw_datetime = 'unknown'
+            parsed_datetime = None
+            
+            if result.get('game_date_info'):
+                # Use date extracted from table HTML
+                date_info = result['game_date_info']
+                raw_datetime = date_info.get('raw_datetime', 'unknown')
+                parsed_datetime = date_info.get('parsed_datetime')
+            elif game_info:
+                # Fall back to game_info (from player history)
+                raw_datetime = game_info.get('raw_datetime', 'unknown')
+                parsed_datetime = game_info.get('parsed_datetime')
+            
             game_api_data = {
                 'table_id': table_id,
-                'raw_datetime': game_info.get('raw_datetime') if game_info else 'unknown',
-                'parsed_datetime': game_info.get('parsed_datetime') if game_info else None,
+                'raw_datetime': raw_datetime,
+                'parsed_datetime': parsed_datetime,
                 'game_mode': game_mode,
                 'map': map_name,
                 'corporate_era_on': corporate_era_on,
