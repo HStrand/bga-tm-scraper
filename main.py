@@ -537,13 +537,11 @@ def process_single_player(player_id: str, scraper: TMScraper, args) -> None:
     
     for game_info in games_data:
         table_id = game_info['table_id']
-        
-        # TEMPORARY DON'T SKIP INDEXED GAMES
-        
-        # # Skip already indexed games
-        # if table_id in indexed_games:
-        #     logger.info(f"Skipping already indexed game {table_id}")
-        #     continue
+
+        # Skip already indexed games
+        if table_id in indexed_games:
+            logger.info(f"Skipping already indexed game {table_id}")
+            continue
         
         games_registry = GamesRegistry()
         if process_single_game(table_id, player_id, scraper, games_registry, False, game_info):
