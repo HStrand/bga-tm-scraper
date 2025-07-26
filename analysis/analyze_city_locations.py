@@ -171,18 +171,18 @@ def process_game_for_city_values(file_path, tiles_lookup):
                         if greenery_ocean_adjacencies > 0:
                             city_values[city_location]['resources']['M€'] += greenery_ocean_adjacencies * 2
         
-        # Add VP from final state if available
-        if 'final_state' in game_data and 'player_vp' in game_data['final_state']:
-            final_state = game_data['final_state']
-            for player_id, player_data in final_state['player_vp'].items():
-                if 'details' in player_data and 'cities' in player_data['details']:
-                    cities = player_data['details']['cities']
-                    for city_location, city_info in cities.items():
-                        # Skip space cities
-                        if city_location in ['Ganymede Colony', 'Phobos Space Haven']:
-                            continue
-                        if city_location in city_values and 'vp' in city_info:
-                            city_values[city_location]['resources']['VP'] += city_info['vp']
+        # Add VP from final state
+        final_state = game_data['moves'][-1]
+        for player_id, player_data in final_state['game_state']['player_vp'].items():
+            if 'details' in player_data and 'cities' in player_data['details']:
+                cities = player_data['details']['cities']
+                for city_location, city_info in cities.items():
+                    # Skip space cities
+                    if city_location in ['Ganymede Colony', 'Phobos Space Haven']:
+                        continue
+                    if city_location in city_values and 'vp' in city_info:
+                        city_values[city_location]['resources']['VP'] += city_info['vp']
+            
         
     except (json.JSONDecodeError, KeyError, FileNotFoundError) as e:
         print(f"Warning: Could not process {file_path}: {e}")
