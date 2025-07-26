@@ -33,6 +33,7 @@ try:
     from bga_tm_scraper.parser import Parser
     from bga_tm_scraper.games_registry import GamesRegistry
     from bga_tm_scraper.bga_session import BGASession
+    from gui.api_client import APIClient
     import requests
     import json
 except ImportError as e:
@@ -150,6 +151,52 @@ def update_games(api_data: Dict[str, Any]) -> bool:
     except Exception as e:
         logger.error(f"Unexpected error updating games: {e}")
         return False
+
+
+def create_api_client() -> APIClient:
+    """Create API client from config"""
+    try:
+        return APIClient(config.API_KEY)
+    except Exception as e:
+        logger.error(f"Failed to create API client: {e}")
+        raise RuntimeError(f"API client initialization failed: {e}")
+
+
+def upload_game_log_to_api(game_data: Dict[str, Any], api_client: APIClient) -> bool:
+    """Upload parsed game data using store_game_log"""
+    try:
+        return api_client.store_game_log(game_data, config.BGA_EMAIL)
+    except Exception as e:
+        logger.error(f"Failed to upload game log to API: {e}")
+        return False
+
+
+def detect_argument_type(arg: str) -> str:
+    """Detect if argument is player_id or composite_key"""
+    if ':' in arg:
+        return 'composite_key'
+    elif arg.isdigit():
+        return 'player_id'
+    else:
+        raise ValueError(f"Invalid argument format: {arg}")
+
+
+def process_mixed_arguments(args: List[str]) -> Dict[str, List[str]]:
+    """Separate player IDs from composite keys"""
+    player_ids = []
+    composite_keys = []
+    
+    for arg in args:
+        try:
+            if detect_argument_type(arg) == 'player_id':
+                player_ids.append(arg)
+            else:
+                composite_keys.append(arg)
+        except ValueError as e:
+            logger.error(str(e))
+            continue
+    
+    return {'player_ids': player_ids, 'composite_keys': composite_keys}
 
 
 def validate_config():
@@ -342,14 +389,17 @@ def initialize_scraper() -> TMScraper:
     return scraper
 
 
-def process_single_game(table_id: str, player_perspective: str, scraper: TMScraper, game_info: Dict[str, Any] = None) -> bool:
+def process_single_game(table_id: str, player_perspective: str, scraper: TMScraper, games_registry: GamesRegistry, 
+                        upload_to_api: bool = False, game_info: Dict[str, Any] = None) -> bool:
     """
-    Process a single game - scrape table and submit to API
+    Process a single game - scrape table and store in local registry or upload to API
     
     Args:
         table_id: BGA table ID
         player_perspective: Player ID whose perspective this is from
         scraper: Initialized TMScraper instance
+        games_registry: GamesRegistry instance for local storage
+        upload_to_api: Whether to upload to API instead of local storage
         game_info: Optional game info dict with raw_datetime and parsed_datetime
         
     Returns:
@@ -404,17 +454,41 @@ def process_single_game(table_id: str, player_perspective: str, scraper: TMScrap
                 'players': players_list
             }
             
-            # POST single game to API immediately
-            if update_single_game(game_api_data):
-                logger.info(f"✅ Game {table_id} ({game_mode}) indexed successfully")
-                print(f"✅ Indexed game {table_id} ({game_mode})")
+            if upload_to_api:
+                # Upload to API
+                if update_single_game(game_api_data):
+                    logger.info(f"✅ Game {table_id} ({game_mode}) uploaded to API successfully")
+                    print(f"✅ Uploaded game {table_id} ({game_mode}) to API")
+                    if map_name:
+                        print(f"   Map: {map_name}")
+                    return True
+                else:
+                    logger.error(f"❌ Failed to upload game {table_id} to API")
+                    print(f"❌ Failed to upload game {table_id} to API")
+                    return False
+            else:
+                # Store in local registry
+                is_arena_mode = game_mode == "Arena mode"
+                
+                # Extract player IDs from ELO data
+                player_ids_found = [elo_obj.player_id for elo_obj in elo_data.values() if elo_obj.player_id]
+                
+                # Add to registry
+                games_registry.add_game_check(
+                    table_id=table_id,
+                    raw_datetime=game_info.get('raw_datetime') if game_info else 'unknown',
+                    parsed_datetime=game_info.get('parsed_datetime') if game_info else None,
+                    players=player_ids_found,
+                    is_arena_mode=is_arena_mode,
+                    version=version,
+                    player_perspective=player_perspective
+                )
+                
+                logger.info(f"✅ Game {table_id} ({game_mode}) added to local registry")
+                print(f"✅ Added game {table_id} ({game_mode}) to local registry")
                 if map_name:
                     print(f"   Map: {map_name}")
                 return True
-            else:
-                logger.error(f"❌ Failed to index game {table_id} via API")
-                print(f"❌ Failed to index game {table_id}")
-                return False
         else:
             logger.warning(f"❌ Failed to scrape game {table_id}")
             print(f"❌ Failed to scrape game {table_id}")
@@ -457,7 +531,8 @@ def process_single_player(player_id: str, scraper: TMScraper, args) -> None:
         #     logger.info(f"Skipping already indexed game {table_id}")
         #     continue
         
-        if process_single_game(table_id, player_id, scraper, game_info):
+        games_registry = GamesRegistry()
+        if process_single_game(table_id, player_id, scraper, games_registry, False, game_info):
             games_indexed += 1
         
         games_processed += 1
@@ -474,82 +549,71 @@ def process_single_player(player_id: str, scraper: TMScraper, args) -> None:
         print(f"ℹ️  No new games for player {player_id}")
 
 
-def handle_scrape_table(args) -> None:
-    """Handle scrape-table command for single or multiple games"""
-    composite_keys = args.games
-    logger.info(f"Starting table scraping for {len(composite_keys)} game(s): {composite_keys}")
-    
-    # Parse the composite keys
-    target_games = parse_composite_keys(composite_keys)
-    if not target_games:
-        logger.error("No valid composite keys provided")
-        print("❌ No valid composite keys provided")
-        return
-    
-    logger.info(f"Processing {len(target_games)} games")
-    print(f"🎯 Processing {len(target_games)} games")
-    
-    # Initialize scraper
-    scraper = initialize_scraper()
-    
-    try:
-        successful_games = 0
-        failed_games = 0
-        
-        for i, game in enumerate(target_games, 1):
-            table_id = game['table_id']
-            player_perspective = game['player_perspective']
-            
-            logger.info(f"Processing game {i}/{len(target_games)}: table_id={table_id}, player_perspective={player_perspective}")
-            print(f"\n🎯 Processing game {i}/{len(target_games)}: {table_id} from perspective of player {player_perspective}")
-            
-            # Process the game
-            success = process_single_game(table_id, player_perspective, scraper)
-            
-            if success:
-                successful_games += 1
-                logger.info(f"✅ Successfully processed game {table_id}")
-                print(f"✅ Game {table_id} processed successfully!")
-            else:
-                failed_games += 1
-                logger.error(f"❌ Failed to process game {table_id}")
-                print(f"❌ Failed to process game {table_id}")
-            
-            # Add delay between games (except for the last one)
-            if i < len(target_games):
-                delay = getattr(config, 'REQUEST_DELAY', 1)
-                print(f"⏱️  Waiting {delay}s before next game...")
-                time.sleep(delay)
-        
-        # Summary
-        logger.info(f"Table scraping completed: {successful_games}/{len(target_games)} games processed successfully")
-        print(f"\n📊 Summary: {successful_games}/{len(target_games)} games processed successfully")
-        if failed_games > 0:
-            print(f"❌ {failed_games} games failed")
-            
-    finally:
-        scraper.close_browser()
-    
-    logger.info("Table scraping completed")
-
-
 def handle_scrape_tables(args) -> None:
-    """Handle scrape-tables command"""
+    """Handle unified scrape-tables command (supports player IDs, composite keys, and API mode)"""
     logger.info("Starting table scraping...")
     
-    # Determine target players based on arguments
+    # Determine processing mode based on arguments
     if args.players:
-        # Manual mode: specific players provided
-        player_ids = args.players
-        logger.info(f"Manual mode: Processing {len(player_ids)} specified players")
+        # Process mixed arguments (player IDs and composite keys)
+        processed_args = process_mixed_arguments(args.players)
+        player_ids = processed_args['player_ids']
+        composite_keys = processed_args['composite_keys']
+        
+        logger.info(f"Mixed mode: {len(player_ids)} player IDs, {len(composite_keys)} composite keys")
         
         # Initialize scraper
         scraper = initialize_scraper()
         
         try:
-            for i, player_id in enumerate(player_ids, 1):
-                logger.info(f"Processing player {i}/{len(player_ids)}: {player_id}")
-                process_single_player(player_id, scraper, args)
+            # Process player IDs (scrape all games for these players)
+            if player_ids:
+                logger.info(f"Processing {len(player_ids)} player IDs")
+                for i, player_id in enumerate(player_ids, 1):
+                    logger.info(f"Processing player {i}/{len(player_ids)}: {player_id}")
+                    process_single_player(player_id, scraper, args)
+            
+            # Process composite keys (scrape specific games)
+            if composite_keys:
+                logger.info(f"Processing {len(composite_keys)} composite keys")
+                target_games = parse_composite_keys(composite_keys)
+                
+                if target_games:
+                    successful_games = 0
+                    failed_games = 0
+                    
+                    for i, game in enumerate(target_games, 1):
+                        table_id = game['table_id']
+                        player_perspective = game['player_perspective']
+                        
+                        logger.info(f"Processing game {i}/{len(target_games)}: table_id={table_id}, player_perspective={player_perspective}")
+                        print(f"\n🎯 Processing game {i}/{len(target_games)}: {table_id} from perspective of player {player_perspective}")
+                        
+                        # Process the game
+                        games_registry = GamesRegistry()
+                        success = process_single_game(table_id, player_perspective, scraper, games_registry, args.upload_to_api)
+                        
+                        if success:
+                            successful_games += 1
+                            logger.info(f"✅ Successfully processed game {table_id}")
+                            print(f"✅ Game {table_id} processed successfully!")
+                        else:
+                            failed_games += 1
+                            logger.error(f"❌ Failed to process game {table_id}")
+                            print(f"❌ Failed to process game {table_id}")
+                        
+                        # Add delay between games (except for the last one)
+                        if i < len(target_games):
+                            delay = getattr(config, 'REQUEST_DELAY', 1)
+                            print(f"⏱️  Waiting {delay}s before next game...")
+                            time.sleep(delay)
+                    
+                    # Summary for composite keys
+                    logger.info(f"Composite key processing completed: {successful_games}/{len(target_games)} games processed successfully")
+                    print(f"\n📊 Composite key summary: {successful_games}/{len(target_games)} games processed successfully")
+                    if failed_games > 0:
+                        print(f"❌ {failed_games} games failed")
+                        
         finally:
             scraper.close_browser()
             
@@ -585,8 +649,19 @@ def handle_scrape_complete(args) -> None:
             logger.error("Failed to update players registry")
             return
     
-    # Determine target players
+    # Initialize API client if upload is requested
+    api_client = None
+    if args.upload_to_api:
+        try:
+            api_client = create_api_client()
+            logger.info("API client initialized for game log uploads")
+        except Exception as e:
+            logger.error(f"Failed to initialize API client: {e}")
+            return
+
+    # Determine target processing mode
     if args.all:
+        # Process all players mode
         players = load_players_by_rank()
         if not players:
             logger.error("No players found. Run 'update-players' first.")
@@ -606,6 +681,7 @@ def handle_scrape_complete(args) -> None:
                 filtered_players.append(player)
         
         player_ids = [p['player_id'] for p in filtered_players]
+        composite_keys = []
         
         logger.info(f"Found {total_players} total players")
         logger.info(f"Filtered out {completed_players} players with completed discovery")
@@ -618,10 +694,18 @@ def handle_scrape_complete(args) -> None:
             return
             
     elif args.players:
-        player_ids = args.players
-        logger.info(f"Processing {len(player_ids)} specified players")
+        # Process mixed arguments (player IDs and composite keys)
+        processed_args = process_mixed_arguments(args.players)
+        player_ids = processed_args['player_ids']
+        composite_keys = processed_args['composite_keys']
+        
+        logger.info(f"Mixed mode: {len(player_ids)} player IDs, {len(composite_keys)} composite keys")
+        
+        if not player_ids and not composite_keys:
+            logger.error("No valid arguments provided")
+            return
     else:
-        logger.error("Must specify either --all or provide player IDs")
+        logger.error("Must specify either --all or provide player IDs/composite keys")
         return
 
     # Initialize components
@@ -630,6 +714,7 @@ def handle_scrape_complete(args) -> None:
     parser = Parser()
     
     try:
+        # Process player IDs (full workflow for each player)
         for i, player_id in enumerate(player_ids, 1):
             logger.info(f"Processing player {i}/{len(player_ids)}: {player_id}")
             
@@ -701,6 +786,21 @@ def handle_scrape_complete(args) -> None:
                             output_path = os.path.join(config.PARSED_DATA_DIR, f"game_{table_id}.json")
                             parser.export_to_json(game_data, output_path, player_perspective=player_id)
                             
+                            # Upload to API if requested
+                            if api_client:
+                                try:
+                                    # Convert GameData to API format
+                                    api_format_data = parser._convert_game_data_to_api_format(game_data, table_id, player_id)
+                                    if upload_game_log_to_api(api_format_data, api_client):
+                                        logger.info(f"✅ Successfully uploaded game {table_id} to API")
+                                        print(f"📤 Uploaded game {table_id} to API")
+                                    else:
+                                        logger.warning(f"⚠️ Failed to upload game {table_id} to API")
+                                        print(f"❌ Failed to upload game {table_id} to API")
+                                except Exception as upload_error:
+                                    logger.error(f"Error uploading game {table_id} to API: {upload_error}")
+                                    print(f"❌ Error uploading game {table_id} to API: {upload_error}")
+                            
                             # Mark as parsed
                             games_registry.mark_game_parsed(table_id, player_perspective=player_id)
                             
@@ -719,6 +819,129 @@ def handle_scrape_complete(args) -> None:
             
             # Save registry after each player
             games_registry.save_registry()
+        
+        # Process composite keys (specific games)
+        if composite_keys:
+            logger.info(f"Processing {len(composite_keys)} composite keys")
+            target_games = parse_composite_keys(composite_keys)
+            
+            if target_games:
+                successful_games = 0
+                failed_games = 0
+                
+                for i, game in enumerate(target_games, 1):
+                    table_id = game['table_id']
+                    player_perspective = game['player_perspective']
+                    
+                    logger.info(f"Processing composite key game {i}/{len(target_games)}: table_id={table_id}, player_perspective={player_perspective}")
+                    print(f"\n🎯 Processing game {i}/{len(target_games)}: {table_id} from perspective of player {player_perspective}")
+                    
+                    # Skip if already processed and not retrying failed
+                    if not args.retry_failed and games_registry.is_game_parsed(table_id, player_perspective):
+                        logger.info(f"Skipping already parsed game {table_id}")
+                        print(f"⏭️ Skipping already parsed game {table_id}")
+                        continue
+                    
+                    try:
+                        result = scraper.scrape_table_and_replay(table_id, player_perspective, save_raw=True,
+                                                               raw_data_dir=config.RAW_DATA_DIR)
+                        
+                        if result and result.get('success'):
+                            is_arena_mode = result.get('arena_mode', False)
+                            version = result.get('version')
+                            
+                            # Extract player IDs from scraped data
+                            player_ids_found = []
+                            if result.get('table_data') and result['table_data'].get('html_content'):
+                                player_ids_found = scraper.extract_player_ids_from_table(
+                                    result['table_data']['html_content']
+                                )
+                            
+                            # Add to registry and mark as scraped
+                            games_registry.add_game_check(
+                                table_id=table_id,
+                                raw_datetime='unknown',  # No game_info for composite keys
+                                parsed_datetime=None,
+                                players=player_ids_found,
+                                is_arena_mode=is_arena_mode,
+                                version=version,
+                                player_perspective=player_perspective
+                            )
+                            games_registry.mark_game_scraped(table_id, player_perspective=player_perspective)
+                            
+                            # Parse the game using new unified method
+                            table_html = result['table_data']['html_content']
+                            replay_html = result['replay_data'].get('html_content', '')
+                            
+                            if replay_html:
+                                # Parse table metadata first
+                                game_metadata = parser.parse_table_metadata(table_html)
+                                
+                                # Add version if available
+                                if version:
+                                    game_metadata.version_id = version
+                                
+                                game_data = parser.parse_complete_game(
+                                    replay_html=replay_html,
+                                    game_metadata=game_metadata,
+                                    table_id=table_id,
+                                    player_perspective=player_perspective
+                                )
+                                
+                                # Export to JSON
+                                output_path = os.path.join(config.PARSED_DATA_DIR, f"game_{table_id}.json")
+                                parser.export_to_json(game_data, output_path, player_perspective=player_perspective)
+                                
+                                # Upload to API if requested
+                                if api_client:
+                                    try:
+                                        # Convert GameData to API format
+                                        api_format_data = parser._convert_game_data_to_api_format(game_data, table_id, player_perspective)
+                                        if upload_game_log_to_api(api_format_data, api_client):
+                                            logger.info(f"✅ Successfully uploaded game {table_id} to API")
+                                            print(f"📤 Uploaded game {table_id} to API")
+                                        else:
+                                            logger.warning(f"⚠️ Failed to upload game {table_id} to API")
+                                            print(f"❌ Failed to upload game {table_id} to API")
+                                    except Exception as upload_error:
+                                        logger.error(f"Error uploading game {table_id} to API: {upload_error}")
+                                        print(f"❌ Error uploading game {table_id} to API: {upload_error}")
+                                
+                                # Mark as parsed
+                                games_registry.mark_game_parsed(table_id, player_perspective=player_perspective)
+                                
+                                successful_games += 1
+                                game_mode_text = "Arena" if is_arena_mode else "Normal"
+                                logger.info(f"✅ Successfully processed {game_mode_text} mode game {table_id}")
+                                print(f"✅ Game {table_id} processed successfully!")
+                            else:
+                                failed_games += 1
+                                logger.warning(f"⚠️  No replay data for game {table_id}")
+                                print(f"❌ No replay data for game {table_id}")
+                        else:
+                            failed_games += 1
+                            logger.warning(f"❌ Failed to scrape game {table_id}")
+                            print(f"❌ Failed to scrape game {table_id}")
+                    
+                    except Exception as e:
+                        failed_games += 1
+                        logger.error(f"Error processing game {table_id}: {e}")
+                        print(f"❌ Error processing game {table_id}: {e}")
+                    
+                    # Add delay between games (except for the last one)
+                    if i < len(target_games):
+                        delay = getattr(config, 'REQUEST_DELAY', 1)
+                        print(f"⏱️  Waiting {delay}s before next game...")
+                        time.sleep(delay)
+                
+                # Summary for composite keys
+                logger.info(f"Composite key processing completed: {successful_games}/{len(target_games)} games processed successfully")
+                print(f"\n📊 Composite key summary: {successful_games}/{len(target_games)} games processed successfully")
+                if failed_games > 0:
+                    print(f"❌ {failed_games} games failed")
+                
+                # Save registry after composite key processing
+                games_registry.save_registry()
     
     finally:
         scraper.close_browser()
@@ -729,6 +952,16 @@ def handle_scrape_complete(args) -> None:
 def handle_scrape_replays(args) -> None:
     """Handle scrape-replays command"""
     logger.info("Starting replay scraping...")
+    
+    # Initialize API client if upload is requested
+    api_client = None
+    if args.upload_to_api:
+        try:
+            api_client = create_api_client()
+            logger.info("API client initialized for game log uploads")
+        except Exception as e:
+            logger.error(f"Failed to initialize API client: {e}")
+            return
     
     # Initialize session tracking and email notifications
     from bga_tm_scraper.session_tracker import start_new_session, end_current_session
@@ -868,6 +1101,21 @@ def handle_scrape_replays(args) -> None:
                     output_path = os.path.join(config.PARSED_DATA_DIR, f"game_{table_id}.json")
                     parser.export_to_json(game_data, output_path, player_perspective=player_perspective)
                     
+                    # Upload to API if requested
+                    if api_client:
+                        try:
+                            # Convert GameData to API format
+                            api_format_data = parser._convert_game_data_to_api_format(game_data, table_id, player_perspective)
+                            if upload_game_log_to_api(api_format_data, api_client):
+                                logger.info(f"✅ Successfully uploaded game {table_id} to API")
+                                print(f"📤 Uploaded game {table_id} to API")
+                            else:
+                                logger.warning(f"⚠️ Failed to upload game {table_id} to API")
+                                print(f"❌ Failed to upload game {table_id} to API")
+                        except Exception as upload_error:
+                            logger.error(f"Error uploading game {table_id} to API: {upload_error}")
+                            print(f"❌ Error uploading game {table_id} to API: {upload_error}")
+                    
                     # Mark as scraped and parsed
                     games_registry.mark_game_scraped(table_id, player_perspective=player_perspective)
                     games_registry.mark_game_parsed(table_id, player_perspective=player_perspective)
@@ -984,6 +1232,16 @@ def handle_parse(args) -> None:
     """Handle parse command"""
     logger.info("Starting game parsing...")
     
+    # Initialize API client if upload is requested
+    api_client = None
+    if args.upload_to_api:
+        try:
+            api_client = create_api_client()
+            logger.info("API client initialized for game log uploads")
+        except Exception as e:
+            logger.error(f"Failed to initialize API client: {e}")
+            return
+    
     games_registry = GamesRegistry()
     parser = Parser()
     
@@ -1099,6 +1357,21 @@ def handle_parse(args) -> None:
             output_path = os.path.join(config.PARSED_DATA_DIR, f"game_{table_id}.json")
             parser.export_to_json(game_data, output_path, player_perspective=player_perspective)
             
+            # Upload to API if requested
+            if api_client:
+                try:
+                    # Convert GameData to API format
+                    api_format_data = parser._convert_game_data_to_api_format(game_data, table_id, player_perspective or "unknown")
+                    if upload_game_log_to_api(api_format_data, api_client):
+                        logger.info(f"✅ Successfully uploaded game {table_id} to API")
+                        print(f"📤 Uploaded game {table_id} to API")
+                    else:
+                        logger.warning(f"⚠️ Failed to upload game {table_id} to API")
+                        print(f"❌ Failed to upload game {table_id} to API")
+                except Exception as upload_error:
+                    logger.error(f"Error uploading game {table_id} to API: {upload_error}")
+                    print(f"❌ Error uploading game {table_id} to API: {upload_error}")
+            
             # Mark as parsed in registry
             games_registry.mark_game_parsed(table_id, player_perspective=player_perspective)
             
@@ -1175,14 +1448,36 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python main.py scrape-table 670153426:91334215                           # Single game
-  python main.py scrape-table 670153426:91334215 665079560:86296239        # Multiple games
+  # Table scraping (indexing only)
   python main.py scrape-tables                                             # API mode - gets players from API
-  python main.py scrape-tables 12345678 87654321                           # Manual mode - specific players
-  python main.py scrape-complete 12345678 87654321
-  python main.py scrape-replays 123456789:12345678 987654321:87654321
-  python main.py parse
-  python main.py status --detailed
+  python main.py scrape-tables 12345678 87654321                           # Player mode - specific players
+  python main.py scrape-tables 670153426:91334215                          # Composite key mode - single game
+  python main.py scrape-tables 670153426:91334215 665079560:86296239       # Composite key mode - multiple games
+  python main.py scrape-tables 12345678 670153426:91334215                 # Mixed mode - player ID + composite key
+  python main.py scrape-tables --upload-to-api 12345678                    # Upload table metadata to API
+  python main.py scrape-tables --upload-to-api 670153426:91334215          # Composite key + API upload
+
+  # Complete workflow (tables + replays + parsing)
+  python main.py scrape-complete --all                                     # Process all players
+  python main.py scrape-complete 12345678 87654321                         # Specific players
+  python main.py scrape-complete 670153426:91334215                        # Single game via composite key
+  python main.py scrape-complete 670153426:91334215 665079560:86296239     # Multiple games via composite keys
+  python main.py scrape-complete --upload-to-api 12345678                  # Upload parsed games to API
+  python main.py scrape-complete --upload-to-api 670153426:91334215        # Composite key + API upload
+
+  # Replay scraping and parsing
+  python main.py scrape-replays                                            # All games needing replays
+  python main.py scrape-replays 670153426:91334215 665079560:86296239      # Specific games
+  python main.py scrape-replays --upload-to-api                            # Upload parsed games to API
+
+  # Parsing only
+  python main.py parse                                                     # All games ready for parsing
+  python main.py parse --reparse                                           # Reparse already parsed games
+  python main.py parse --upload-to-api 670153426:91334215                  # Parse specific game + upload to API
+
+  # Utility commands
+  python main.py update-players --count 500                                # Update player registry
+  python main.py status --detailed                                         # Show detailed registry status
         """
     )
     
@@ -1193,17 +1488,13 @@ Examples:
     # Subcommands
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
     
-    # scrape-table command (single or multiple games)
-    scrape_table_parser = subparsers.add_parser('scrape-table', 
-                                               help='Scrape table(s) and submit to API')
-    scrape_table_parser.add_argument('games', nargs='+',
-                                    help='One or more composite keys in format table_id:player_perspective')
-    
-    # scrape-tables command
+    # scrape-tables command (unified - supports player IDs, composite keys, and API mode)
     scrape_tables_parser = subparsers.add_parser('scrape-tables', 
-                                                help='Scrape table HTMLs only')
+                                                help='Scrape tables and update local registry (supports player IDs, composite keys, and API mode)')
+    scrape_tables_parser.add_argument('--upload-to-api', action='store_true',
+                                     help='Upload table metadata to API using update_single_game')
     scrape_tables_parser.add_argument('players', nargs='*',
-                                     help='Space-separated list of player IDs (if none provided, uses API mode)')
+                                     help='Space-separated list of player IDs or composite keys (table_id:player_perspective). If none provided, uses API mode.')
     
     # scrape-complete command
     scrape_complete_parser = subparsers.add_parser('scrape-complete',
@@ -1212,12 +1503,16 @@ Examples:
                                        help='Process all players')
     scrape_complete_parser.add_argument('--update-players', action='store_true',
                                        help='Update player registry before processing')
+    scrape_complete_parser.add_argument('--upload-to-api', action='store_true',
+                                       help='Upload parsed games to API using store_game_log')
     scrape_complete_parser.add_argument('players', nargs='*',
-                                       help='Space-separated list of player IDs')
+                                       help='Space-separated list of player IDs or composite keys (table_id:player_perspective)')
     
     # scrape-replays command
     scrape_replays_parser = subparsers.add_parser('scrape-replays',
                                                  help='Scrape replays and parse (requires table HTMLs)')
+    scrape_replays_parser.add_argument('--upload-to-api', action='store_true',
+                                      help='Upload parsed games to API using store_game_log')
     scrape_replays_parser.add_argument('games', nargs='*',
                                       help='Space-separated list of composite keys (table_id:player_perspective)')
     
@@ -1226,6 +1521,8 @@ Examples:
                                         help='Parse games only (requires both HTMLs)')
     parse_parser.add_argument('--reparse', action='store_true',
                              help='Reparse already parsed games (overwrite existing JSON files)')
+    parse_parser.add_argument('--upload-to-api', action='store_true',
+                             help='Upload parsed games to API using store_game_log')
     parse_parser.add_argument('games', nargs='*',
                              help='Space-separated list of composite keys (table_id:player_perspective)')
     
@@ -1258,9 +1555,7 @@ Examples:
     
     # Route to appropriate handler
     try:
-        if args.command == 'scrape-table':
-            handle_scrape_table(args)
-        elif args.command == 'scrape-tables':
+        if args.command == 'scrape-tables':
             handle_scrape_tables(args)
         elif args.command == 'scrape-complete':
             handle_scrape_complete(args)

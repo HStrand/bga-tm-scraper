@@ -366,7 +366,7 @@ class TMScraper:
             from .parser import Parser
             parser = Parser()
             game_mode = parser.parse_game_mode(table_data['html_content'])
-            logger.info("Detected game mode:", game_mode)
+            logger.info(f"Detected game mode: {game_mode}")
             is_arena_mode = game_mode == "Arena mode"
 
             print(f"✅ Game {table_id} is {game_mode} - proceeding with scraping")
@@ -2415,4 +2415,3 @@ class TMScraper:
         except Exception as e:
             logger.error(f"Error extracting Game Speed from table HTML: {e}")
             return None
-        
