@@ -270,17 +270,23 @@ class InMemoryScraper:
                 logger.error(f"No replay HTML found for {table_id}")
                 return None
             
-            # Parse the game data in memory
-            game_data = self.parser.parse_complete_game_with_elo(
+            # Parse the game data in memory using new unified method
+            # First parse table metadata
+            game_metadata = self.parser.parse_table_metadata(table_html)
+            
+            # Use unified parsing method
+            game_data = self.parser.parse_complete_game(
                 replay_html=replay_html,
-                table_html=table_html,
+                game_metadata=game_metadata,
                 table_id=table_id,
                 player_perspective=player_id
             )
             
             if game_data:
+                # Convert GameData object to dictionary format for GUI
+                result = self.parser._convert_game_data_to_api_format(game_data, table_id, player_id)
                 logger.info(f"Successfully parsed game {table_id} in memory")
-                return game_data
+                return result
             else:
                 logger.error(f"Failed to parse game {table_id}")
                 return None
@@ -338,17 +344,22 @@ class InMemoryScraper:
                 logger.error(f"No replay HTML found for {table_id}")
                 return None
             
-            # Parse the game data using assignment metadata
-            game_data = self.parser.parse_replay_with_assignment_metadata(
+            # Convert assignment metadata to GameMetadata format
+            game_metadata = self.parser.convert_assignment_to_game_metadata(assignment_metadata)
+            
+            # Parse the game data using unified method
+            game_data = self.parser.parse_complete_game(
                 replay_html=replay_html,
-                assignment_metadata=assignment_metadata,
+                game_metadata=game_metadata,
                 table_id=table_id,
                 player_perspective=player_perspective
             )
             
             if game_data:
+                # Convert GameData object to dictionary format for GUI
+                result = self.parser._convert_game_data_to_api_format(game_data, table_id, player_perspective)
                 logger.info(f"Successfully parsed replay-only game {table_id} with assignment metadata")
-                return game_data
+                return result
             else:
                 logger.error(f"Failed to parse replay-only game {table_id}")
                 return None

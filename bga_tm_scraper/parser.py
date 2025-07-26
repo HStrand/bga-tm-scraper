@@ -25,8 +25,8 @@ class EloData:
     position: Optional[int] = None
 
 @dataclass
-class AssignmentMetadata:
-    """Represents metadata from assignment for replay scraping"""
+class GameMetadata:
+    """Represents metadata from table HTML or assignment for replay scraping"""
     played_at: Optional[str] = None  # ISO timestamp when game was played
     map: Optional[str] = None
     prelude_on: Optional[bool] = None
@@ -37,7 +37,7 @@ class AssignmentMetadata:
     game_speed: Optional[str] = None
     game_mode: Optional[str] = None
     version_id: Optional[str] = None
-    players: Optional[List[Dict[str, Any]]] = None
+    players: Optional[Dict[str, EloData]] = None  # player_id -> EloData
 
 @dataclass
 class GameState:
@@ -137,20 +137,256 @@ class Parser:
     def __init__(self):
         pass
     
-    def parse_complete_game(self, html_content: str, replay_id: str, player_perspective: str, assignment_metadata: Optional[AssignmentMetadata] = None, elo_data: Optional[Dict[str, EloData]] = None) -> GameData:
-        """Parse a complete game and return comprehensive data structure"""
-        logger.info(f"Starting parsing for game {replay_id}")
+    def parse_table_metadata(self, table_html: str) -> GameMetadata:
+        """Extract all metadata from table HTML including game mode, map, settings, and ELO data"""
+        logger.info("Parsing table metadata from HTML")
         
-        soup = BeautifulSoup(html_content, 'html.parser')
+        soup = BeautifulSoup(table_html, 'html.parser')
+        
+        # Extract game mode
+        game_mode = self._extract_game_mode_from_table(table_html)
+        
+        # Extract map
+        map_name = self._extract_map_from_table(table_html)
+        
+        # Extract game settings
+        corporate_era_on = self._extract_corporate_era_from_table(table_html)
+        prelude_on = self._extract_prelude_from_table(table_html)
+        draft_on = self._extract_draft_from_table(table_html)
+        colonies_on = self._extract_colonies_from_table(table_html)
+        beginners_corporations_on = self._extract_beginners_corporations_from_table(table_html)
+        game_speed = self._extract_game_speed_from_table(table_html)
+        
+        # Extract ELO data and convert to Dict[str, EloData] with string keys
+        elo_data_dict = self.parse_elo_data(table_html)
+        players_dict = {}
+        for player_name, elo_data in elo_data_dict.items():
+            # Ensure player_id is string
+            player_id = str(elo_data.player_id) if elo_data.player_id else ""
+            if player_id:
+                players_dict[player_id] = elo_data
+        
+        metadata = GameMetadata(
+            map=map_name,
+            prelude_on=prelude_on,
+            colonies_on=colonies_on,
+            corporate_era_on=corporate_era_on,
+            draft_on=draft_on,
+            beginners_corporations_on=beginners_corporations_on,
+            game_speed=game_speed,
+            game_mode=game_mode,
+            players=players_dict
+        )
+        
+        logger.info(f"Successfully parsed table metadata: {len(players_dict)} players, game_mode={game_mode}, map={map_name}")
+        return metadata
+    
+    def convert_assignment_to_game_metadata(self, assignment_data: Dict[str, Any]) -> GameMetadata:
+        """Convert GUI assignment data (camelCase) to GameMetadata with EloData objects"""
+        logger.info("Converting assignment data to GameMetadata")
+        
+        players_dict = {}
+        for player in assignment_data.get('players', []):
+            player_id = str(player.get('playerId', ''))
+            if player_id:
+                elo_data = EloData(
+                    player_name=player.get('playerName'),
+                    player_id=player_id,
+                    position=player.get('position'),
+                    arena_points=player.get('arenaPoints'),
+                    arena_points_change=player.get('arenaPointsChange'),
+                    game_rank=player.get('elo'),
+                    game_rank_change=player.get('eloChange')
+                )
+                players_dict[player_id] = elo_data
+        
+        metadata = GameMetadata(
+            played_at=assignment_data.get('playedAt'),
+            map=assignment_data.get('map'),
+            prelude_on=assignment_data.get('preludeOn'),
+            colonies_on=assignment_data.get('coloniesOn'),
+            corporate_era_on=assignment_data.get('corporateEraOn'),
+            draft_on=assignment_data.get('draftOn'),
+            beginners_corporations_on=assignment_data.get('beginnersCorporationsOn'),
+            game_speed=assignment_data.get('gameSpeed'),
+            game_mode=assignment_data.get('gameMode', 'Arena mode'),
+            version_id=assignment_data.get('versionId'),
+            players=players_dict
+        )
+        
+        logger.info(f"Successfully converted assignment data: {len(players_dict)} players")
+        return metadata
+    
+    def _extract_game_mode_from_table(self, table_html: str) -> str:
+        """Extract game mode from table HTML"""
+        soup = BeautifulSoup(table_html, 'html.parser')
+        span_element = soup.find('span', id='mob_gameoption_201_displayed_value')
+        
+        if span_element:
+            mode = span_element.get_text().strip()
+            return mode
+        else:
+            return "Normal mode"  # Default
+    
+    def _extract_map_from_table(self, table_html: str) -> Optional[str]:
+        """Extract the selected map from table page HTML"""
+        try:
+            soup = BeautifulSoup(table_html, 'html.parser')
+            
+            # Look for the specific map element
+            map_element = soup.find('span', id='gameoption_107_displayed_value')
+            
+            if map_element:
+                map_name = map_element.get_text().strip()
+                logger.info(f"Extracted map: {map_name}")
+                return map_name
+            else:
+                logger.debug("Map element not found in table HTML")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error extracting map from table HTML: {e}")
+            return None
+    
+    def _extract_corporate_era_from_table(self, table_html: str) -> Optional[bool]:
+        """Extract the Corporate Era setting from table page HTML"""
+        try:
+            soup = BeautifulSoup(table_html, 'html.parser')
+            
+            # Look for the specific Corporate Era element
+            corporate_era_element = soup.find('span', id='mob_gameoption_101_displayed_value')
+            
+            if corporate_era_element:
+                corporate_era_text = corporate_era_element.get_text().strip()
+                corporate_era_on = corporate_era_text.lower() == 'on'
+                logger.info(f"Extracted Corporate Era: {corporate_era_text} -> {corporate_era_on}")
+                return corporate_era_on
+            else:
+                logger.debug("Corporate Era element not found in table HTML")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error extracting Corporate Era from table HTML: {e}")
+            return None
+    
+    def _extract_prelude_from_table(self, table_html: str) -> Optional[bool]:
+        """Extract the Prelude setting from table page HTML"""
+        try:
+            soup = BeautifulSoup(table_html, 'html.parser')
+            
+            # Look for the specific Prelude element
+            prelude_element = soup.find('span', id='mob_gameoption_104_displayed_value')
+            
+            if prelude_element:
+                prelude_text = prelude_element.get_text().strip()
+                prelude_on = prelude_text.lower() == 'on'
+                logger.info(f"Extracted Prelude: {prelude_text} -> {prelude_on}")
+                return prelude_on
+            else:
+                logger.debug("Prelude element not found in table HTML")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error extracting Prelude from table HTML: {e}")
+            return None
+    
+    def _extract_draft_from_table(self, table_html: str) -> Optional[bool]:
+        """Extract the Draft setting from table page HTML"""
+        try:
+            soup = BeautifulSoup(table_html, 'html.parser')
+            
+            # Look for the specific Draft element
+            draft_element = soup.find('span', id='mob_gameoption_103_displayed_value')
+            
+            if draft_element:
+                draft_text = draft_element.get_text().strip()
+                draft_on = draft_text.lower() == 'yes'
+                logger.info(f"Extracted Draft: {draft_text} -> {draft_on}")
+                return draft_on
+            else:
+                logger.debug("Draft element not found in table HTML")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error extracting Draft from table HTML: {e}")
+            return None
+    
+    def _extract_colonies_from_table(self, table_html: str) -> Optional[bool]:
+        """Extract the Colonies setting from table page HTML"""
+        try:
+            soup = BeautifulSoup(table_html, 'html.parser')
+            
+            # Look for the specific Colonies element
+            colonies_element = soup.find('span', id='mob_gameoption_108_displayed_value')
+            
+            if colonies_element:
+                colonies_text = colonies_element.get_text().strip()
+                colonies_on = colonies_text.lower() == 'on'
+                logger.info(f"Extracted Colonies: {colonies_text} -> {colonies_on}")
+                return colonies_on
+            else:
+                logger.debug("Colonies element not found in table HTML")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error extracting Colonies from table HTML: {e}")
+            return None
+    
+    def _extract_beginners_corporations_from_table(self, table_html: str) -> Optional[bool]:
+        """Extract the Beginners Corporations setting from table page HTML"""
+        try:
+            soup = BeautifulSoup(table_html, 'html.parser')
+            
+            # Look for the specific Beginners Corporations element
+            beginners_corps_element = soup.find('span', id='gameoption_100_displayed_value')
+            
+            if beginners_corps_element:
+                beginners_corps_text = beginners_corps_element.get_text().strip()
+                beginners_corps_on = beginners_corps_text.lower() == 'yes'
+                logger.info(f"Extracted Beginners Corporations: {beginners_corps_text} -> {beginners_corps_on}")
+                return beginners_corps_on
+            else:
+                logger.debug("Beginners Corporations element not found in table HTML")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error extracting Beginners Corporations from table HTML: {e}")
+            return None
+    
+    def _extract_game_speed_from_table(self, table_html: str) -> Optional[str]:
+        """Extract the Game Speed setting from table page HTML"""
+        try:
+            soup = BeautifulSoup(table_html, 'html.parser')
+            
+            # Look for the specific Game Speed element
+            game_speed_element = soup.find('span', id='gameoption_200_displayed_value')
+            
+            if game_speed_element:
+                game_speed_text = game_speed_element.get_text().strip()
+                logger.info(f"Extracted Game Speed: {game_speed_text}")
+                return game_speed_text
+            else:
+                logger.debug("Game Speed element not found in table HTML")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error extracting Game Speed from table HTML: {e}")
+            return None
+    
+    def parse_complete_game(self, replay_html: str, game_metadata: GameMetadata, table_id: str, player_perspective: str) -> GameData:
+        """Unified parsing method that takes GameMetadata instead of separate parameters"""
+        logger.info(f"Starting unified parsing for game {table_id}")
+        
+        soup = BeautifulSoup(replay_html, 'html.parser')
         
         # Extract gamelogs once for memory efficiency
-        gamelogs = self._extract_g_gamelogs(html_content)
+        gamelogs = self._extract_g_gamelogs(replay_html)
         
-        # Extract player IDs from reliable sources (assignment metadata or ELO data only)
-        player_id_map = self._get_player_id_map_from_metadata(assignment_metadata, elo_data)
+        # Extract player IDs from GameMetadata
+        player_id_map = self._get_player_id_map(game_metadata)
         
         # Extract VP progression throughout the game
-        vp_progression = self._extract_vp_progression(html_content, gamelogs)
+        vp_progression = self._extract_vp_progression(replay_html, gamelogs)
         
         # Extract corporations from HTML
         corporations = self._extract_corporations(soup)
@@ -169,7 +405,7 @@ class Parser:
         if gamelogs and player_id_map:
             logger.info("Adding comprehensive tracking data to game states")
             # Extract tracker dictionary dynamically from HTML
-            tracker_dict = self._extract_tracker_dictionary_from_html(html_content)
+            tracker_dict = self._extract_tracker_dictionary_from_html(replay_html)
             
             # Get player IDs for tracking
             player_ids = list(player_id_map.keys())
@@ -181,74 +417,135 @@ class Parser:
             self._update_game_states_with_tracking(moves_with_states, tracking_progression)
 
         # Build final player objects from collected data
-        players_info = self._build_final_players(player_id_map, corporations, moves_with_states, assignment_metadata)
+        players_info = self._build_final_players(player_id_map, corporations, moves_with_states, game_metadata)
         
         # Determine winner from final game state
         winner = self._determine_winner_from_game_states(moves_with_states, players_info)
         
         # Extract game metadata
-        metadata = self._extract_metadata(soup, html_content, moves_with_states)
+        metadata = self._extract_metadata(soup, replay_html, moves_with_states)
         
         # Calculate max generation from vp_progression or moves
         max_generation = self._calculate_max_generation(vp_progression, moves_with_states)
         
-        # Create game data with assignment metadata fields
+        # Create game data with game metadata fields
         game_data = GameData(
-            replay_id=replay_id,
+            replay_id=table_id,
             player_perspective=player_perspective,
-            game_date=self._extract_game_date(soup, assignment_metadata),
+            game_date=self._extract_game_date(soup, game_metadata),
             game_duration=self._calculate_game_duration(moves_with_states),
             winner=winner,
             generations=max_generation,
-            # Add assignment metadata fields to top level
-            map=assignment_metadata.map if assignment_metadata else None,
-            prelude_on=assignment_metadata.prelude_on if assignment_metadata else None,
-            colonies_on=assignment_metadata.colonies_on if assignment_metadata else None,
-            corporate_era_on=assignment_metadata.corporate_era_on if assignment_metadata else None,
-            draft_on=assignment_metadata.draft_on if assignment_metadata else None,
-            beginners_corporations_on=assignment_metadata.beginners_corporations_on if assignment_metadata else None,
-            game_speed=assignment_metadata.game_speed if assignment_metadata else None,
+            # Add game metadata fields to top level
+            map=game_metadata.map,
+            prelude_on=game_metadata.prelude_on,
+            colonies_on=game_metadata.colonies_on,
+            corporate_era_on=game_metadata.corporate_era_on,
+            draft_on=game_metadata.draft_on,
+            beginners_corporations_on=game_metadata.beginners_corporations_on,
+            game_speed=game_metadata.game_speed,
             players=players_info,
             moves=moves_with_states,
             metadata=metadata
         )
         
-        logger.info(f"Parsing complete for game {replay_id}: {len(moves_with_states)} moves, {len(players_info)} players")
+        logger.info(f"Unified parsing complete for game {table_id}: {len(moves_with_states)} moves, {len(players_info)} players")
         return game_data
     
-    def _get_player_id_map_from_metadata(self, assignment_metadata: Optional[AssignmentMetadata] = None, elo_data: Optional[Dict[str, EloData]] = None) -> Dict[str, str]:
-        """Extract player ID to name mapping from reliable sources (assignment metadata or ELO data only)"""
+    def _get_player_id_map(self, game_metadata: GameMetadata) -> Dict[str, str]:
+        """Extract player ID to name mapping from GameMetadata"""
         player_id_map = {}  # player_id -> player_name
         
-        # Priority 1: Assignment metadata (most reliable)
-        if assignment_metadata and assignment_metadata.players:
-            logger.info("Extracting player IDs from assignment metadata")
-            for player_meta in assignment_metadata.players:
-                player_id = str(player_meta.get('playerId', ''))
-                player_name = player_meta.get('playerName', 'Unknown')
-                if player_id and player_name:
-                    player_id_map[player_id] = player_name
-                    logger.debug(f"Assignment metadata: {player_id} -> {player_name}")
+        if game_metadata and game_metadata.players:
+            logger.info("Extracting player IDs from GameMetadata")
+            for player_id, elo_data in game_metadata.players.items():
+                if elo_data.player_name:
+                    player_id_map[player_id] = elo_data.player_name
+                    logger.debug(f"GameMetadata: {player_id} -> {elo_data.player_name}")
             
             if player_id_map:
-                logger.info(f"Successfully extracted {len(player_id_map)} players from assignment metadata")
+                logger.info(f"Successfully extracted {len(player_id_map)} players from GameMetadata")
                 return player_id_map
         
-        # Priority 2: ELO data (second most reliable)
-        if elo_data:
-            logger.info("Extracting player IDs from ELO data")
-            for player_name, elo_info in elo_data.items():
-                if elo_info.player_id and elo_info.player_name:
-                    player_id_map[elo_info.player_id] = elo_info.player_name
-                    logger.debug(f"ELO data: {elo_info.player_id} -> {elo_info.player_name}")
+        # If no player data available, raise an error
+        logger.error("No player data available in GameMetadata")
+        raise ValueError("Parser requires GameMetadata with player information")
+    
+    def _build_final_players(self, player_id_map: Dict[str, str], corporations: Dict[str, str], 
+                                               moves_with_states: List[Move], game_metadata: GameMetadata) -> Dict[str, Player]:
+        """Build final player objects from collected data using GameMetadata"""
+        players = {}
+        
+        # Get final VP data from the last move with game state
+        final_vp_data = {}
+        if moves_with_states:
+            for move in reversed(moves_with_states):
+                if move.game_state and move.game_state.player_vp:
+                    final_vp_data = move.game_state.player_vp
+                    break
+        
+        # Build player objects
+        for player_id, player_name in player_id_map.items():
+            # Get final VP and breakdown
+            final_vp = 0
+            vp_breakdown = {}
+            if player_id in final_vp_data:
+                final_vp = final_vp_data[player_id].get('total', 0)
+                vp_breakdown = final_vp_data[player_id].get('total_details', {})
             
-            if player_id_map:
-                logger.info(f"Successfully extracted {len(player_id_map)} players from ELO data")
-                return player_id_map
+            # Collect cards played, milestones, awards from moves
+            cards_played = []
+            milestones_claimed = []
+            awards_funded = []
+            
+            for move in moves_with_states:
+                if move.player_id == player_id:
+                    if move.card_played:
+                        cards_played.append(move.card_played)
+                    if move.action_type == 'claim_milestone':
+                        milestone_match = re.search(r'claims milestone (\w+)', move.description)
+                        if milestone_match:
+                            milestones_claimed.append(milestone_match.group(1))
+                    if move.action_type == 'fund_award':
+                        award_match = re.search(r'funds (\w+) award', move.description)
+                        if award_match:
+                            awards_funded.append(award_match.group(1))
+            
+            # Get ELO data from GameMetadata
+            elo_data = None
+            if game_metadata and game_metadata.players and player_id in game_metadata.players:
+                elo_data = game_metadata.players[player_id]
+            
+            players[player_id] = Player(
+                player_id=player_id,
+                player_name=player_name,
+                corporation=corporations.get(player_name, 'Unknown'),
+                final_vp=final_vp,
+                final_tr=vp_breakdown.get('tr', 20),
+                vp_breakdown=vp_breakdown,
+                cards_played=cards_played,
+                milestones_claimed=milestones_claimed,
+                awards_funded=awards_funded,
+                elo_data=elo_data
+            )
         
-        # If neither source is available, raise an error
-        logger.error("No reliable player data source available (neither assignment metadata nor ELO data provided)")
-        raise ValueError("Parser requires either assignment metadata or ELO data to identify players reliably")
+        logger.info(f"Built {len(players)} final player objects from GameMetadata")
+        return players
+    
+    def _extract_game_date(self, soup: BeautifulSoup, game_metadata: GameMetadata) -> str:
+        """Extract game date from GameMetadata or HTML"""
+        # If GameMetadata has played_at timestamp, use it
+        if game_metadata and game_metadata.played_at:
+            try:
+                # Parse the ISO timestamp and convert to date
+                played_at_dt = datetime.fromisoformat(game_metadata.played_at.replace('Z', '+00:00'))
+                return played_at_dt.strftime("%Y-%m-%d")
+            except (ValueError, AttributeError) as e:
+                logger.warning(f"Failed to parse played_at timestamp '{game_metadata.played_at}': {e}")
+        
+        # Fallback: Look for date information in the HTML
+        # This would need to be customized based on BGA's HTML structure
+        return datetime.now().strftime("%Y-%m-%d")
     
     def _extract_all_moves(self, soup: BeautifulSoup, players_info: Dict[str, Player], gamelogs: Dict[str, Any] = None) -> List[Move]:
         """Extract all moves with detailed information"""
@@ -1256,21 +1553,6 @@ class Parser:
         logger.info(f"Total corporations extracted: {corporations}")
         return corporations
     
-    def _extract_game_date(self, soup: BeautifulSoup, assignment_metadata: Optional[AssignmentMetadata] = None) -> str:
-        """Extract game date from HTML or assignment metadata"""
-        # If assignment metadata is provided and has playedAt timestamp, use it
-        if assignment_metadata and assignment_metadata.played_at:
-            try:
-                # Parse the ISO timestamp and convert to date
-                played_at_dt = datetime.fromisoformat(assignment_metadata.played_at.replace('Z', '+00:00'))
-                return played_at_dt.strftime("%Y-%m-%d")
-            except (ValueError, AttributeError) as e:
-                logger.warning(f"Failed to parse playedAt timestamp '{assignment_metadata.played_at}': {e}")
-        
-        # Fallback: Look for date information in the HTML
-        # This would need to be customized based on BGA's HTML structure
-        return datetime.now().strftime("%Y-%m-%d")
-    
     def _calculate_game_duration(self, moves: List[Move]) -> str:
         """Calculate game duration from moves"""
         if not moves or len(moves) < 2:
@@ -1663,21 +1945,25 @@ class Parser:
         logger.info("Completed updating game states with comprehensive tracking data")
 
     def parse_complete_game_with_elo(self, replay_html: str, table_html: str, table_id: str, player_perspective: str) -> GameData:
-        """Parse a complete game with ELO data from both replay and table HTML"""
-        logger.info(f"Starting parsing with ELO data for game {table_id}")
+        """Parse a complete game with ELO data from both replay and table HTML (legacy method for backward compatibility)"""
+        logger.info(f"Starting parsing with ELO data for game {table_id} (legacy method)")
         
-        # Parse ELO data from table HTML first to get player names
-        elo_data = self.parse_elo_data(table_html)
-        logger.info(f"Found ELO data for players: {list(elo_data.keys())}")
+        # Parse table metadata first
+        game_metadata = self.parse_table_metadata(table_html)
         
-        # Parse the main game data from replay HTML, passing ELO data
-        game_data = self.parse_complete_game(replay_html, table_id, player_perspective, elo_data=elo_data)
+        game_data = self.parse_complete_game(
+            replay_html=replay_html,
+            game_metadata=game_metadata,
+            table_id=table_id,
+            player_perspective=player_perspective
+        )
         
-        # Update metadata to indicate ELO data was included
-        game_data.metadata['elo_data_included'] = len(elo_data) > 0
-        game_data.metadata['elo_players_found'] = len(elo_data)
+        # Update metadata to indicate ELO data was included (for backward compatibility)
+        if game_metadata.players:
+            game_data.metadata['elo_data_included'] = len(game_metadata.players) > 0
+            game_data.metadata['elo_players_found'] = len(game_metadata.players)
         
-        logger.info(f"Parsing with ELO complete for game {table_id}: ELO data found for {len(elo_data)} players")
+        logger.info(f"Legacy parsing with ELO complete for game {table_id}")
         return game_data
     
     def parse_elo_data(self, table_html: str) -> Dict[str, EloData]:
@@ -1834,65 +2120,21 @@ class Parser:
         try:
             logger.info(f"Parsing replay with assignment metadata for game {table_id}")
             
-            # Create AssignmentMetadata object from the raw assignment data
-            assignment_meta_obj = AssignmentMetadata(
-                played_at=assignment_metadata.get('playedAt'),
-                map=assignment_metadata.get('map'),
-                prelude_on=assignment_metadata.get('preludeOn'),
-                colonies_on=assignment_metadata.get('coloniesOn'),
-                corporate_era_on=assignment_metadata.get('corporateEraOn'),
-                draft_on=assignment_metadata.get('draftOn'),
-                beginners_corporations_on=assignment_metadata.get('beginnersCorporationsOn'),
-                game_speed=assignment_metadata.get('gameSpeed'),
-                game_mode=assignment_metadata.get('gameMode', 'Arena mode'),
-                version_id=assignment_metadata.get('versionId'),
-                players=assignment_metadata.get('players', [])
+            # Convert assignment metadata to GameMetadata format
+            game_metadata = self.convert_assignment_to_game_metadata(assignment_metadata)
+            
+            # Use unified parsing method
+            game_data = self.parse_complete_game(
+                replay_html=replay_html,
+                game_metadata=game_metadata,
+                table_id=table_id,
+                player_perspective=player_perspective
             )
             
-            # Parse basic game data from replay HTML with assignment metadata
-            game_data = self.parse_complete_game(replay_html, table_id, player_perspective, assignment_meta_obj)
-            
-            # Extract assignment metadata for ELO processing
-            game_mode = assignment_metadata.get('gameMode', 'Arena mode')
-            version_id = assignment_metadata.get('versionId')
-            players_metadata = assignment_metadata.get('players', [])
-            
-            # Create ELO data from assignment metadata
-            elo_data = {}
-            for player_meta in players_metadata:
-                player_name = player_meta.get('playerName', 'Unknown')
-                player_id = str(player_meta.get('playerId', ''))
-                elo = player_meta.get('elo', 0)
-                elo_change = player_meta.get('eloChange', 0)
-                arena_points = player_meta.get('arenaPoints')
-                arena_points_change = player_meta.get('arenaPointsChange')
-                position = player_meta.get('position', 1)
-                
-                # Create EloData object from assignment metadata with full data
-                elo_data[player_name] = EloData(
-                    player_name=player_name,
-                    player_id=player_id,
-                    position=position,
-                    arena_points=arena_points,
-                    arena_points_change=arena_points_change,
-                    game_rank=elo,
-                    game_rank_change=elo_change
-                )
-            
-            # If no players were found in replay HTML, create them from assignment metadata
-            if not game_data.players and elo_data:
-                logger.info("No players found in replay HTML, creating from assignment metadata")
-                game_data.players = self._create_players_from_assignment_metadata(elo_data, assignment_metadata, replay_html, table_id)
-            
-            # Merge ELO data into player information
-            self._merge_elo_with_players(game_data.players, elo_data)
-            
-            # Add assignment metadata to game data
-            game_data.metadata['game_mode'] = game_mode
-            game_data.metadata['version_id'] = version_id
+            # Add assignment metadata to game data metadata
             game_data.metadata['assignment_metadata_used'] = True
-            game_data.metadata['elo_data_included'] = len(elo_data) > 0
-            game_data.metadata['elo_players_found'] = len(elo_data)
+            game_data.metadata['elo_data_included'] = len(game_metadata.players) > 0 if game_metadata.players else False
+            game_data.metadata['elo_players_found'] = len(game_metadata.players) if game_metadata.players else 0
             game_data.metadata['parsed_at'] = datetime.now().isoformat()
             
             # Convert to dictionary format for API upload
@@ -2111,77 +2353,6 @@ class Parser:
             move.game_state = game_state
         
         return moves
-
-    def _build_final_players(self, player_id_map: Dict[str, str], corporations: Dict[str, str], moves_with_states: List[Move], assignment_metadata: Optional[AssignmentMetadata] = None) -> Dict[str, Player]:
-        """Build final player objects from collected data"""
-        players = {}
-        
-        # Get final VP data from the last move with game state
-        final_vp_data = {}
-        if moves_with_states:
-            for move in reversed(moves_with_states):
-                if move.game_state and move.game_state.player_vp:
-                    final_vp_data = move.game_state.player_vp
-                    break
-        
-        # Build player objects
-        for player_id, player_name in player_id_map.items():
-            # Get final VP and breakdown
-            final_vp = 0
-            vp_breakdown = {}
-            if player_id in final_vp_data:
-                final_vp = final_vp_data[player_id].get('total', 0)
-                vp_breakdown = final_vp_data[player_id].get('total_details', {})
-            
-            # Collect cards played, milestones, awards from moves
-            cards_played = []
-            milestones_claimed = []
-            awards_funded = []
-            
-            for move in moves_with_states:
-                if move.player_id == player_id:
-                    if move.card_played:
-                        cards_played.append(move.card_played)
-                    if move.action_type == 'claim_milestone':
-                        milestone_match = re.search(r'claims milestone (\w+)', move.description)
-                        if milestone_match:
-                            milestones_claimed.append(milestone_match.group(1))
-                    if move.action_type == 'fund_award':
-                        award_match = re.search(r'funds (\w+) award', move.description)
-                        if award_match:
-                            awards_funded.append(award_match.group(1))
-            
-            # Get ELO data from assignment metadata if available
-            elo_data = None
-            if assignment_metadata and assignment_metadata.players:
-                for player_meta in assignment_metadata.players:
-                    if str(player_meta.get('playerId', '')) == player_id:
-                        elo_data = EloData(
-                            player_name=player_name,
-                            player_id=player_id,
-                            position=player_meta.get('position', 1),
-                            arena_points=player_meta.get('arenaPoints'),
-                            arena_points_change=player_meta.get('arenaPointsChange'),
-                            game_rank=player_meta.get('elo', 0),
-                            game_rank_change=player_meta.get('eloChange', 0)
-                        )
-                        break
-            
-            players[player_id] = Player(
-                player_id=player_id,
-                player_name=player_name,
-                corporation=corporations.get(player_name, 'Unknown'),
-                final_vp=final_vp,
-                final_tr=vp_breakdown.get('tr', 20),
-                vp_breakdown=vp_breakdown,
-                cards_played=cards_played,
-                milestones_claimed=milestones_claimed,
-                awards_funded=awards_funded,
-                elo_data=elo_data
-            )
-        
-        logger.info(f"Built {len(players)} final player objects")
-        return players
 
     def _determine_winner_from_game_states(self, moves_with_states: List[Move], players_info: Dict[str, Player]) -> str:
         """Determine winner from final game state VP data"""

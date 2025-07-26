@@ -678,14 +678,21 @@ def handle_scrape_complete(args) -> None:
                         )
                         games_registry.mark_game_scraped(table_id, player_perspective=player_id)
                         
-                        # Parse the game
+                        # Parse the game using new unified method
                         table_html = result['table_data']['html_content']
                         replay_html = result['replay_data'].get('html_content', '')
                         
                         if replay_html:
-                            game_data = parser.parse_complete_game_with_elo(
+                            # Parse table metadata first
+                            game_metadata = parser.parse_table_metadata(table_html)
+                            
+                            # Add version if available
+                            if version:
+                                game_metadata.version_id = version
+                            
+                            game_data = parser.parse_complete_game(
                                 replay_html=replay_html,
-                                table_html=table_html,
+                                game_metadata=game_metadata,
                                 table_id=table_id,
                                 player_perspective=player_id
                             )
