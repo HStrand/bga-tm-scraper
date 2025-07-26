@@ -137,7 +137,7 @@ class Parser:
     def __init__(self):
         pass
     
-    def parse_complete_game(self, html_content: str, replay_id: str, player_perspective: str, assignment_metadata: Optional[AssignmentMetadata] = None) -> GameData:
+    def parse_complete_game(self, html_content: str, replay_id: str, player_perspective: str, assignment_metadata: Optional[AssignmentMetadata] = None, elo_data: Optional[Dict[str, EloData]] = None) -> GameData:
         """Parse a complete game and return comprehensive data structure"""
         logger.info(f"Starting parsing for game {replay_id}")
         
@@ -146,27 +146,33 @@ class Parser:
         # Extract gamelogs once for memory efficiency
         gamelogs = self._extract_g_gamelogs(html_content)
         
-        # Extract basic game info
-        players_info = self._extract_players_info(soup, html_content)
-        
-        # Extract all moves with detailed parsing
-        moves = self._extract_all_moves(soup, players_info, gamelogs)
+        # Extract player IDs from reliable sources (assignment metadata or ELO data only)
+        player_id_map = self._get_player_id_map_from_metadata(assignment_metadata, elo_data)
         
         # Extract VP progression throughout the game
         vp_progression = self._extract_vp_progression(html_content)
         
+        # Extract corporations from HTML
+        corporations = self._extract_corporations(soup)
+        
+        # Create simple name_to_id mapping for move processing
+        name_to_id = {name: player_id for player_id, name in player_id_map.items()}
+        
+        # Extract all moves with detailed parsing (using simple name mapping)
+        moves = self._extract_all_moves_simple(soup, name_to_id, gamelogs)
+        
         # Build game states for each move
-        moves_with_states = self._build_game_states(moves, vp_progression, players_info, gamelogs)
+        moves_with_states = self._build_game_states_simple(moves, vp_progression, list(player_id_map.keys()), gamelogs)
         
         # Add comprehensive resource/production/tag tracking if gamelogs available
         tracking_progression = []
-        if gamelogs and players_info:
+        if gamelogs and player_id_map:
             logger.info("Adding comprehensive tracking data to game states")
             # Extract tracker dictionary dynamically from HTML
             tracker_dict = self._extract_tracker_dictionary_from_html(html_content)
             
             # Get player IDs for tracking
-            player_ids = list(players_info.keys())
+            player_ids = list(player_id_map.keys())
             
             # Track resources and production through all moves
             tracking_progression = self._track_resources_and_production(gamelogs, player_ids, tracker_dict)
@@ -174,8 +180,11 @@ class Parser:
             # Update game states with tracking data
             self._update_game_states_with_tracking(moves_with_states, tracking_progression)
 
-        # Determine winner
-        winner = self._determine_winner(players_info)
+        # Build final player objects from collected data
+        players_info = self._build_final_players(player_id_map, corporations, moves_with_states, assignment_metadata)
+        
+        # Determine winner from final game state
+        winner = self._determine_winner_from_game_states(moves_with_states, players_info)
         
         # Extract game metadata
         metadata = self._extract_metadata(soup, html_content, moves_with_states)
@@ -207,74 +216,39 @@ class Parser:
         logger.info(f"Parsing complete for game {replay_id}: {len(moves_with_states)} moves, {len(players_info)} players")
         return game_data
     
-    def _extract_players_info(self, soup: BeautifulSoup, html_content: str) -> Dict[str, Player]:
-        """Extract comprehensive player information using gamelogs-first approach"""
-        # First, try to get player names from gamelogs (most reliable)
-        gamelogs = self._extract_g_gamelogs(html_content)
-        vp_data = self._extract_vp_data_from_html(html_content)
-        valid_player_ids = set(vp_data.keys())
+    def _get_player_id_map_from_metadata(self, assignment_metadata: Optional[AssignmentMetadata] = None, elo_data: Optional[Dict[str, EloData]] = None) -> Dict[str, str]:
+        """Extract player ID to name mapping from reliable sources (assignment metadata or ELO data only)"""
+        player_id_map = {}  # player_id -> player_name
         
-        player_names = []
-        player_id_map = {}
-        
-        if gamelogs and valid_player_ids:
-            logger.info("Extracting player info using gamelogs-first approach")
-            # Extract player mapping directly from gamelogs
-            gamelogs_mapping = self._extract_player_mapping_from_gamelogs(gamelogs, valid_player_ids)
-            if gamelogs_mapping:
-                logger.info(f"Found complete gamelogs mapping: {gamelogs_mapping}")
-                player_names = list(gamelogs_mapping.keys())
-                player_id_map = gamelogs_mapping
-        
-        # Fallback: Get player names from HTML span elements if gamelogs approach failed
-        if not player_names:
-            logger.info("Gamelogs approach failed, falling back to HTML span extraction")
-            player_elements = soup.find_all('span', class_='playername')
-            for elem in player_elements:
-                player_name = elem.get_text().strip()
-                if player_name and player_name not in player_names:
-                    player_names.append(player_name)
+        # Priority 1: Assignment metadata (most reliable)
+        if assignment_metadata and assignment_metadata.players:
+            logger.info("Extracting player IDs from assignment metadata")
+            for player_meta in assignment_metadata.players:
+                player_id = str(player_meta.get('playerId', ''))
+                player_name = player_meta.get('playerName', 'Unknown')
+                if player_id and player_name:
+                    player_id_map[player_id] = player_name
+                    logger.debug(f"Assignment metadata: {player_id} -> {player_name}")
             
-            # Get player ID mapping using the improved method
-            if player_names:
-                player_id_map = self._extract_player_id_mapping(html_content, player_names)
+            if player_id_map:
+                logger.info(f"Successfully extracted {len(player_id_map)} players from assignment metadata")
+                return player_id_map
         
-        # Final fallback: Extract player names from move descriptions
-        if not player_names:
-            logger.info("No playername spans found, extracting from move descriptions")
-            player_names = self._extract_player_names_from_moves(soup)
-            if player_names:
-                player_id_map = self._extract_player_id_mapping(html_content, player_names)
-        
-        # Get corporations
-        corporations = self._extract_corporations(soup)
-        
-        # Build player objects
-        players = {}
-        for player_name in player_names:
-            player_id = player_id_map.get(player_name, f"unknown_{len(players)}")
+        # Priority 2: ELO data (second most reliable)
+        if elo_data:
+            logger.info("Extracting player IDs from ELO data")
+            for player_name, elo_info in elo_data.items():
+                if elo_info.player_id and elo_info.player_name:
+                    player_id_map[elo_info.player_id] = elo_info.player_name
+                    logger.debug(f"ELO data: {elo_info.player_id} -> {elo_info.player_name}")
             
-            # Get final VP and breakdown
-            final_vp = 0
-            vp_breakdown = {}
-            if player_id in vp_data:
-                final_vp = vp_data[player_id].get('total', 0)
-                vp_breakdown = vp_data[player_id].get('total_details', {})
-            
-            players[player_id] = Player(
-                player_id=player_id,
-                player_name=player_name,
-                corporation=corporations.get(player_name, 'Unknown'),
-                final_vp=final_vp,
-                final_tr=vp_breakdown.get('tr', 20),
-                vp_breakdown=vp_breakdown,
-                cards_played=[],  # Will be populated from moves
-                milestones_claimed=[],  # Will be populated from moves
-                awards_funded=[]  # Will be populated from moves
-            )
+            if player_id_map:
+                logger.info(f"Successfully extracted {len(player_id_map)} players from ELO data")
+                return player_id_map
         
-        logger.info(f"Extracted {len(players)} players using gamelogs-first approach: {list(players.keys())}")
-        return players
+        # If neither source is available, raise an error
+        logger.error("No reliable player data source available (neither assignment metadata nor ELO data provided)")
+        raise ValueError("Parser requires either assignment metadata or ELO data to identify players reliably")
     
     def _extract_player_names_from_moves(self, soup: BeautifulSoup) -> List[str]:
         """Extract player names from move descriptions as fallback"""
@@ -1188,6 +1162,10 @@ class Parser:
                     # Look for scoringTable type entries
                     if data_item.get('type') == 'scoringTable':
                         scoring_data = data_item.get('args', {}).get('data', {})
+
+                        if not scoring_data:
+                            scoring_data = data_item.get('args', {}) # Older format
+
                         if scoring_data:
                             # Replace IDs with names in the scoring data, including hex information
                             scoring_data_with_names = self._replace_ids_with_names(
@@ -1337,7 +1315,12 @@ class Parser:
                     
                     # Look for scoringTable type entries
                     if data_item.get('type') == 'scoringTable':
+
                         scoring_data = data_item.get('args', {}).get('data', {})
+
+                        if not scoring_data:
+                            scoring_data = data_item.get('args', {})
+
                         if scoring_data:
                             # Replace IDs with names in the scoring data, including hex information
                             scoring_data_with_names = self._replace_ids_with_names(
@@ -1395,10 +1378,108 @@ class Parser:
         return vp_progression
     
     def _extract_vp_data_from_html(self, html_content: str) -> Dict[str, Any]:
-        """Extract VP data from HTML - reusing existing logic"""
-        pattern = r'"data":\{("(\d+)":\{.*?"total":(\d+).*?\}.*?"(\d+)":\{.*?"total":(\d+).*?\})\}'
+        """Extract VP data from HTML - handles both newer and older formats with variable player counts"""
+        logger.debug("Extracting VP data from HTML")
         
-        matches = re.findall(pattern, html_content, re.DOTALL)
+        # Try newer format first (with "data" wrapper in scoringTable)
+        newer_pattern = r'"type":"scoringTable"[^}]*?"args":\s*\{\s*"data":\s*(\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\})'
+        matches = re.findall(newer_pattern, html_content, re.DOTALL)
+        
+        if matches:
+            logger.debug(f"Found {len(matches)} matches with newer format")
+            # Try to parse each match and find the one with highest total VP
+            best_vp_data = None
+            best_total = 0
+            
+            for match in matches:
+                try:
+                    vp_data = json.loads(match)
+                    # Calculate total VP across all players
+                    total_vp = sum(player_data.get('total', 0) for player_data in vp_data.values() if isinstance(player_data, dict))
+                    
+                    if total_vp > best_total:
+                        best_total = total_vp
+                        best_vp_data = vp_data
+                        logger.debug(f"Found better VP data with total {total_vp}")
+                        
+                except json.JSONDecodeError as e:
+                    logger.debug(f"Failed to parse newer format match: {e}")
+                    continue
+            
+            if best_vp_data:
+                logger.info(f"Successfully extracted VP data (newer format) for {len(best_vp_data)} players, total VP: {best_total}")
+                return best_vp_data
+        
+        # Try older format (direct player data in scoringTable args)
+        older_pattern = r'"type":"scoringTable"[^}]*?"args":\s*(\{"[0-9]+":.*?\})'
+        matches = re.findall(older_pattern, html_content, re.DOTALL)
+        
+        if matches:
+            logger.debug(f"Found {len(matches)} matches with older format")
+            # Try to parse each match and find the one with highest total VP
+            best_vp_data = None
+            best_total = 0
+            
+            for match in matches:
+                try:
+                    # Need to properly close the JSON - find the end of the player data
+                    # Look for the complete args object
+                    args_start = html_content.find(match)
+                    if args_start == -1:
+                        continue
+                    
+                    # Find the closing brace for the args object
+                    brace_count = 0
+                    end_pos = args_start
+                    in_string = False
+                    escape_next = False
+                    
+                    for i, char in enumerate(html_content[args_start:], args_start):
+                        if escape_next:
+                            escape_next = False
+                            continue
+                            
+                        if char == '\\':
+                            escape_next = True
+                            continue
+                            
+                        if char == '"' and not escape_next:
+                            in_string = not in_string
+                            continue
+                            
+                        if not in_string:
+                            if char == '{':
+                                brace_count += 1
+                            elif char == '}':
+                                brace_count -= 1
+                                if brace_count == 0:
+                                    end_pos = i + 1
+                                    break
+                    
+                    # Extract the complete JSON
+                    complete_json = html_content[args_start:end_pos]
+                    vp_data = json.loads(complete_json)
+                    
+                    # Calculate total VP across all players
+                    total_vp = sum(player_data.get('total', 0) for player_data in vp_data.values() if isinstance(player_data, dict))
+                    
+                    if total_vp > best_total:
+                        best_total = total_vp
+                        best_vp_data = vp_data
+                        logger.debug(f"Found better VP data with total {total_vp}")
+                        
+                except json.JSONDecodeError as e:
+                    logger.debug(f"Failed to parse older format match: {e}")
+                    continue
+            
+            if best_vp_data:
+                logger.info(f"Successfully extracted VP data (older format) for {len(best_vp_data)} players, total VP: {best_total}")
+                return best_vp_data
+        
+        # Final fallback - try the original regex approach for backwards compatibility
+        logger.debug("Trying original regex fallback")
+        original_pattern = r'"data":\{("(\d+)":\{.*?"total":(\d+).*?\}.*?"(\d+)":\{.*?"total":(\d+).*?\})\}'
+        matches = re.findall(original_pattern, html_content, re.DOTALL)
         
         if matches:
             best_match = None
@@ -1417,10 +1498,13 @@ class Parser:
                     if brace_count > 0:
                         json_str = "{" + best_match + '}' * brace_count + "}"
                     
-                    return json.loads(json_str)
+                    result = json.loads(json_str)
+                    logger.info(f"Successfully extracted VP data (fallback) for {len(result)} players")
+                    return result
                 except json.JSONDecodeError:
                     pass
         
+        logger.warning("Failed to extract VP data from HTML using all methods")
         return {}
     
     def _extract_player_id_mapping(self, html_content: str, player_names: List[str]) -> Dict[str, str]:
@@ -1547,6 +1631,43 @@ class Parser:
             
             return fallback_map
     
+    def _extract_player_mapping_from_gamelogs_direct(self, gamelogs: Dict[str, Any]) -> Dict[str, str]:
+        """Extract player ID to name mapping directly from gamelogs data (no validation needed)"""
+        mapping = {}  # player_id -> player_name
+        
+        try:
+            data_entries = gamelogs.get('data', {}).get('data', [])
+            
+            for entry in data_entries:
+                if not isinstance(entry, dict):
+                    continue
+                
+                entry_data = entry.get('data', [])
+                if not isinstance(entry_data, list):
+                    continue
+                
+                for data_item in entry_data:
+                    if not isinstance(data_item, dict):
+                        continue
+                    
+                    args = data_item.get('args', {})
+                    
+                    # Look for entries that have both player_id and player_name
+                    if 'player_id' in args and 'player_name' in args:
+                        player_id = str(args['player_id'])
+                        player_name = args['player_name']
+                        
+                        if player_id and player_name:
+                            mapping[player_id] = player_name
+                            logger.debug(f"Gamelogs direct mapping: {player_id} -> {player_name}")
+            
+            logger.info(f"Extracted {len(mapping)} direct player mappings from gamelogs")
+            return mapping
+            
+        except Exception as e:
+            logger.error(f"Error extracting direct player mapping from gamelogs: {e}")
+            return {}
+
     def _extract_player_mapping_from_gamelogs(self, gamelogs: Dict[str, Any], valid_player_ids: set) -> Dict[str, str]:
         """Extract player name to ID mapping from gamelogs data"""
         mapping = {}
@@ -2204,19 +2325,11 @@ class Parser:
         elo_data = self.parse_elo_data(table_html)
         logger.info(f"Found ELO data for players: {list(elo_data.keys())}")
         
-        # Parse the main game data from replay HTML
-        game_data = self.parse_complete_game(replay_html, table_id, player_perspective)
+        # Parse the main game data from replay HTML, passing ELO data
+        game_data = self.parse_complete_game(replay_html, table_id, player_perspective, elo_data=elo_data)
         
         # Validate that we have meaningful game data before proceeding
         has_meaningful_data = self._validate_meaningful_game_data(game_data, replay_html)
-        
-        # If no players were found in replay HTML, create them from ELO data
-        if not game_data.players and elo_data:
-            logger.info("No players found in replay HTML, creating from ELO data")
-            game_data.players = self._create_players_from_elo_data(elo_data, replay_html, table_id)
-        
-        # Merge ELO data into player information
-        self._merge_elo_with_players(game_data.players, elo_data)
         
         # Update metadata to indicate ELO data was included
         game_data.metadata['elo_data_included'] = len(elo_data) > 0
@@ -2746,6 +2859,248 @@ class Parser:
             logger.error(f"Error converting game data to API format: {e}")
             return {}
 
+
+    def _extract_all_moves_simple(self, soup: BeautifulSoup, name_to_id: Dict[str, str], gamelogs: Dict[str, Any] = None) -> List[Move]:
+        """Extract all moves with simple name-to-ID mapping"""
+        moves = []
+        move_divs = soup.find_all('div', class_='replaylogs_move')
+        
+        for move_div in move_divs:
+            move = self._parse_single_move_detailed(move_div, name_to_id, gamelogs)
+            if move:
+                moves.append(move)
+        
+        return moves
+
+    def _build_game_states_simple(self, moves: List[Move], vp_progression: List[Dict[str, Any]], player_ids: List[str], gamelogs: Dict[str, Any] = None) -> List[Move]:
+        """Build game states for each move with simple player ID list"""
+        # Initialize tracking variables
+        current_temp = -30
+        current_oxygen = 0
+        current_oceans = 0
+        current_generation = 1
+        
+        # Track milestones and awards state throughout the game
+        current_milestones = {}
+        current_awards = {}
+        
+        # Initialize default VP data for all players
+        default_vp_data = {}
+        for player_id in player_ids:
+            default_vp_data[player_id] = {
+                "total": 20,
+                "total_details": {
+                    "tr": 20,
+                    "awards": 0,
+                    "milestones": 0,
+                    "cities": 0,
+                    "greeneries": 0,
+                    "cards": 0
+                }
+            }
+        
+        # Track the last known VP data to carry forward when no new data is available
+        last_vp_data = dict(default_vp_data)
+        
+        # Create a mapping from move_number to VP data for proper correlation
+        vp_by_move_number = {}
+        for vp_entry in vp_progression:
+            move_number = vp_entry.get('move_number')
+            if move_number:
+                # Convert move_number to string for consistent matching
+                vp_by_move_number[str(move_number)] = vp_entry.get('vp_data', {})
+        
+        logger.info(f"Built VP mapping for {len(vp_by_move_number)} moves")
+        
+        # Extract parameter changes from gamelogs if available
+        parameter_changes_by_move = {}
+        if gamelogs:
+            parameter_changes_by_move = self._extract_parameter_changes_from_gamelogs(gamelogs)
+            logger.info(f"Extracted parameter changes for {len(parameter_changes_by_move)} moves from gamelogs")
+        
+        # Process each move and build game state
+        for i, move in enumerate(moves):
+            # Update generation
+            if 'New generation' in move.description:
+                gen_match = re.search(r'New generation (\d+)', move.description)
+                if gen_match:
+                    current_generation = int(gen_match.group(1))
+            
+            # Update parameters from gamelogs data
+            move_parameter_changes = parameter_changes_by_move.get(move.move_number, {})
+            if move_parameter_changes:
+                if 'temperature' in move_parameter_changes:
+                    current_temp = move_parameter_changes['temperature']
+                    logger.debug(f"Move {move.move_number}: Temperature updated to {current_temp}")
+                if 'oxygen' in move_parameter_changes:
+                    current_oxygen = move_parameter_changes['oxygen']
+                    logger.debug(f"Move {move.move_number}: Oxygen updated to {current_oxygen}")
+                if 'oceans' in move_parameter_changes:
+                    current_oceans = move_parameter_changes['oceans']
+                    logger.debug(f"Move {move.move_number}: Oceans updated to {current_oceans}")
+            
+            # Update milestone and award tracking
+            if move.action_type == 'claim_milestone':
+                milestone_match = re.search(r'claims milestone (\w+)', move.description)
+                if milestone_match:
+                    milestone_name = milestone_match.group(1)
+                    current_milestones[milestone_name] = {
+                        'claimed_by': move.player_name,
+                        'player_id': move.player_id,
+                        'move_number': move.move_number,
+                        'timestamp': move.timestamp
+                    }
+            
+            if move.action_type == 'fund_award':
+                award_match = re.search(r'funds (\w+) award', move.description)
+                if award_match:
+                    award_name = award_match.group(1)
+                    current_awards[award_name] = {
+                        'funded_by': move.player_name,
+                        'player_id': move.player_id,
+                        'move_number': move.move_number,
+                        'timestamp': move.timestamp
+                    }
+            
+            # Get VP data for this move by matching move_number
+            move_vp_data = vp_by_move_number.get(str(move.move_number), {})
+            
+            # Ensure VP data is always present
+            if move_vp_data:
+                # Update last known VP data with new data
+                last_vp_data = dict(move_vp_data)
+                logger.debug(f"Updated VP data for move {move.move_number}")
+            else:
+                # Use last known VP data if no new data available
+                move_vp_data = dict(last_vp_data)
+                logger.debug(f"Using carried-forward VP data for move {move.move_number}")
+            
+            # Ensure all players have VP data (fill in missing players with defaults)
+            for player_id in player_ids:
+                if player_id not in move_vp_data:
+                    move_vp_data[player_id] = dict(default_vp_data[player_id])
+                    logger.debug(f"Added default VP data for missing player {player_id} in move {move.move_number}")
+            
+            # Create game state (without resource/production tracking)
+            game_state = GameState(
+                move_number=move.move_number,
+                generation=current_generation,
+                temperature=current_temp,
+                oxygen=current_oxygen,
+                oceans=current_oceans,
+                player_vp=move_vp_data,
+                milestones=dict(current_milestones),
+                awards=dict(current_awards)
+            )
+            
+            move.game_state = game_state
+        
+        return moves
+
+    def _build_final_players(self, player_id_map: Dict[str, str], corporations: Dict[str, str], moves_with_states: List[Move], assignment_metadata: Optional[AssignmentMetadata] = None) -> Dict[str, Player]:
+        """Build final player objects from collected data"""
+        players = {}
+        
+        # Get final VP data from the last move with game state
+        final_vp_data = {}
+        if moves_with_states:
+            for move in reversed(moves_with_states):
+                if move.game_state and move.game_state.player_vp:
+                    final_vp_data = move.game_state.player_vp
+                    break
+        
+        # Build player objects
+        for player_id, player_name in player_id_map.items():
+            # Get final VP and breakdown
+            final_vp = 0
+            vp_breakdown = {}
+            if player_id in final_vp_data:
+                final_vp = final_vp_data[player_id].get('total', 0)
+                vp_breakdown = final_vp_data[player_id].get('total_details', {})
+            
+            # Collect cards played, milestones, awards from moves
+            cards_played = []
+            milestones_claimed = []
+            awards_funded = []
+            
+            for move in moves_with_states:
+                if move.player_id == player_id:
+                    if move.card_played:
+                        cards_played.append(move.card_played)
+                    if move.action_type == 'claim_milestone':
+                        milestone_match = re.search(r'claims milestone (\w+)', move.description)
+                        if milestone_match:
+                            milestones_claimed.append(milestone_match.group(1))
+                    if move.action_type == 'fund_award':
+                        award_match = re.search(r'funds (\w+) award', move.description)
+                        if award_match:
+                            awards_funded.append(award_match.group(1))
+            
+            # Get ELO data from assignment metadata if available
+            elo_data = None
+            if assignment_metadata and assignment_metadata.players:
+                for player_meta in assignment_metadata.players:
+                    if str(player_meta.get('playerId', '')) == player_id:
+                        elo_data = EloData(
+                            player_name=player_name,
+                            player_id=player_id,
+                            position=player_meta.get('position', 1),
+                            arena_points=player_meta.get('arenaPoints'),
+                            arena_points_change=player_meta.get('arenaPointsChange'),
+                            game_rank=player_meta.get('elo', 0),
+                            game_rank_change=player_meta.get('eloChange', 0)
+                        )
+                        break
+            
+            players[player_id] = Player(
+                player_id=player_id,
+                player_name=player_name,
+                corporation=corporations.get(player_name, 'Unknown'),
+                final_vp=final_vp,
+                final_tr=vp_breakdown.get('tr', 20),
+                vp_breakdown=vp_breakdown,
+                cards_played=cards_played,
+                milestones_claimed=milestones_claimed,
+                awards_funded=awards_funded,
+                elo_data=elo_data
+            )
+        
+        logger.info(f"Built {len(players)} final player objects")
+        return players
+
+    def _determine_winner_from_game_states(self, moves_with_states: List[Move], players_info: Dict[str, Player]) -> str:
+        """Determine winner from final game state VP data"""
+        if not moves_with_states or not players_info:
+            return "Unknown"
+        
+        # Get final VP data from the last move with game state
+        final_vp_data = {}
+        for move in reversed(moves_with_states):
+            if move.game_state and move.game_state.player_vp:
+                final_vp_data = move.game_state.player_vp
+                break
+        
+        if not final_vp_data:
+            # Fallback to player info
+            max_vp = max(player.final_vp for player in players_info.values())
+            winners = [player.player_name for player in players_info.values() if player.final_vp == max_vp]
+            return winners[0] if winners else "Unknown"
+        
+        # Find player with highest VP
+        max_vp = 0
+        winner_id = None
+        
+        for player_id, vp_data in final_vp_data.items():
+            total_vp = vp_data.get('total', 0)
+            if total_vp > max_vp:
+                max_vp = total_vp
+                winner_id = player_id
+        
+        # Convert player ID to player name
+        if winner_id and winner_id in players_info:
+            return players_info[winner_id].player_name
+        
+        return "Unknown"
 
     def export_to_json(self, game_data: GameData, output_path: str, player_perspective: str = None):
         """Export game data to JSON with player perspective folder structure"""
