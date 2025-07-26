@@ -150,7 +150,7 @@ class Parser:
         player_id_map = self._get_player_id_map_from_metadata(assignment_metadata, elo_data)
         
         # Extract VP progression throughout the game
-        vp_progression = self._extract_vp_progression(html_content)
+        vp_progression = self._extract_vp_progression(html_content, gamelogs)
         
         # Extract corporations from HTML
         corporations = self._extract_corporations(soup)
@@ -974,14 +974,9 @@ class Parser:
         # This method exists to maintain consistency when gamelogs are processed separately
         return {}
 
-    def _extract_vp_progression(self, html_content: str) -> List[Dict[str, Any]]:
+    def _extract_vp_progression(self, html_content: str, gamelogs: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Extract VP progression throughout the game using g_gamelogs data"""
-        # Extract g_gamelogs first
-        gamelogs = self._extract_g_gamelogs(html_content)
-        if not gamelogs:
-            # Fallback to old method if g_gamelogs not found
-            return self._extract_vp_progression_fallback(html_content)
-        
+
         # Extract name mappings from HTML
         card_names = self._extract_card_names(html_content)
         milestone_names = self._extract_milestone_names(html_content)
@@ -1678,18 +1673,9 @@ class Parser:
         # Parse the main game data from replay HTML, passing ELO data
         game_data = self.parse_complete_game(replay_html, table_id, player_perspective, elo_data=elo_data)
         
-        # Validate that we have meaningful game data before proceeding
-        has_meaningful_data = self._validate_meaningful_game_data(game_data, replay_html)
-        
         # Update metadata to indicate ELO data was included
         game_data.metadata['elo_data_included'] = len(elo_data) > 0
         game_data.metadata['elo_players_found'] = len(elo_data)
-        
-        # If we only have ELO data and no meaningful game data, this should be considered a parsing failure
-        if not has_meaningful_data:
-            logger.warning(f"Game {table_id} only has ELO data, no meaningful replay data found")
-            logger.warning("This indicates the replay HTML is missing or corrupted")
-            raise ValueError(f"No meaningful game data found for {table_id} - only ELO data available. This suggests replay HTML is missing or incomplete.")
         
         logger.info(f"Parsing with ELO complete for game {table_id}: ELO data found for {len(elo_data)} players")
         return game_data
@@ -1818,86 +1804,6 @@ class Parser:
         except Exception as e:
             logger.error(f"Error parsing player from score entry: {e}")
             return None
-
-    def _validate_meaningful_game_data(self, game_data: GameData, replay_html: str) -> bool:
-        """
-        Validate that we have meaningful game data, not just ELO fallback data
-        
-        Args:
-            game_data: Parsed game data
-            replay_html: Original replay HTML content
-            
-        Returns:
-            bool: True if we have meaningful game data, False if only ELO fallback
-        """
-        try:
-            # Check for meaningful indicators of actual game data
-            meaningful_indicators = 0
-            
-            # 1. Check if we have actual moves (not just 0)
-            if len(game_data.moves) > 0:
-                meaningful_indicators += 1
-                logger.debug(f"Found {len(game_data.moves)} moves")
-            
-            # 2. Check if we have corporation data
-            corporations_found = 0
-            for player in game_data.players.values():
-                if player.corporation and player.corporation != 'Unknown':
-                    corporations_found += 1
-            
-            if corporations_found > 0:
-                meaningful_indicators += 1
-                logger.debug(f"Found {corporations_found} corporations")
-            
-            # 3. Check if we have card mappings in the HTML (indicates replay data)
-            card_names = self._extract_card_names(replay_html)
-            if len(card_names) > 0:
-                meaningful_indicators += 1
-                logger.debug(f"Found {len(card_names)} card mappings")
-            
-            # 4. Check if we have milestone/award mappings
-            milestone_names = self._extract_milestone_names(replay_html)
-            award_names = self._extract_award_names(replay_html)
-            if len(milestone_names) > 0 or len(award_names) > 0:
-                meaningful_indicators += 1
-                logger.debug(f"Found {len(milestone_names)} milestones, {len(award_names)} awards")
-            
-            # 5. Check if we have gamelogs data (strong indicator of replay HTML)
-            gamelogs = self._extract_g_gamelogs(replay_html)
-            if gamelogs and 'data' in gamelogs:
-                meaningful_indicators += 1
-                logger.debug("Found gamelogs data")
-            
-            # 6. Check if we have VP progression data
-            vp_progression = self._extract_vp_progression(replay_html)
-            if len(vp_progression) > 1:  # More than just initial state
-                meaningful_indicators += 1
-                logger.debug(f"Found {len(vp_progression)} VP progression entries")
-            
-            # 7. Check if we have actual game generations > 1
-            if game_data.generations > 1:
-                meaningful_indicators += 1
-                logger.debug(f"Found {game_data.generations} generations")
-            
-            # We need at least 3 meaningful indicators AND must have moves OR corporations
-            # This prevents cases where we have some replay data but no actual gameplay
-            has_core_gameplay = len(game_data.moves) > 0 or corporations_found > 0
-            is_meaningful = meaningful_indicators >= 3 and has_core_gameplay
-            
-            logger.info(f"Validation result: {meaningful_indicators}/7 indicators found, meaningful={is_meaningful}")
-            
-            if not is_meaningful:
-                logger.warning("Game data validation failed - appears to be ELO-only fallback data")
-                logger.warning(f"Indicators found: moves={len(game_data.moves)}, corporations={corporations_found}, "
-                             f"cards={len(card_names)}, milestones/awards={len(milestone_names)+len(award_names)}, "
-                             f"gamelogs={'yes' if gamelogs else 'no'}, vp_entries={len(vp_progression)}, "
-                             f"generations={game_data.generations}")
-            
-            return is_meaningful
-            
-        except Exception as e:
-            logger.error(f"Error validating game data: {e}")
-            return False
 
     def _merge_elo_with_players(self, players: Dict[str, Player], elo_data: Dict[str, EloData]):
         """Merge ELO data into player objects"""
