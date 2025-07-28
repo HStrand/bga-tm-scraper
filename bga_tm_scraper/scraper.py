@@ -1272,6 +1272,183 @@ class TMScraper:
             # Don't fail completely - try to proceed
             return True
 
+    def _wait_for_replay_content_to_load(self, replay_id: str) -> bool:
+        """
+        Wait for the replay page content to load properly, specifically focusing on g_gamelogs
+        
+        Args:
+            replay_id: BGA replay ID for logging purposes
+            
+        Returns:
+            bool: True if content loaded successfully, False if timeout or error
+        """
+        try:
+            # Get timeout from speed settings
+            timeout = self.speed_settings.get('element_wait_timeout', 10)
+            
+            print(f"⏱️  Waiting for replay content to load (timeout: {timeout}s)")
+            logger.info(f"Waiting for replay content to load for replay {replay_id}")
+            
+            # Strategy 1: Wait for specific content indicators to appear
+            wait = WebDriverWait(self.driver, timeout)
+            
+            # Try multiple strategies to detect when content is loaded
+            content_loaded = False
+            
+            # Strategy 1: Wait for g_gamelogs JavaScript variable to be populated
+            try:
+                logger.info("Strategy 1: Waiting for g_gamelogs JavaScript variable...")
+                
+                def gamelogs_populated(driver):
+                    try:
+                        # Execute JavaScript to check if g_gamelogs exists and has content
+                        result = driver.execute_script("""
+                            if (typeof g_gamelogs !== 'undefined' && g_gamelogs && g_gamelogs.length > 0) {
+                                return g_gamelogs.length;
+                            }
+                            return 0;
+                        """)
+                        
+                        if result and result > 0:
+                            logger.info(f"Found g_gamelogs with {result} entries")
+                            return True
+                        return False
+                    except Exception as e:
+                        logger.debug(f"Error checking g_gamelogs: {e}")
+                        return False
+                
+                wait.until(gamelogs_populated)
+                logger.info("g_gamelogs JavaScript variable populated - content appears to be loaded")
+                print("✅ g_gamelogs detected - content loaded")
+                content_loaded = True
+            except:
+                logger.info("Strategy 1 failed: g_gamelogs not found or not populated")
+            
+            # Strategy 2: Wait for replay log DOM elements to appear
+            if not content_loaded:
+                try:
+                    logger.info("Strategy 2: Waiting for replay log elements...")
+                    wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "div.replaylogs_move")))
+                    
+                    # Verify we have multiple log entries (typical replay has many moves)
+                    log_elements = self.driver.find_elements(By.CSS_SELECTOR, "div.replaylogs_move")
+                    if len(log_elements) >= 1:  # At least one move
+                        logger.info(f"Found {len(log_elements)} replay log elements - content appears loaded")
+                        print(f"✅ Replay logs detected ({len(log_elements)} moves) - content loaded")
+                        content_loaded = True
+                    else:
+                        logger.info(f"Only found {len(log_elements)} replay log elements - waiting for more")
+                except:
+                    logger.info("Strategy 2 failed: No replay log elements found")
+            
+            # Strategy 3: Wait for player selection or game interface elements
+            if not content_loaded:
+                try:
+                    logger.info("Strategy 3: Waiting for player selection elements...")
+                    wait.until(EC.any_of(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "div.playerselection")),
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "div.player_board")),
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "span.playername"))
+                    ))
+                    logger.info("Player interface elements found")
+                    print("✅ Player interface detected - content loaded")
+                    content_loaded = True
+                except:
+                    logger.info("Strategy 3 failed: No player interface elements found")
+            
+            # Strategy 4: Wait for overall-content div to be populated with replay-specific content
+            if not content_loaded:
+                try:
+                    logger.info("Strategy 4: Waiting for overall-content to be populated with replay content...")
+                    
+                    def replay_content_populated(driver):
+                        try:
+                            overall_content = driver.find_element(By.ID, "overall-content")
+                            content_text = overall_content.text.strip()
+                            inner_html = overall_content.get_attribute('innerHTML').strip()
+                            
+                            # Content is considered loaded if:
+                            # 1. It has substantial text content, AND
+                            # 2. It contains replay-specific indicators
+                            has_text = len(content_text) > 200
+                            has_replay_content = any(indicator in inner_html.lower() for indicator in [
+                                'replaylogs', 'playername', 'playerselection', 'g_gamelogs'
+                            ])
+                            
+                            if has_text and has_replay_content:
+                                logger.info(f"Replay content populated: text={len(content_text)} chars, has_replay_content={has_replay_content}")
+                                return True
+                            return False
+                        except:
+                            return False
+                    
+                    wait.until(replay_content_populated)
+                    logger.info("Overall-content div populated with replay content")
+                    print("✅ Replay content populated - content loaded")
+                    content_loaded = True
+                except:
+                    logger.info("Strategy 4 failed: Overall-content not populated with replay content")
+            
+            # Strategy 5: Progressive delay with content validation (fallback)
+            if not content_loaded:
+                logger.info("Strategy 5: Using progressive delays with content validation...")
+                delays = [1.0, 2.0, 3.0, 5.0]  # Progressive delays for replay pages
+                
+                for delay in delays:
+                    print(f"⏱️  Waiting {delay}s for content to load...")
+                    time.sleep(delay)
+                    
+                    # Check if content has appeared
+                    page_source = self.driver.page_source
+                    
+                    # Look for g_gamelogs in the page source
+                    if 'g_gamelogs' in page_source and 'replaylogs_move' in page_source:
+                        logger.info(f"Content loaded after {delay}s delay - g_gamelogs and replay logs found")
+                        print(f"✅ Content loaded after {delay}s - replay data detected")
+                        content_loaded = True
+                        break
+                    
+                    # Look for replay log elements
+                    try:
+                        soup = BeautifulSoup(page_source, 'html.parser')
+                        replay_logs = soup.find_all('div', class_='replaylogs_move')
+                        if len(replay_logs) >= 1:
+                            logger.info(f"Content loaded after {delay}s delay - {len(replay_logs)} replay logs found")
+                            print(f"✅ Content loaded after {delay}s - replay logs detected")
+                            content_loaded = True
+                            break
+                    except:
+                        pass
+                    
+                    # Check for substantial content with replay indicators
+                    if any(indicator in page_source.lower() for indicator in [
+                        'replaylogs', 'g_gamelogs', 'playerselection'
+                    ]) and len(page_source) > 10000:
+                        logger.info(f"Content loaded after {delay}s delay - replay indicators found")
+                        print(f"✅ Content loaded after {delay}s - replay indicators detected")
+                        content_loaded = True
+                        break
+                    
+                    logger.info(f"Content not ready after {delay}s, trying next delay...")
+            
+            if content_loaded:
+                # Give a small additional delay to ensure everything is fully rendered
+                time.sleep(0.3)  # Short final delay for replay pages
+                logger.info("Replay content loading completed successfully")
+                return True
+            else:
+                logger.warning(f"Replay content failed to load within timeout for replay {replay_id}")
+                print("⚠️  Replay content loading timeout - proceeding anyway")
+                
+                # Even if we timeout, let's try to proceed - sometimes content is there but not detected
+                return True
+                
+        except Exception as e:
+            logger.error(f"Error waiting for replay content to load: {e}")
+            print(f"❌ Error waiting for replay content: {e}")
+            # Don't fail completely - try to proceed
+            return True
+
     def scrape_replay_from_table(self, table_id: str, player_id: str, save_raw: bool = True, raw_data_dir: str = None, version_id: str = None, player_perspective: str = None) -> Optional[Dict]:
         """
         Scrape replay page using table ID and player ID with optional version parameter
@@ -1388,9 +1565,11 @@ class TMScraper:
             # Navigate to the replay URL
             print(f"Navigating to: {url}")
             self.driver.get(url)
-            page_delay = self.speed_settings.get('page_load_delay', 3)
-            print(f"⏱️  Waiting {page_delay}s for replay page to load ({self.speed_profile} mode)")
-            time.sleep(page_delay)
+            
+            # Wait for replay content to load using smart detection instead of fixed delay
+            if not self._wait_for_replay_content_to_load(replay_id):
+                print("❌ Replay content failed to load properly")
+                # Continue anyway - sometimes content is there but not detected
             
             # Check if we got an error page
             page_source = self.driver.page_source
