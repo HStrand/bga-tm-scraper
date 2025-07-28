@@ -294,7 +294,13 @@ class TMScraper:
             else:
                 logger.warning("No ELO data found - cannot extract player IDs")
             
-            # Step 11: Extract version number from gamereview page
+            # Step 11: Extract game date from table page using parser
+            logger.info("Extracting game date...")
+            from .parser import Parser
+            parser = Parser()
+            game_date_info = parser._extract_game_date_from_table(table_data['html_content'])
+            
+            # Step 12: Extract version number from gamereview page
             logger.info("Extracting version number...")
             version = self.extract_version_from_gamereview(table_id)
             if version:
@@ -304,7 +310,7 @@ class TMScraper:
                 logger.warning("Could not extract version number")
                 print("⚠️  Could not extract version number")
 
-            # Step 12: Combine results
+            # Step 13: Combine results
             result_data = {
                 'table_id': table_id,
                 'table_data': table_data,
@@ -321,6 +327,7 @@ class TMScraper:
                 'player_ids': player_ids,
                 'elo_data': elo_data,
                 'version': version,
+                'game_date_info': game_date_info,  # Include extracted game date
                 'table_only': True  # Flag to indicate this was table-only scraping
             }
             
@@ -366,7 +373,7 @@ class TMScraper:
             from .parser import Parser
             parser = Parser()
             game_mode = parser.parse_game_mode(table_data['html_content'])
-            logger.info("Detected game mode:", game_mode)
+            logger.info(f"Detected game mode: {game_mode}")
             is_arena_mode = game_mode == "Arena mode"
 
             print(f"✅ Game {table_id} is {game_mode} - proceeding with scraping")
@@ -1265,6 +1272,183 @@ class TMScraper:
             # Don't fail completely - try to proceed
             return True
 
+    def _wait_for_replay_content_to_load(self, replay_id: str) -> bool:
+        """
+        Wait for the replay page content to load properly, specifically focusing on g_gamelogs
+        
+        Args:
+            replay_id: BGA replay ID for logging purposes
+            
+        Returns:
+            bool: True if content loaded successfully, False if timeout or error
+        """
+        try:
+            # Get timeout from speed settings
+            timeout = self.speed_settings.get('element_wait_timeout', 10)
+            
+            print(f"⏱️  Waiting for replay content to load (timeout: {timeout}s)")
+            logger.info(f"Waiting for replay content to load for replay {replay_id}")
+            
+            # Strategy 1: Wait for specific content indicators to appear
+            wait = WebDriverWait(self.driver, timeout)
+            
+            # Try multiple strategies to detect when content is loaded
+            content_loaded = False
+            
+            # Strategy 1: Wait for g_gamelogs JavaScript variable to be populated
+            try:
+                logger.info("Strategy 1: Waiting for g_gamelogs JavaScript variable...")
+                
+                def gamelogs_populated(driver):
+                    try:
+                        # Execute JavaScript to check if g_gamelogs exists and has content
+                        result = driver.execute_script("""
+                            if (typeof g_gamelogs !== 'undefined' && g_gamelogs && g_gamelogs.length > 0) {
+                                return g_gamelogs.length;
+                            }
+                            return 0;
+                        """)
+                        
+                        if result and result > 0:
+                            logger.info(f"Found g_gamelogs with {result} entries")
+                            return True
+                        return False
+                    except Exception as e:
+                        logger.debug(f"Error checking g_gamelogs: {e}")
+                        return False
+                
+                wait.until(gamelogs_populated)
+                logger.info("g_gamelogs JavaScript variable populated - content appears to be loaded")
+                print("✅ g_gamelogs detected - content loaded")
+                content_loaded = True
+            except:
+                logger.info("Strategy 1 failed: g_gamelogs not found or not populated")
+            
+            # Strategy 2: Wait for replay log DOM elements to appear
+            if not content_loaded:
+                try:
+                    logger.info("Strategy 2: Waiting for replay log elements...")
+                    wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "div.replaylogs_move")))
+                    
+                    # Verify we have multiple log entries (typical replay has many moves)
+                    log_elements = self.driver.find_elements(By.CSS_SELECTOR, "div.replaylogs_move")
+                    if len(log_elements) >= 1:  # At least one move
+                        logger.info(f"Found {len(log_elements)} replay log elements - content appears loaded")
+                        print(f"✅ Replay logs detected ({len(log_elements)} moves) - content loaded")
+                        content_loaded = True
+                    else:
+                        logger.info(f"Only found {len(log_elements)} replay log elements - waiting for more")
+                except:
+                    logger.info("Strategy 2 failed: No replay log elements found")
+            
+            # Strategy 3: Wait for player selection or game interface elements
+            if not content_loaded:
+                try:
+                    logger.info("Strategy 3: Waiting for player selection elements...")
+                    wait.until(EC.any_of(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "div.playerselection")),
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "div.player_board")),
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "span.playername"))
+                    ))
+                    logger.info("Player interface elements found")
+                    print("✅ Player interface detected - content loaded")
+                    content_loaded = True
+                except:
+                    logger.info("Strategy 3 failed: No player interface elements found")
+            
+            # Strategy 4: Wait for overall-content div to be populated with replay-specific content
+            if not content_loaded:
+                try:
+                    logger.info("Strategy 4: Waiting for overall-content to be populated with replay content...")
+                    
+                    def replay_content_populated(driver):
+                        try:
+                            overall_content = driver.find_element(By.ID, "overall-content")
+                            content_text = overall_content.text.strip()
+                            inner_html = overall_content.get_attribute('innerHTML').strip()
+                            
+                            # Content is considered loaded if:
+                            # 1. It has substantial text content, AND
+                            # 2. It contains replay-specific indicators
+                            has_text = len(content_text) > 200
+                            has_replay_content = any(indicator in inner_html.lower() for indicator in [
+                                'replaylogs', 'playername', 'playerselection', 'g_gamelogs'
+                            ])
+                            
+                            if has_text and has_replay_content:
+                                logger.info(f"Replay content populated: text={len(content_text)} chars, has_replay_content={has_replay_content}")
+                                return True
+                            return False
+                        except:
+                            return False
+                    
+                    wait.until(replay_content_populated)
+                    logger.info("Overall-content div populated with replay content")
+                    print("✅ Replay content populated - content loaded")
+                    content_loaded = True
+                except:
+                    logger.info("Strategy 4 failed: Overall-content not populated with replay content")
+            
+            # Strategy 5: Progressive delay with content validation (fallback)
+            if not content_loaded:
+                logger.info("Strategy 5: Using progressive delays with content validation...")
+                delays = [1.0, 2.0, 3.0, 5.0]  # Progressive delays for replay pages
+                
+                for delay in delays:
+                    print(f"⏱️  Waiting {delay}s for content to load...")
+                    time.sleep(delay)
+                    
+                    # Check if content has appeared
+                    page_source = self.driver.page_source
+                    
+                    # Look for g_gamelogs in the page source
+                    if 'g_gamelogs' in page_source and 'replaylogs_move' in page_source:
+                        logger.info(f"Content loaded after {delay}s delay - g_gamelogs and replay logs found")
+                        print(f"✅ Content loaded after {delay}s - replay data detected")
+                        content_loaded = True
+                        break
+                    
+                    # Look for replay log elements
+                    try:
+                        soup = BeautifulSoup(page_source, 'html.parser')
+                        replay_logs = soup.find_all('div', class_='replaylogs_move')
+                        if len(replay_logs) >= 1:
+                            logger.info(f"Content loaded after {delay}s delay - {len(replay_logs)} replay logs found")
+                            print(f"✅ Content loaded after {delay}s - replay logs detected")
+                            content_loaded = True
+                            break
+                    except:
+                        pass
+                    
+                    # Check for substantial content with replay indicators
+                    if any(indicator in page_source.lower() for indicator in [
+                        'replaylogs', 'g_gamelogs', 'playerselection'
+                    ]) and len(page_source) > 10000:
+                        logger.info(f"Content loaded after {delay}s delay - replay indicators found")
+                        print(f"✅ Content loaded after {delay}s - replay indicators detected")
+                        content_loaded = True
+                        break
+                    
+                    logger.info(f"Content not ready after {delay}s, trying next delay...")
+            
+            if content_loaded:
+                # Give a small additional delay to ensure everything is fully rendered
+                time.sleep(0.3)  # Short final delay for replay pages
+                logger.info("Replay content loading completed successfully")
+                return True
+            else:
+                logger.warning(f"Replay content failed to load within timeout for replay {replay_id}")
+                print("⚠️  Replay content loading timeout - proceeding anyway")
+                
+                # Even if we timeout, let's try to proceed - sometimes content is there but not detected
+                return True
+                
+        except Exception as e:
+            logger.error(f"Error waiting for replay content to load: {e}")
+            print(f"❌ Error waiting for replay content: {e}")
+            # Don't fail completely - try to proceed
+            return True
+
     def scrape_replay_from_table(self, table_id: str, player_id: str, save_raw: bool = True, raw_data_dir: str = None, version_id: str = None, player_perspective: str = None) -> Optional[Dict]:
         """
         Scrape replay page using table ID and player ID with optional version parameter
@@ -1381,9 +1565,11 @@ class TMScraper:
             # Navigate to the replay URL
             print(f"Navigating to: {url}")
             self.driver.get(url)
-            page_delay = self.speed_settings.get('page_load_delay', 3)
-            print(f"⏱️  Waiting {page_delay}s for replay page to load ({self.speed_profile} mode)")
-            time.sleep(page_delay)
+            
+            # Wait for replay content to load using smart detection instead of fixed delay
+            if not self._wait_for_replay_content_to_load(replay_id):
+                print("❌ Replay content failed to load properly")
+                # Continue anyway - sometimes content is there but not detected
             
             # Check if we got an error page
             page_source = self.driver.page_source
@@ -1633,56 +1819,7 @@ class TMScraper:
         except Exception as e:
             logger.error(f"Error scraping player game history for {player_id}: {e}")
             print(f"❌ Error scraping player game history: {e}")
-            return []
-    
-    def _extract_table_ids_from_history(self, html_content: str) -> List[str]:
-        """
-        Extract table IDs from player game history HTML
-        
-        Args:
-            html_content: HTML content of the player history page
-            
-        Returns:
-            list: List of unique table IDs found
-        """
-        table_ids = []
-        
-        try:
-            # Method 1: Look for table IDs in the format #XXXXXXXXX
-            table_id_pattern = r'#(\d{8,})'
-            matches = re.findall(table_id_pattern, html_content)
-            table_ids.extend(matches)
-            
-            # Method 2: Parse with BeautifulSoup for more structured extraction
-            soup = BeautifulSoup(html_content, 'html.parser')
-            
-            # Look for links or elements that might contain table IDs
-            for link in soup.find_all('a', href=True):
-                href = link.get('href', '')
-                if 'table' in href:
-                    # Extract table ID from URL parameters
-                    table_matches = re.findall(r'table[=:](\d+)', href)
-                    table_ids.extend(table_matches)
-            
-            # Look for elements with table ID text content
-            for element in soup.find_all(text=re.compile(r'#\d{8,}')):
-                text_matches = re.findall(r'#(\d{8,})', element)
-                table_ids.extend(text_matches)
-            
-            # Remove duplicates while preserving order
-            unique_table_ids = []
-            seen = set()
-            for table_id in table_ids:
-                if table_id not in seen and len(table_id) >= 8:
-                    unique_table_ids.append(table_id)
-                    seen.add(table_id)
-            
-            logger.info(f"Extracted {len(unique_table_ids)} unique table IDs")
-            return unique_table_ids
-            
-        except Exception as e:
-            logger.error(f"Error extracting table IDs from history: {e}")
-            return []
+            return []    
 
     def _extract_games_with_datetimes_from_history(self, html_content: str) -> List[Dict]:
         """
@@ -1902,79 +2039,6 @@ class TMScraper:
             logger.debug(f"Error parsing datetime from text '{text}': {e}")
             return None
 
-    def scrape_multiple_tables_and_replays(self, games_with_perspectives: List[Dict], save_raw: bool = True,
-                                         raw_data_dir: str = None) -> List[Dict]:
-        """
-        Scrape multiple table and replay pages with player perspectives
-        
-        Args:
-            games_with_perspectives: List of dicts with 'table_id' and 'player_perspective' keys
-            save_raw: Whether to save raw HTML
-            raw_data_dir: Directory to save raw HTML files
-            
-        Returns:
-            list: List of scraped data dictionaries
-        """
-        if raw_data_dir is None:
-            raw_data_dir = config.RAW_DATA_DIR
-        results = []
-        
-        logger.info(f"Starting batch scraping of {len(games_with_perspectives)} games (table + replay)")
-        
-        for i, game_info in enumerate(games_with_perspectives, 1):
-            table_id = game_info['table_id']
-            player_perspective = game_info['player_perspective']
-            
-            logger.info(f"Processing game {i}/{len(games_with_perspectives)} (table ID: {table_id}, perspective: {player_perspective})")
-            print(f"\nProcessing game {i}/{len(games_with_perspectives)} (table ID: {table_id}, perspective: {player_perspective})")
-            
-            result = self.scrape_table_and_replay(table_id, player_perspective, save_raw, raw_data_dir)
-            if result:
-                results.append(result)
-            
-            # Delay between requests (except for the last one)
-            if i < len(games_with_perspectives):
-                print(f"Waiting {self.request_delay} seconds...")
-                time.sleep(self.request_delay)
-        
-        logger.info(f"Batch scraping completed. Successfully scraped {len(results)}/{len(games_with_perspectives)} games")
-        return results
-
-    def scrape_multiple_replays(self, urls: List[str], save_raw: bool = True,
-                              raw_data_dir: str = None) -> List[Dict]:
-        """
-        Scrape multiple replay pages (legacy method)
-        
-        Args:
-            urls: List of BGA replay URLs
-            save_raw: Whether to save raw HTML
-            raw_data_dir: Directory to save raw HTML files
-            
-        Returns:
-            list: List of scraped data dictionaries
-        """
-        if raw_data_dir is None:
-            raw_data_dir = config.RAW_DATA_DIR
-        results = []
-        
-        logger.info(f"Starting batch scraping of {len(urls)} replays")
-        
-        for i, url in enumerate(urls, 1):
-            logger.info(f"Processing replay {i}/{len(urls)}")
-            print(f"\nProcessing replay {i}/{len(urls)}")
-            
-            result = self.scrape_replay(url, save_raw, raw_data_dir)
-            if result:
-                results.append(result)
-            
-            # Delay between requests (except for the last one)
-            if i < len(urls):
-                print(f"Waiting {self.request_delay} seconds...")
-                time.sleep(self.request_delay)
-        
-        logger.info(f"Batch scraping completed. Successfully scraped {len(results)}/{len(urls)} replays")
-        return results
-    
     def initialize_session(self) -> bool:
         """
         Initialize authenticated session for direct HTTP requests
@@ -2198,81 +2262,6 @@ class TMScraper:
             logger.error(f"Error checking direct fetch capability for {table_id}: {e}")
             return False, None, None
 
-    def scrape_with_smart_mode(self, table_id: str, player_perspective: str, save_raw: bool = True, raw_data_dir: str = None) -> Optional[Dict]:
-        """
-        Smart scraping that chooses between direct fetch and browser scraping based on available data
-        
-        Args:
-            table_id: BGA table ID
-            player_perspective: Player ID whose perspective this game is being scraped from
-            save_raw: Whether to save raw HTML
-            raw_data_dir: Directory to save raw HTML files
-            
-        Returns:
-            dict: Combined scraped data or None if failed
-        """
-        if raw_data_dir is None:
-            raw_data_dir = config.RAW_DATA_DIR
-        logger.info(f"Smart scraping for game {table_id}")
-        
-        # Check if we can use direct fetching
-        can_direct, version, player_id = self.can_use_direct_fetch(table_id, raw_data_dir)
-        
-        if can_direct:
-            print(f"🚀 Using direct fetch mode for game {table_id} (table HTML + version available)")
-            
-            # Initialize session if not already done
-            if not self.requests_session:
-                if not self.initialize_session():
-                    print("❌ Failed to initialize session, falling back to browser mode")
-                    return self.scrape_table_and_replay(table_id, player_perspective, save_raw, raw_data_dir)
-            
-            # Read existing table HTML
-            table_html_path = os.path.join(raw_data_dir, f"table_{table_id}.html")
-            with open(table_html_path, 'r', encoding='utf-8') as f:
-                table_html = f.read()
-            
-            # Create table data structure
-            table_data = {
-                'table_id': table_id,
-                'url': f"https://boardgamearena.com/table?table={table_id}",
-                'scraped_at': datetime.now().isoformat(),
-                'html_content': table_html,
-                'players_found': [],
-                'elo_data_found': True,  # Assume true since we have the file
-                'from_file': True  # Flag to indicate this was loaded from file
-            }
-            
-            # Fetch replay directly
-            replay_data = self.fetch_replay_direct(table_id, version, player_id, save_raw, raw_data_dir)
-            if not replay_data:
-                print("❌ Direct fetch failed, falling back to browser mode")
-                return self.scrape_table_and_replay(table_id, player_perspective, save_raw, raw_data_dir)
-            
-            # Combine results
-            combined_data = {
-                'table_id': table_id,
-                'table_data': table_data,
-                'replay_data': replay_data,
-                'scraped_at': datetime.now().isoformat(),
-                'success': True,
-                'arena_mode': True,  # Assume true since it's in registry
-                'version': version,
-                'smart_mode': 'direct_fetch'
-            }
-            
-            logger.info(f"Successfully scraped game {table_id} using direct fetch")
-            print(f"✅ Smart mode (direct fetch) successful for game {table_id}")
-            return combined_data
-            
-        else:
-            print(f"🌐 Using browser mode for game {table_id} (missing table HTML or version)")
-            # Fall back to normal browser scraping
-            result = self.scrape_table_and_replay(table_id, player_perspective, save_raw, raw_data_dir)
-            if result:
-                result['smart_mode'] = 'browser_scraping'
-            return result
-
     def close_browser(self):
         """Close the browser and cleanup session"""
         if self.session:
@@ -2394,38 +2383,6 @@ class TMScraper:
             logger.error(f"Error checking replay limit: {e}")
             return False
 
-    def _check_login_status(self) -> bool:
-        """Check if we're still logged into BGA"""
-        try:
-            if not self.driver:
-                return False
-            
-            # Check current page for login indicators
-            page_source = self.driver.page_source.lower()
-            
-            # If we see login indicators, we're logged out
-            if any(indicator in page_source for indicator in ['must be logged', 'login', 'sign in']):
-                return False
-            
-            # If we see logout indicators, we're logged in
-            if any(indicator in page_source for indicator in ['logout', 'my account', 'player_name']):
-                return True
-            
-            # If unclear, try a quick navigation to main page to check
-            current_url = self.driver.current_url
-            self.driver.get("https://boardgamearena.com")
-            time.sleep(2)
-            
-            page_source = self.driver.page_source.lower()
-            is_logged_in = any(indicator in page_source for indicator in ['logout', 'my account', 'player_name'])
-            
-            logger.info(f"Login status check: {'logged in' if is_logged_in else 'logged out'}")
-            return is_logged_in
-            
-        except Exception as e:
-            logger.error(f"Error checking login status: {e}")
-            return False
-
     def _extract_replay_id(self, url: str) -> Optional[str]:
         """Extract replay ID from BGA replay URL (table parameter)"""
         try:
@@ -2443,132 +2400,6 @@ class TMScraper:
         except Exception as e:
             logger.error(f"Error extracting replay ID from {url}: {e}")
             return None
-
-    def _extract_arena_season_table_ids(self, html_content: str, target_season: int) -> List[str]:
-        """
-        Extract table IDs from player game history HTML, filtering for specific Arena season
-        
-        Args:
-            html_content: HTML content of the player history page
-            target_season: Arena season number to filter for (e.g., 21)
-            
-        Returns:
-            list: List of unique table IDs from the specified Arena season
-        """
-        arena_table_ids = []
-        
-        try:
-            soup = BeautifulSoup(html_content, 'html.parser')
-            
-            # Look for game rows in the history table
-            # Each game should be in a row or container that includes both the table ID and game mode info
-            game_rows = soup.find_all('div', class_='row')
-            
-            for row in game_rows:
-                try:
-                    # Look for table ID in this row
-                    table_id_match = re.search(r'#(\d{8,})', str(row))
-                    if not table_id_match:
-                        continue
-                    
-                    table_id = table_id_match.group(1)
-                    
-                    # Check if this row contains Arena mode information
-                    row_text = row.get_text().lower()
-                    
-                    # Look for Arena mode indicators
-                    if 'arena mode' not in row_text and 'arena' not in row_text:
-                        continue
-                    
-                    # Look for the specific season number
-                    # The HTML shows patterns like "Arena mode: compete for the seasonal BGA trophy." with season info
-                    season_pattern = rf'season\s*{target_season}|{target_season}\s*season'
-                    if re.search(season_pattern, row_text, re.IGNORECASE):
-                        arena_table_ids.append(table_id)
-                        logger.info(f"Found Arena season {target_season} game: {table_id}")
-                        continue
-                    
-                    # Also look for gameoption elements that might contain season info
-                    gameoption_elements = row.find_all(attrs={'id': re.compile(r'gameoption_\d+')})
-                    for elem in gameoption_elements:
-                        elem_text = elem.get_text().lower()
-                        if f'{target_season}' in elem_text and ('arena' in elem_text or 'season' in elem_text):
-                            arena_table_ids.append(table_id)
-                            logger.info(f"Found Arena season {target_season} game via gameoption: {table_id}")
-                            break
-                    
-                except Exception as e:
-                    logger.debug(f"Error processing game row: {e}")
-                    continue
-            
-            # Remove duplicates while preserving order
-            unique_arena_table_ids = []
-            seen = set()
-            for table_id in arena_table_ids:
-                if table_id not in seen and len(table_id) >= 8:
-                    unique_arena_table_ids.append(table_id)
-                    seen.add(table_id)
-            
-            logger.info(f"Extracted {len(unique_arena_table_ids)} Arena season {target_season} table IDs")
-            return unique_arena_table_ids
-            
-        except Exception as e:
-            logger.error(f"Error extracting Arena season table IDs: {e}")
-            return []
-
-    def check_game_is_arena_season(self, table_id: str, target_season: int) -> bool:
-        """
-        Check if a specific game is from the target Arena season by scraping its table page
-        
-        Args:
-            table_id: BGA table ID
-            target_season: Arena season number to check for (e.g., 21)
-            
-        Returns:
-            bool: True if the game is from the target Arena season, False otherwise
-        """
-        if not self.driver:
-            raise RuntimeError("Browser not started. Call start_browser() first.")
-        
-        try:
-            # Scrape the table page to get game mode information
-            table_data = self.scrape_table_page(table_id, "temp_check", save_raw=False)
-            if not table_data:
-                logger.warning(f"Could not scrape table page for {table_id}")
-                return False
-            
-            html_content = table_data['html_content']
-            soup = BeautifulSoup(html_content, 'html.parser')
-            
-            # Look for Arena mode indicators
-            page_text = soup.get_text().lower()
-            
-            # Check for Arena mode
-            if 'arena mode' not in page_text and 'arena' not in page_text:
-                logger.info(f"Game {table_id} is not Arena mode")
-                return False
-            
-            # Check for the specific season
-            season_pattern = rf'season\s*{target_season}|{target_season}\s*season'
-            if re.search(season_pattern, page_text, re.IGNORECASE):
-                logger.info(f"Game {table_id} is Arena season {target_season}")
-                return True
-            
-            # Also check gameoption elements specifically
-            gameoption_elements = soup.find_all(attrs={'id': re.compile(r'gameoption_\d+')})
-            for elem in gameoption_elements:
-                elem_text = elem.get_text().lower()
-                if f'{target_season}' in elem_text and ('arena' in elem_text or 'season' in elem_text):
-                    logger.info(f"Game {table_id} is Arena season {target_season} (via gameoption)")
-                    return True
-            
-            logger.info(f"Game {table_id} is Arena mode but not season {target_season}")
-            return False
-            
-        except Exception as e:
-            logger.error(f"Error checking Arena season for game {table_id}: {e}")
-            return False
-
 
     def _extract_map_from_table(self, html_content: str) -> Optional[str]:
         """
@@ -2770,76 +2601,3 @@ class TMScraper:
         except Exception as e:
             logger.error(f"Error extracting Game Speed from table HTML: {e}")
             return None
-
-    def _extract_player_ids_simple(self, html_content: str, player_names: List[str]) -> Dict[str, str]:
-        """
-        Simplified player ID extraction for table-only scraping to avoid regex backtracking issues
-        
-        Args:
-            html_content: HTML content of the table page
-            player_names: List of player names from ELO data
-            
-        Returns:
-            dict: Mapping of player names to player IDs
-        """
-        player_id_map = {}
-        
-        try:
-            # Get valid player IDs from VP data first (this is fast and reliable)
-            from .parser import Parser
-            parser = Parser()
-            vp_data = parser._extract_vp_data_from_html(html_content)
-            valid_player_ids = list(vp_data.keys())
-            
-            logger.info(f"Found {len(valid_player_ids)} valid player IDs from VP data: {valid_player_ids}")
-            
-            # Simple mapping: if we have the same number of players in both lists, map by order
-            if len(player_names) == len(valid_player_ids):
-                for i, player_name in enumerate(player_names):
-                    if i < len(valid_player_ids):
-                        player_id_map[player_name] = valid_player_ids[i]
-                        logger.info(f"Mapped {player_name} -> {valid_player_ids[i]}")
-            else:
-                # Fallback: try a simple, limited regex search for each player
-                soup = BeautifulSoup(html_content, 'html.parser')
-                
-                for player_name in player_names:
-                    # Look for the player name in playername spans and find nearby player IDs
-                    player_spans = soup.find_all('span', class_='playername', string=player_name)
-                    
-                    for span in player_spans:
-                        # Look in the parent elements for player IDs (limited scope)
-                        parent = span.parent
-                        if parent:
-                            parent_str = str(parent)[:500]  # Limit to 500 chars to avoid backtracking
-                            # Simple regex for 8-12 digit numbers
-                            id_matches = re.findall(r'\b(\d{8,12})\b', parent_str)
-                            for match in id_matches:
-                                if match in valid_player_ids:
-                                    player_id_map[player_name] = match
-                                    logger.info(f"Mapped {player_name} -> {match} (via parent search)")
-                                    break
-                        
-                        if player_name in player_id_map:
-                            break
-                
-                # Final fallback: assign remaining IDs to unmapped players
-                mapped_ids = set(player_id_map.values())
-                unmapped_players = [p for p in player_names if p not in player_id_map]
-                remaining_ids = [pid for pid in valid_player_ids if pid not in mapped_ids]
-                
-                for i, player_name in enumerate(unmapped_players):
-                    if i < len(remaining_ids):
-                        player_id_map[player_name] = remaining_ids[i]
-                        logger.info(f"Mapped {player_name} -> {remaining_ids[i]} (fallback)")
-            
-            logger.info(f"Final player ID mapping: {player_id_map}")
-            return player_id_map
-            
-        except Exception as e:
-            logger.error(f"Error in simplified player ID extraction: {e}")
-            # Emergency fallback: create dummy IDs
-            fallback_map = {}
-            for i, player_name in enumerate(player_names):
-                fallback_map[player_name] = f"player_{i}"
-            return fallback_map

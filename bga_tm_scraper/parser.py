@@ -25,8 +25,8 @@ class EloData:
     position: Optional[int] = None
 
 @dataclass
-class AssignmentMetadata:
-    """Represents metadata from assignment for replay scraping"""
+class GameMetadata:
+    """Represents metadata from table HTML or assignment for replay scraping"""
     played_at: Optional[str] = None  # ISO timestamp when game was played
     map: Optional[str] = None
     prelude_on: Optional[bool] = None
@@ -37,7 +37,7 @@ class AssignmentMetadata:
     game_speed: Optional[str] = None
     game_mode: Optional[str] = None
     version_id: Optional[str] = None
-    players: Optional[List[Dict[str, Any]]] = None
+    players: Optional[Dict[str, EloData]] = None  # player_id -> EloData
 
 @dataclass
 class GameState:
@@ -137,36 +137,434 @@ class Parser:
     def __init__(self):
         pass
     
-    def parse_complete_game(self, html_content: str, replay_id: str, player_perspective: str, assignment_metadata: Optional[AssignmentMetadata] = None) -> GameData:
-        """Parse a complete game and return comprehensive data structure"""
-        logger.info(f"Starting parsing for game {replay_id}")
+    def parse_table_metadata(self, table_html: str) -> GameMetadata:
+        """Extract all metadata from table HTML including game mode, map, settings, and ELO data"""
+        logger.info("Parsing table metadata from HTML")
         
-        soup = BeautifulSoup(html_content, 'html.parser')
+        soup = BeautifulSoup(table_html, 'html.parser')
+        
+        # Extract game mode
+        game_mode = self._extract_game_mode_from_table(table_html)
+        
+        # Extract map
+        map_name = self._extract_map_from_table(table_html)
+        
+        # Extract game settings
+        corporate_era_on = self._extract_corporate_era_from_table(table_html)
+        prelude_on = self._extract_prelude_from_table(table_html)
+        draft_on = self._extract_draft_from_table(table_html)
+        colonies_on = self._extract_colonies_from_table(table_html)
+        beginners_corporations_on = self._extract_beginners_corporations_from_table(table_html)
+        game_speed = self._extract_game_speed_from_table(table_html)
+        
+        # Extract ELO data and convert to Dict[str, EloData] with string keys
+        elo_data_dict = self.parse_elo_data(table_html)
+        players_dict = {}
+        for player_name, elo_data in elo_data_dict.items():
+            # Ensure player_id is string
+            player_id = str(elo_data.player_id) if elo_data.player_id else ""
+            if player_id:
+                players_dict[player_id] = elo_data
+        
+        metadata = GameMetadata(
+            map=map_name,
+            prelude_on=prelude_on,
+            colonies_on=colonies_on,
+            corporate_era_on=corporate_era_on,
+            draft_on=draft_on,
+            beginners_corporations_on=beginners_corporations_on,
+            game_speed=game_speed,
+            game_mode=game_mode,
+            players=players_dict
+        )
+        
+        logger.info(f"Successfully parsed table metadata: {len(players_dict)} players, game_mode={game_mode}, map={map_name}")
+        return metadata
+    
+    def convert_assignment_to_game_metadata(self, assignment_data: Dict[str, Any]) -> GameMetadata:
+        """Convert GUI assignment data (camelCase) to GameMetadata with EloData objects"""
+        logger.info("Converting assignment data to GameMetadata")
+        
+        players_dict = {}
+        for player in assignment_data.get('players', []):
+            player_id = str(player.get('playerId', ''))
+            if player_id:
+                elo_data = EloData(
+                    player_name=player.get('playerName'),
+                    player_id=player_id,
+                    position=player.get('position'),
+                    arena_points=player.get('arenaPoints'),
+                    arena_points_change=player.get('arenaPointsChange'),
+                    game_rank=player.get('elo'),
+                    game_rank_change=player.get('eloChange')
+                )
+                players_dict[player_id] = elo_data
+        
+        metadata = GameMetadata(
+            played_at=assignment_data.get('playedAt'),
+            map=assignment_data.get('map'),
+            prelude_on=assignment_data.get('preludeOn'),
+            colonies_on=assignment_data.get('coloniesOn'),
+            corporate_era_on=assignment_data.get('corporateEraOn'),
+            draft_on=assignment_data.get('draftOn'),
+            beginners_corporations_on=assignment_data.get('beginnersCorporationsOn'),
+            game_speed=assignment_data.get('gameSpeed'),
+            game_mode=assignment_data.get('gameMode', 'Arena mode'),
+            version_id=assignment_data.get('versionId'),
+            players=players_dict
+        )
+        
+        logger.info(f"Successfully converted assignment data: {len(players_dict)} players")
+        return metadata
+    
+    def _extract_game_mode_from_table(self, table_html: str) -> str:
+        """Extract game mode from table HTML"""
+        soup = BeautifulSoup(table_html, 'html.parser')
+        span_element = soup.find('span', id='mob_gameoption_201_displayed_value')
+        
+        if span_element:
+            mode = span_element.get_text().strip()
+            return mode
+        else:
+            return "Normal mode"  # Default
+    
+    def _extract_map_from_table(self, table_html: str) -> Optional[str]:
+        """Extract the selected map from table page HTML"""
+        try:
+            soup = BeautifulSoup(table_html, 'html.parser')
+            
+            # Look for the specific map element
+            map_element = soup.find('span', id='gameoption_107_displayed_value')
+            
+            if map_element:
+                map_name = map_element.get_text().strip()
+                logger.info(f"Extracted map: {map_name}")
+                return map_name
+            else:
+                logger.debug("Map element not found in table HTML")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error extracting map from table HTML: {e}")
+            return None
+    
+    def _extract_corporate_era_from_table(self, table_html: str) -> Optional[bool]:
+        """Extract the Corporate Era setting from table page HTML"""
+        try:
+            soup = BeautifulSoup(table_html, 'html.parser')
+            
+            # Look for the specific Corporate Era element
+            corporate_era_element = soup.find('span', id='mob_gameoption_101_displayed_value')
+            
+            if corporate_era_element:
+                corporate_era_text = corporate_era_element.get_text().strip()
+                corporate_era_on = corporate_era_text.lower() == 'on'
+                logger.info(f"Extracted Corporate Era: {corporate_era_text} -> {corporate_era_on}")
+                return corporate_era_on
+            else:
+                logger.debug("Corporate Era element not found in table HTML")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error extracting Corporate Era from table HTML: {e}")
+            return None
+    
+    def _extract_prelude_from_table(self, table_html: str) -> Optional[bool]:
+        """Extract the Prelude setting from table page HTML"""
+        try:
+            soup = BeautifulSoup(table_html, 'html.parser')
+            
+            # Look for the specific Prelude element
+            prelude_element = soup.find('span', id='mob_gameoption_104_displayed_value')
+            
+            if prelude_element:
+                prelude_text = prelude_element.get_text().strip()
+                prelude_on = prelude_text.lower() == 'on'
+                logger.info(f"Extracted Prelude: {prelude_text} -> {prelude_on}")
+                return prelude_on
+            else:
+                logger.debug("Prelude element not found in table HTML")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error extracting Prelude from table HTML: {e}")
+            return None
+    
+    def _extract_draft_from_table(self, table_html: str) -> Optional[bool]:
+        """Extract the Draft setting from table page HTML"""
+        try:
+            soup = BeautifulSoup(table_html, 'html.parser')
+            
+            # Look for the specific Draft element
+            draft_element = soup.find('span', id='mob_gameoption_103_displayed_value')
+            
+            if draft_element:
+                draft_text = draft_element.get_text().strip()
+                draft_on = draft_text.lower() == 'yes'
+                logger.info(f"Extracted Draft: {draft_text} -> {draft_on}")
+                return draft_on
+            else:
+                logger.debug("Draft element not found in table HTML")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error extracting Draft from table HTML: {e}")
+            return None
+    
+    def _extract_colonies_from_table(self, table_html: str) -> Optional[bool]:
+        """Extract the Colonies setting from table page HTML"""
+        try:
+            soup = BeautifulSoup(table_html, 'html.parser')
+            
+            # Look for the specific Colonies element
+            colonies_element = soup.find('span', id='mob_gameoption_108_displayed_value')
+            
+            if colonies_element:
+                colonies_text = colonies_element.get_text().strip()
+                colonies_on = colonies_text.lower() == 'on'
+                logger.info(f"Extracted Colonies: {colonies_text} -> {colonies_on}")
+                return colonies_on
+            else:
+                logger.debug("Colonies element not found in table HTML")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error extracting Colonies from table HTML: {e}")
+            return None
+    
+    def _extract_beginners_corporations_from_table(self, table_html: str) -> Optional[bool]:
+        """Extract the Beginners Corporations setting from table page HTML"""
+        try:
+            soup = BeautifulSoup(table_html, 'html.parser')
+            
+            # Look for the specific Beginners Corporations element
+            beginners_corps_element = soup.find('span', id='gameoption_100_displayed_value')
+            
+            if beginners_corps_element:
+                beginners_corps_text = beginners_corps_element.get_text().strip()
+                beginners_corps_on = beginners_corps_text.lower() == 'yes'
+                logger.info(f"Extracted Beginners Corporations: {beginners_corps_text} -> {beginners_corps_on}")
+                return beginners_corps_on
+            else:
+                logger.debug("Beginners Corporations element not found in table HTML")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error extracting Beginners Corporations from table HTML: {e}")
+            return None
+    
+    def _extract_game_speed_from_table(self, table_html: str) -> Optional[str]:
+        """Extract the Game Speed setting from table page HTML"""
+        try:
+            soup = BeautifulSoup(table_html, 'html.parser')
+            
+            # Look for the specific Game Speed element
+            game_speed_element = soup.find('span', id='gameoption_200_displayed_value')
+            
+            if game_speed_element:
+                game_speed_text = game_speed_element.get_text().strip()
+                logger.info(f"Extracted Game Speed: {game_speed_text}")
+                return game_speed_text
+            else:
+                logger.debug("Game Speed element not found in table HTML")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error extracting Game Speed from table HTML: {e}")
+            return None
+
+    def _extract_game_date_from_table(self, table_html: str) -> Optional[Dict]:
+        """
+        Extract the game creation date from table page HTML
+        
+        Args:
+            table_html: HTML content of the table page
+            
+        Returns:
+            dict: Dictionary with raw_datetime, parsed_datetime, and date_type, or None if not found
+        """
+        try:
+            soup = BeautifulSoup(table_html, 'html.parser')
+            
+            # Look for the creationtime div
+            creationtime_element = soup.find('div', id='creationtime')
+            
+            if creationtime_element:
+                creation_text = creationtime_element.get_text().strip()
+                logger.info(f"Found creation time text: {creation_text}")
+                
+                # Extract the date part after "Created "
+                if creation_text.startswith('Created '):
+                    date_text = creation_text[8:]  # Remove "Created " prefix
+                    
+                    # Use the existing _parse_game_datetime method to handle both relative and absolute dates
+                    datetime_info = self._parse_game_datetime(date_text)
+                    
+                    if datetime_info:
+                        logger.info(f"Successfully extracted game date from table: {datetime_info['raw_datetime']}")
+                        return datetime_info
+                    else:
+                        logger.warning(f"Could not parse date from: {date_text}")
+                else:
+                    logger.warning(f"Unexpected creation time format: {creation_text}")
+            else:
+                logger.debug("Creation time element not found in table HTML")
+            
+            return None
+                
+        except Exception as e:
+            logger.error(f"Error extracting game date from table HTML: {e}")
+            return None
+
+    def _parse_game_datetime(self, text: str) -> Optional[Dict]:
+        """
+        Parse datetime from text, handling both relative and absolute dates
+        
+        Args:
+            text: Text that may contain datetime information
+            
+        Returns:
+            dict: Dictionary with raw_datetime, parsed_datetime, and date_type, or None if not found
+        """
+        try:
+            # Pattern 1: Relative dates like "yesterday at 00:08"
+            relative_pattern = r'(yesterday|today)\s+at\s+(\d{1,2}:\d{2})'
+            relative_match = re.search(relative_pattern, text.lower())
+            
+            if relative_match:
+                relative_word = relative_match.group(1)
+                time_str = relative_match.group(2)
+                
+                # Calculate the actual date
+                current_date = datetime.now()
+                if relative_word == 'yesterday':
+                    target_date = current_date - timedelta(days=1)
+                else:  # today
+                    target_date = current_date
+                
+                # Parse the time
+                time_parts = time_str.split(':')
+                hour = int(time_parts[0])
+                minute = int(time_parts[1])
+                
+                # Create the full datetime
+                parsed_datetime = target_date.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                
+                return {
+                    'raw_datetime': f"{relative_word} at {time_str}",
+                    'parsed_datetime': parsed_datetime.isoformat(),
+                    'date_type': 'relative'
+                }
+            
+            # Pattern 2: Absolute dates like "2025-06-15 at 00:29"
+            absolute_pattern = r'(\d{4}-\d{2}-\d{2})\s+at\s+(\d{1,2}:\d{2})'
+            absolute_match = re.search(absolute_pattern, text)
+            
+            if absolute_match:
+                date_str = absolute_match.group(1)
+                time_str = absolute_match.group(2)
+                
+                # Parse the full datetime
+                datetime_str = f"{date_str} {time_str}:00"
+                parsed_datetime = datetime.strptime(datetime_str, "%Y-%m-%d %H:%M:%S")
+                
+                return {
+                    'raw_datetime': f"{date_str} at {time_str}",
+                    'parsed_datetime': parsed_datetime.isoformat(),
+                    'date_type': 'absolute'
+                }
+            
+            # Pattern 3: Alternative absolute format like "15/06/2025 at 00:29"
+            alt_absolute_pattern = r'(\d{1,2}/\d{1,2}/\d{4})\s+at\s+(\d{1,2}:\d{2})'
+            alt_absolute_match = re.search(alt_absolute_pattern, text)
+            
+            if alt_absolute_match:
+                date_str = alt_absolute_match.group(1)
+                time_str = alt_absolute_match.group(2)
+                
+                # Parse the date (assuming DD/MM/YYYY format)
+                date_parts = date_str.split('/')
+                day = int(date_parts[0])
+                month = int(date_parts[1])
+                year = int(date_parts[2])
+                
+                # Parse the time
+                time_parts = time_str.split(':')
+                hour = int(time_parts[0])
+                minute = int(time_parts[1])
+                
+                # Create the datetime
+                parsed_datetime = datetime(year, month, day, hour, minute, 0)
+                
+                return {
+                    'raw_datetime': f"{date_str} at {time_str}",
+                    'parsed_datetime': parsed_datetime.isoformat(),
+                    'date_type': 'absolute'
+                }
+            
+            # Pattern 4: Just time like "00:08" (assume today)
+            time_only_pattern = r'\b(\d{1,2}:\d{2})\b'
+            time_only_match = re.search(time_only_pattern, text)
+            
+            if time_only_match:
+                time_str = time_only_match.group(1)
+                
+                # Parse the time and assume today
+                time_parts = time_str.split(':')
+                hour = int(time_parts[0])
+                minute = int(time_parts[1])
+                
+                current_date = datetime.now()
+                parsed_datetime = current_date.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                
+                return {
+                    'raw_datetime': time_str,
+                    'parsed_datetime': parsed_datetime.isoformat(),
+                    'date_type': 'time_only'
+                }
+            
+            return None
+            
+        except Exception as e:
+            logger.debug(f"Error parsing datetime from text '{text}': {e}")
+            return None
+    
+    def parse_complete_game(self, replay_html: str, game_metadata: GameMetadata, table_id: str, player_perspective: str) -> GameData:
+        """Unified parsing method that takes GameMetadata instead of separate parameters"""
+        logger.info(f"Starting unified parsing for game {table_id}")
+        
+        soup = BeautifulSoup(replay_html, 'html.parser')
         
         # Extract gamelogs once for memory efficiency
-        gamelogs = self._extract_g_gamelogs(html_content)
+        gamelogs = self._extract_g_gamelogs(replay_html)
         
-        # Extract basic game info
-        players_info = self._extract_players_info(soup, html_content)
-        
-        # Extract all moves with detailed parsing
-        moves = self._extract_all_moves(soup, players_info, gamelogs)
+        # Extract player IDs from GameMetadata
+        player_id_map = self._get_player_id_map(game_metadata)
         
         # Extract VP progression throughout the game
-        vp_progression = self._extract_vp_progression(html_content)
+        vp_progression = self._extract_vp_progression(replay_html, gamelogs)
+        
+        # Extract corporations from HTML
+        corporations = self._extract_corporations(soup)
+        
+        # Create simple name_to_id mapping for move processing
+        name_to_id = {name: player_id for player_id, name in player_id_map.items()}
+        
+        # Extract all moves with detailed parsing (using simple name mapping)
+        moves = self._extract_all_moves_simple(soup, name_to_id, gamelogs)
         
         # Build game states for each move
-        moves_with_states = self._build_game_states(moves, vp_progression, players_info, gamelogs)
+        moves_with_states = self._build_game_states_simple(moves, vp_progression, list(player_id_map.keys()), gamelogs)
         
         # Add comprehensive resource/production/tag tracking if gamelogs available
         tracking_progression = []
-        if gamelogs and players_info:
+        if gamelogs and player_id_map:
             logger.info("Adding comprehensive tracking data to game states")
             # Extract tracker dictionary dynamically from HTML
-            tracker_dict = self._extract_tracker_dictionary_from_html(html_content)
+            tracker_dict = self._extract_tracker_dictionary_from_html(replay_html)
             
             # Get player IDs for tracking
-            player_ids = list(players_info.keys())
+            player_ids = list(player_id_map.keys())
             
             # Track resources and production through all moves
             tracking_progression = self._track_resources_and_production(gamelogs, player_ids, tracker_dict)
@@ -174,92 +572,105 @@ class Parser:
             # Update game states with tracking data
             self._update_game_states_with_tracking(moves_with_states, tracking_progression)
 
-        # Determine winner
-        winner = self._determine_winner(players_info)
+        # Build final player objects from collected data
+        players_info = self._build_final_players(player_id_map, corporations, moves_with_states, game_metadata)
+        
+        # Determine winner from final game state
+        winner = self._determine_winner_from_game_states(moves_with_states, players_info)
         
         # Extract game metadata
-        metadata = self._extract_metadata(soup, html_content, moves_with_states)
+        metadata = self._extract_metadata(soup, replay_html, moves_with_states)
         
         # Calculate max generation from vp_progression or moves
         max_generation = self._calculate_max_generation(vp_progression, moves_with_states)
         
-        # Create game data with assignment metadata fields
+        # Create game data with game metadata fields
         game_data = GameData(
-            replay_id=replay_id,
+            replay_id=table_id,
             player_perspective=player_perspective,
-            game_date=self._extract_game_date(soup, assignment_metadata),
+            game_date=self._extract_game_date(soup, game_metadata),
             game_duration=self._calculate_game_duration(moves_with_states),
             winner=winner,
             generations=max_generation,
-            # Add assignment metadata fields to top level
-            map=assignment_metadata.map if assignment_metadata else None,
-            prelude_on=assignment_metadata.prelude_on if assignment_metadata else None,
-            colonies_on=assignment_metadata.colonies_on if assignment_metadata else None,
-            corporate_era_on=assignment_metadata.corporate_era_on if assignment_metadata else None,
-            draft_on=assignment_metadata.draft_on if assignment_metadata else None,
-            beginners_corporations_on=assignment_metadata.beginners_corporations_on if assignment_metadata else None,
-            game_speed=assignment_metadata.game_speed if assignment_metadata else None,
+            # Add game metadata fields to top level
+            map=game_metadata.map,
+            prelude_on=game_metadata.prelude_on,
+            colonies_on=game_metadata.colonies_on,
+            corporate_era_on=game_metadata.corporate_era_on,
+            draft_on=game_metadata.draft_on,
+            beginners_corporations_on=game_metadata.beginners_corporations_on,
+            game_speed=game_metadata.game_speed,
             players=players_info,
             moves=moves_with_states,
             metadata=metadata
         )
         
-        logger.info(f"Parsing complete for game {replay_id}: {len(moves_with_states)} moves, {len(players_info)} players")
+        logger.info(f"Unified parsing complete for game {table_id}: {len(moves_with_states)} moves, {len(players_info)} players")
         return game_data
     
-    def _extract_players_info(self, soup: BeautifulSoup, html_content: str) -> Dict[str, Player]:
-        """Extract comprehensive player information using gamelogs-first approach"""
-        # First, try to get player names from gamelogs (most reliable)
-        gamelogs = self._extract_g_gamelogs(html_content)
-        vp_data = self._extract_vp_data_from_html(html_content)
-        valid_player_ids = set(vp_data.keys())
+    def _get_player_id_map(self, game_metadata: GameMetadata) -> Dict[str, str]:
+        """Extract player ID to name mapping from GameMetadata"""
+        player_id_map = {}  # player_id -> player_name
         
-        player_names = []
-        player_id_map = {}
-        
-        if gamelogs and valid_player_ids:
-            logger.info("Extracting player info using gamelogs-first approach")
-            # Extract player mapping directly from gamelogs
-            gamelogs_mapping = self._extract_player_mapping_from_gamelogs(gamelogs, valid_player_ids)
-            if gamelogs_mapping:
-                logger.info(f"Found complete gamelogs mapping: {gamelogs_mapping}")
-                player_names = list(gamelogs_mapping.keys())
-                player_id_map = gamelogs_mapping
-        
-        # Fallback: Get player names from HTML span elements if gamelogs approach failed
-        if not player_names:
-            logger.info("Gamelogs approach failed, falling back to HTML span extraction")
-            player_elements = soup.find_all('span', class_='playername')
-            for elem in player_elements:
-                player_name = elem.get_text().strip()
-                if player_name and player_name not in player_names:
-                    player_names.append(player_name)
+        if game_metadata and game_metadata.players:
+            logger.info("Extracting player IDs from GameMetadata")
+            for player_id, elo_data in game_metadata.players.items():
+                if elo_data.player_name:
+                    player_id_map[player_id] = elo_data.player_name
+                    logger.debug(f"GameMetadata: {player_id} -> {elo_data.player_name}")
             
-            # Get player ID mapping using the improved method
-            if player_names:
-                player_id_map = self._extract_player_id_mapping(html_content, player_names)
+            if player_id_map:
+                logger.info(f"Successfully extracted {len(player_id_map)} players from GameMetadata")
+                return player_id_map
         
-        # Final fallback: Extract player names from move descriptions
-        if not player_names:
-            logger.info("No playername spans found, extracting from move descriptions")
-            player_names = self._extract_player_names_from_moves(soup)
-            if player_names:
-                player_id_map = self._extract_player_id_mapping(html_content, player_names)
+        # If no player data available, raise an error
+        logger.error("No player data available in GameMetadata")
+        raise ValueError("Parser requires GameMetadata with player information")
+    
+    def _build_final_players(self, player_id_map: Dict[str, str], corporations: Dict[str, str], 
+                                               moves_with_states: List[Move], game_metadata: GameMetadata) -> Dict[str, Player]:
+        """Build final player objects from collected data using GameMetadata"""
+        players = {}
         
-        # Get corporations
-        corporations = self._extract_corporations(soup)
+        # Get final VP data from the last move with game state
+        final_vp_data = {}
+        if moves_with_states:
+            for move in reversed(moves_with_states):
+                if move.game_state and move.game_state.player_vp:
+                    final_vp_data = move.game_state.player_vp
+                    break
         
         # Build player objects
-        players = {}
-        for player_name in player_names:
-            player_id = player_id_map.get(player_name, f"unknown_{len(players)}")
-            
+        for player_id, player_name in player_id_map.items():
             # Get final VP and breakdown
             final_vp = 0
             vp_breakdown = {}
-            if player_id in vp_data:
-                final_vp = vp_data[player_id].get('total', 0)
-                vp_breakdown = vp_data[player_id].get('total_details', {})
+            if player_id in final_vp_data:
+                final_vp = final_vp_data[player_id].get('total', 0)
+                vp_breakdown = final_vp_data[player_id].get('total_details', {})
+            
+            # Collect cards played, milestones, awards from moves
+            cards_played = []
+            milestones_claimed = []
+            awards_funded = []
+            
+            for move in moves_with_states:
+                if move.player_id == player_id:
+                    if move.card_played:
+                        cards_played.append(move.card_played)
+                    if move.action_type == 'claim_milestone':
+                        milestone_match = re.search(r'claims milestone (\w+)', move.description)
+                        if milestone_match:
+                            milestones_claimed.append(milestone_match.group(1))
+                    if move.action_type == 'fund_award':
+                        award_match = re.search(r'funds (\w+) award', move.description)
+                        if award_match:
+                            awards_funded.append(award_match.group(1))
+            
+            # Get ELO data from GameMetadata
+            elo_data = None
+            if game_metadata and game_metadata.players and player_id in game_metadata.players:
+                elo_data = game_metadata.players[player_id]
             
             players[player_id] = Player(
                 player_id=player_id,
@@ -268,46 +679,29 @@ class Parser:
                 final_vp=final_vp,
                 final_tr=vp_breakdown.get('tr', 20),
                 vp_breakdown=vp_breakdown,
-                cards_played=[],  # Will be populated from moves
-                milestones_claimed=[],  # Will be populated from moves
-                awards_funded=[]  # Will be populated from moves
+                cards_played=cards_played,
+                milestones_claimed=milestones_claimed,
+                awards_funded=awards_funded,
+                elo_data=elo_data
             )
         
-        logger.info(f"Extracted {len(players)} players using gamelogs-first approach: {list(players.keys())}")
+        logger.info(f"Built {len(players)} final player objects from GameMetadata")
         return players
     
-    def _extract_player_names_from_moves(self, soup: BeautifulSoup) -> List[str]:
-        """Extract player names from move descriptions as fallback"""
-        player_names = set()
+    def _extract_game_date(self, soup: BeautifulSoup, game_metadata: GameMetadata) -> str:
+        """Extract game date from GameMetadata or HTML"""
+        # If GameMetadata has played_at timestamp, use it
+        if game_metadata and game_metadata.played_at:
+            try:
+                # Parse the ISO timestamp and convert to date
+                played_at_dt = datetime.fromisoformat(game_metadata.played_at.replace('Z', '+00:00'))
+                return played_at_dt.strftime("%Y-%m-%d")
+            except (ValueError, AttributeError) as e:
+                logger.warning(f"Failed to parse played_at timestamp '{game_metadata.played_at}': {e}")
         
-        # Look for player names in move descriptions
-        log_entries = soup.find_all('div', class_='gamelogreview')
-        for entry in log_entries:
-            text = entry.get_text()
-            
-            # Look for patterns like "PlayerName plays card", "PlayerName chooses corporation", etc.
-            patterns = [
-                r'(\w+(?:\s+\w+)*) plays card',
-                r'(\w+(?:\s+\w+)*) chooses corporation',
-                r'(\w+(?:\s+\w+)*) gains',
-                r'(\w+(?:\s+\w+)*) pays',
-                r'(\w+(?:\s+\w+)*) increases',
-                r'(\w+(?:\s+\w+)*) places',
-                r'(\w+(?:\s+\w+)*) claims milestone',
-                r'(\w+(?:\s+\w+)*) funds.*award'
-            ]
-            
-            for pattern in patterns:
-                matches = re.findall(pattern, text)
-                for match in matches:
-                    # Clean up the match and add if it looks like a player name
-                    name = match.strip()
-                    if name and len(name) > 1 and name not in ['You', 'Module', 'Map']:
-                        player_names.add(name)
-        
-        result = list(player_names)
-        logger.info(f"Extracted {len(result)} player names from moves: {result}")
-        return result
+        # Fallback: Look for date information in the HTML
+        # This would need to be customized based on BGA's HTML structure
+        return datetime.now().strftime("%Y-%m-%d")
     
     def _extract_all_moves(self, soup: BeautifulSoup, players_info: Dict[str, Player], gamelogs: Dict[str, Any] = None) -> List[Move]:
         """Extract all moves with detailed information"""
@@ -520,150 +914,6 @@ class Parser:
         
         return None, None
     
-    def _extract_resource_changes_detailed(self, log_entries: List[Tag]) -> Dict[str, int]:
-        """Extract detailed resource changes"""
-        changes = {}
-        
-        for entry in log_entries:
-            html_content = str(entry)
-            
-            # Pattern for gains/pays with number before resource
-            gain_pattern = r'gains (\d+) <div class="token_img tracker_(\w+)"[^>]*title="([^"]*)"[^>]*></div>'
-            pay_pattern = r'pays (\d+) <div class="token_img tracker_(\w+)"[^>]*title="([^"]*)"[^>]*></div>'
-            
-            # Pattern for gains/pays with number after resource
-            gain_after_pattern = r'gains <div class="token_img tracker_(\w+)"[^>]*title="([^"]*)"[^>]*></div>(\d+)'
-            pay_after_pattern = r'pays <div class="token_img tracker_(\w+)"[^>]*title="([^"]*)"[^>]*></div>(\d+)'
-            
-            patterns = [
-                (gain_pattern, 1),
-                (pay_pattern, -1),
-                (gain_after_pattern, 1),
-                (pay_after_pattern, -1)
-            ]
-            
-            for pattern, sign in patterns:
-                matches = re.finditer(pattern, html_content)
-                for match in matches:
-                    if pattern in [gain_pattern, pay_pattern]:
-                        amount = int(match.group(1)) * sign
-                        tracker = match.group(2)
-                        title = match.group(3)
-                    else:
-                        tracker = match.group(1)
-                        title = match.group(2)
-                        amount = int(match.group(3)) * sign
-                    
-                    resource_name = self._map_tracker_to_resource(tracker, title)
-                    if 'Production' not in title:  # Only count non-production changes here
-                        changes[resource_name] = changes.get(resource_name, 0) + amount
-        
-        return changes
-    
-    def _extract_production_changes_detailed(self, log_entries: List[Tag]) -> Dict[str, int]:
-        """Extract detailed production changes"""
-        changes = {}
-        
-        for entry in log_entries:
-            html_content = str(entry)
-            
-            # Production increase/decrease patterns
-            increase_prod_pattern = r'increases <div class="token_img tracker_(\w+)"[^>]*title="([^"]*)"[^>]*></div> by (\d+)'
-            reduce_prod_pattern = r'reduces <div class="token_img tracker_(\w+)"[^>]*title="([^"]*)"[^>]*></div> by (\d+)'
-            
-            patterns = [
-                (increase_prod_pattern, 1),
-                (reduce_prod_pattern, -1)
-            ]
-            
-            for pattern, sign in patterns:
-                matches = re.finditer(pattern, html_content)
-                for match in matches:
-                    tracker = match.group(1)
-                    title = match.group(2)
-                    amount = int(match.group(3)) * sign
-                    
-                    if 'Production' in title:
-                        resource_name = self._map_tracker_to_resource(tracker, title)
-                        changes[resource_name] = changes.get(resource_name, 0) + amount
-        
-        return changes
-    
-    def _extract_parameter_changes_detailed(self, log_entries: List[Tag]) -> Dict[str, int]:
-        """Extract terraforming parameter changes"""
-        changes = {}
-        
-        for entry in log_entries:
-            html_content = str(entry)
-            
-            # Temperature changes
-            temp_match = re.search(r'increases.*Temperature.*by \d+ step.*to a value of (-?\d+)', html_content)
-            if temp_match:
-                changes['temperature'] = int(temp_match.group(1))
-            
-            # Oxygen changes
-            oxygen_match = re.search(r'increases.*Oxygen Level.*by \d+ step.*to a value of (\d+)', html_content)
-            if oxygen_match:
-                changes['oxygen'] = int(oxygen_match.group(1))
-            
-            # Ocean changes
-            ocean_match = re.search(r'increases.*Oceans.*by \d+ step.*to a value of (\d+)', html_content)
-            if ocean_match:
-                changes['oceans'] = int(ocean_match.group(1))
-        
-        return changes
-    
-    def _extract_parameter_changes_from_description(self, description: str) -> Dict[str, int]:
-        """Extract terraforming parameter changes from move description text"""
-        changes = {}
-        
-        # Temperature changes - look for patterns like "Temperature increases by 1 step to a value of -26"
-        temp_patterns = [
-            r'Temperature.*?increases.*?by \d+ step.*?to a value of (-?\d+)',
-            r'increases.*?Temperature.*?by \d+ step.*?to a value of (-?\d+)',
-            r'Temperature.*?to a value of (-?\d+)',
-            r'Temperature.*?(-?\d+)°C'
-        ]
-        
-        for pattern in temp_patterns:
-            temp_match = re.search(pattern, description, re.IGNORECASE)
-            if temp_match:
-                changes['temperature'] = int(temp_match.group(1))
-                logger.debug(f"Found temperature change: {temp_match.group(1)}")
-                break
-        
-        # Oxygen changes - look for patterns like "Oxygen Level increases by 1 step to a value of 5"
-        oxygen_patterns = [
-            r'Oxygen Level.*?increases.*?by \d+ step.*?to a value of (\d+)',
-            r'increases.*?Oxygen Level.*?by \d+ step.*?to a value of (\d+)',
-            r'Oxygen Level.*?to a value of (\d+)',
-            r'Oxygen.*?(\d+)%'
-        ]
-        
-        for pattern in oxygen_patterns:
-            oxygen_match = re.search(pattern, description, re.IGNORECASE)
-            if oxygen_match:
-                changes['oxygen'] = int(oxygen_match.group(1))
-                logger.debug(f"Found oxygen change: {oxygen_match.group(1)}")
-                break
-        
-        # Ocean changes - look for patterns like "Oceans increases by 1 step to a value of 3"
-        ocean_patterns = [
-            r'Oceans.*?increases.*?by \d+ step.*?to a value of (\d+)',
-            r'increases.*?Oceans.*?by \d+ step.*?to a value of (\d+)',
-            r'Oceans.*?to a value of (\d+)',
-            r'Ocean.*?(\d+)'
-        ]
-        
-        for pattern in ocean_patterns:
-            ocean_match = re.search(pattern, description, re.IGNORECASE)
-            if ocean_match:
-                changes['oceans'] = int(ocean_match.group(1))
-                logger.debug(f"Found ocean change: {ocean_match.group(1)}")
-                break
-        
-        return changes
-    
     def _extract_parameter_changes_from_gamelogs(self, gamelogs: Dict[str, Any]) -> Dict[int, Dict[str, int]]:
         """Extract terraforming parameter changes from gamelogs JSON data"""
         parameter_changes_by_move = {}
@@ -731,26 +981,6 @@ class Parser:
             logger.error(f"Error extracting parameter changes from gamelogs: {e}")
             return {}
     
-    def _map_tracker_to_resource(self, tracker: str, title: str) -> str:
-        """Map tracker code to resource name"""
-        mapping = {
-            'm': 'M€',
-            's': 'Steel',
-            'u': 'Titanium',
-            'p': 'Plant',
-            'e': 'Energy',
-            'h': 'Heat',
-            'tr': 'TR',
-            'pm': 'M€',
-            'ps': 'Steel',
-            'pu': 'Titanium',
-            'pp': 'Plant',
-            'pe': 'Energy',
-            'ph': 'Heat',
-        }
-        
-        return mapping.get(tracker, title.replace(' Production', ''))
-    
     def _update_player_data_from_move(self, move: Move, players_info: Dict[str, Player]):
         """Update player data based on move information"""
         if move.player_id not in players_info:
@@ -774,29 +1004,6 @@ class Parser:
             if award_match:
                 player.awards_funded.append(award_match.group(1))
     
-    def _validate_resource_value(self, resource: str, value: int, is_production: bool = False) -> int:
-        """Validate and clamp resource values to valid ranges"""
-        if is_production:
-            # Production minimums in Terraforming Mars
-            minimums = {
-                'M€': -5,  # Can go negative due to certain cards
-                'Steel': 0,
-                'Titanium': 0,
-                'Plant': 0,
-                'Energy': 0,
-                'Heat': 0
-            }
-            min_val = minimums.get(resource, 0)
-            return max(min_val, value)
-        else:
-            # Regular resources can't go below 0 (except M€ which can be negative)
-            if resource == 'M€':
-                return value  # M€ can be negative
-            elif resource == 'TR':
-                return max(20, min(63, value))  # TR range is 20-63
-            else:
-                return max(0, value)  # Other resources can't be negative
-
     def _build_game_states(self, moves: List[Move], vp_progression: List[Dict[str, Any]], players_info: Dict[str, Player], gamelogs: Dict[str, Any] = None) -> List[Move]:
         """Build game states for each move with VP, milestone, and award tracking"""
         # Initialize tracking variables
@@ -1188,6 +1395,10 @@ class Parser:
                     # Look for scoringTable type entries
                     if data_item.get('type') == 'scoringTable':
                         scoring_data = data_item.get('args', {}).get('data', {})
+
+                        if not scoring_data:
+                            scoring_data = data_item.get('args', {}) # Older format
+
                         if scoring_data:
                             # Replace IDs with names in the scoring data, including hex information
                             scoring_data_with_names = self._replace_ids_with_names(
@@ -1215,71 +1426,10 @@ class Parser:
         # This is a placeholder method - in practice, hex names should be extracted from HTML
         # This method exists to maintain consistency when gamelogs are processed separately
         return {}
-    
-    def _parse_milestone_award_data(self, gamelogs: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        """Parse milestone and award data from g_gamelogs"""
-        milestones_data = {}
-        awards_data = {}
-        
-        try:
-            data_entries = gamelogs.get('data', {}).get('data', [])
-            
-            for entry in data_entries:
-                if not isinstance(entry, dict):
-                    continue
-                
-                entry_data = entry.get('data', [])
-                if not isinstance(entry_data, list):
-                    continue
-                
-                for data_item in entry_data:
-                    if not isinstance(data_item, dict):
-                        continue
-                    
-                    # Look for milestone claims
-                    log_message = data_item.get('log', '')
-                    if 'milestone' in log_message.lower():
-                        args = data_item.get('args', {})
-                        if 'player_name' in args:
-                            milestone_info = {
-                                'move_id': entry.get('move_id'),
-                                'time': entry.get('time'),
-                                'player_id': args.get('player_id'),
-                                'player_name': args.get('player_name'),
-                                'uid': data_item.get('uid')
-                            }
-                            milestone_key = f"milestone_{data_item.get('uid', 'unknown')}"
-                            milestones_data[milestone_key] = milestone_info
-                    
-                    # Look for award funding
-                    if 'award' in log_message.lower() and 'fund' in log_message.lower():
-                        args = data_item.get('args', {})
-                        if 'player_name' in args:
-                            award_info = {
-                                'move_id': entry.get('move_id'),
-                                'time': entry.get('time'),
-                                'player_id': args.get('player_id'),
-                                'player_name': args.get('player_name'),
-                                'uid': data_item.get('uid')
-                            }
-                            award_key = f"award_{data_item.get('uid', 'unknown')}"
-                            awards_data[award_key] = award_info
-            
-            logger.info(f"Extracted {len(milestones_data)} milestone entries and {len(awards_data)} award entries")
-            return milestones_data, awards_data
-            
-        except Exception as e:
-            logger.error(f"Error parsing milestone/award data: {e}")
-            return {}, {}
-    
-    def _extract_vp_progression(self, html_content: str) -> List[Dict[str, Any]]:
+
+    def _extract_vp_progression(self, html_content: str, gamelogs: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Extract VP progression throughout the game using g_gamelogs data"""
-        # Extract g_gamelogs first
-        gamelogs = self._extract_g_gamelogs(html_content)
-        if not gamelogs:
-            # Fallback to old method if g_gamelogs not found
-            return self._extract_vp_progression_fallback(html_content)
-        
+
         # Extract name mappings from HTML
         card_names = self._extract_card_names(html_content)
         milestone_names = self._extract_milestone_names(html_content)
@@ -1337,7 +1487,12 @@ class Parser:
                     
                     # Look for scoringTable type entries
                     if data_item.get('type') == 'scoringTable':
+
                         scoring_data = data_item.get('args', {}).get('data', {})
+
+                        if not scoring_data:
+                            scoring_data = data_item.get('args', {})
+
                         if scoring_data:
                             # Replace IDs with names in the scoring data, including hex information
                             scoring_data_with_names = self._replace_ids_with_names(
@@ -1395,10 +1550,108 @@ class Parser:
         return vp_progression
     
     def _extract_vp_data_from_html(self, html_content: str) -> Dict[str, Any]:
-        """Extract VP data from HTML - reusing existing logic"""
-        pattern = r'"data":\{("(\d+)":\{.*?"total":(\d+).*?\}.*?"(\d+)":\{.*?"total":(\d+).*?\})\}'
+        """Extract VP data from HTML - handles both newer and older formats with variable player counts"""
+        logger.debug("Extracting VP data from HTML")
         
-        matches = re.findall(pattern, html_content, re.DOTALL)
+        # Try newer format first (with "data" wrapper in scoringTable)
+        newer_pattern = r'"type":"scoringTable"[^}]*?"args":\s*\{\s*"data":\s*(\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\})'
+        matches = re.findall(newer_pattern, html_content, re.DOTALL)
+        
+        if matches:
+            logger.debug(f"Found {len(matches)} matches with newer format")
+            # Try to parse each match and find the one with highest total VP
+            best_vp_data = None
+            best_total = 0
+            
+            for match in matches:
+                try:
+                    vp_data = json.loads(match)
+                    # Calculate total VP across all players
+                    total_vp = sum(player_data.get('total', 0) for player_data in vp_data.values() if isinstance(player_data, dict))
+                    
+                    if total_vp > best_total:
+                        best_total = total_vp
+                        best_vp_data = vp_data
+                        logger.debug(f"Found better VP data with total {total_vp}")
+                        
+                except json.JSONDecodeError as e:
+                    logger.debug(f"Failed to parse newer format match: {e}")
+                    continue
+            
+            if best_vp_data:
+                logger.info(f"Successfully extracted VP data (newer format) for {len(best_vp_data)} players, total VP: {best_total}")
+                return best_vp_data
+        
+        # Try older format (direct player data in scoringTable args)
+        older_pattern = r'"type":"scoringTable"[^}]*?"args":\s*(\{"[0-9]+":.*?\})'
+        matches = re.findall(older_pattern, html_content, re.DOTALL)
+        
+        if matches:
+            logger.debug(f"Found {len(matches)} matches with older format")
+            # Try to parse each match and find the one with highest total VP
+            best_vp_data = None
+            best_total = 0
+            
+            for match in matches:
+                try:
+                    # Need to properly close the JSON - find the end of the player data
+                    # Look for the complete args object
+                    args_start = html_content.find(match)
+                    if args_start == -1:
+                        continue
+                    
+                    # Find the closing brace for the args object
+                    brace_count = 0
+                    end_pos = args_start
+                    in_string = False
+                    escape_next = False
+                    
+                    for i, char in enumerate(html_content[args_start:], args_start):
+                        if escape_next:
+                            escape_next = False
+                            continue
+                            
+                        if char == '\\':
+                            escape_next = True
+                            continue
+                            
+                        if char == '"' and not escape_next:
+                            in_string = not in_string
+                            continue
+                            
+                        if not in_string:
+                            if char == '{':
+                                brace_count += 1
+                            elif char == '}':
+                                brace_count -= 1
+                                if brace_count == 0:
+                                    end_pos = i + 1
+                                    break
+                    
+                    # Extract the complete JSON
+                    complete_json = html_content[args_start:end_pos]
+                    vp_data = json.loads(complete_json)
+                    
+                    # Calculate total VP across all players
+                    total_vp = sum(player_data.get('total', 0) for player_data in vp_data.values() if isinstance(player_data, dict))
+                    
+                    if total_vp > best_total:
+                        best_total = total_vp
+                        best_vp_data = vp_data
+                        logger.debug(f"Found better VP data with total {total_vp}")
+                        
+                except json.JSONDecodeError as e:
+                    logger.debug(f"Failed to parse older format match: {e}")
+                    continue
+            
+            if best_vp_data:
+                logger.info(f"Successfully extracted VP data (older format) for {len(best_vp_data)} players, total VP: {best_total}")
+                return best_vp_data
+        
+        # Final fallback - try the original regex approach for backwards compatibility
+        logger.debug("Trying original regex fallback")
+        original_pattern = r'"data":\{("(\d+)":\{.*?"total":(\d+).*?\}.*?"(\d+)":\{.*?"total":(\d+).*?\})\}'
+        matches = re.findall(original_pattern, html_content, re.DOTALL)
         
         if matches:
             best_match = None
@@ -1417,173 +1670,14 @@ class Parser:
                     if brace_count > 0:
                         json_str = "{" + best_match + '}' * brace_count + "}"
                     
-                    return json.loads(json_str)
+                    result = json.loads(json_str)
+                    logger.info(f"Successfully extracted VP data (fallback) for {len(result)} players")
+                    return result
                 except json.JSONDecodeError:
                     pass
         
+        logger.warning("Failed to extract VP data from HTML using all methods")
         return {}
-    
-    def _extract_player_id_mapping(self, html_content: str, player_names: List[str]) -> Dict[str, str]:
-        """Extract player ID mapping with optimized regex to prevent catastrophic backtracking"""
-        player_id_map = {}
-        
-        try:
-            # Get valid player IDs from VP data
-            vp_data = self._extract_vp_data_from_html(html_content)
-            valid_player_ids = set(vp_data.keys())
-            
-            logger.info(f"Found {len(valid_player_ids)} valid player IDs: {valid_player_ids}")
-            
-            # First, try to get mapping from gamelogs (most reliable)
-            gamelogs = self._extract_g_gamelogs(html_content)
-            if gamelogs:
-                logger.info("Attempting to extract player mapping from gamelogs")
-                gamelogs_mapping = self._extract_player_mapping_from_gamelogs(gamelogs, valid_player_ids)
-                if gamelogs_mapping:
-                    logger.info(f"Found gamelogs mapping: {gamelogs_mapping}")
-                    # Update player_names to use the correct names from gamelogs
-                    gamelogs_names = list(gamelogs_mapping.keys())
-                    player_id_map.update(gamelogs_mapping)
-                    
-                    # If we got a complete mapping from gamelogs, return it
-                    if len(player_id_map) == len(valid_player_ids):
-                        logger.info(f"Complete mapping from gamelogs: {player_id_map}")
-                        return player_id_map
-            
-            # If gamelogs didn't provide complete mapping, fall back to HTML-based search
-            # Use the original player_names passed in, but also try gamelogs names if available
-            names_to_try = list(player_names)
-            if 'gamelogs_names' in locals():
-                # Add gamelogs names that aren't already mapped
-                for name in gamelogs_names:
-                    if name not in player_id_map and name not in names_to_try:
-                        names_to_try.append(name)
-            
-            logger.info(f"Trying HTML-based mapping for names: {names_to_try}")
-            
-            # Look for player board elements that might contain the mapping
-            for player in names_to_try:
-                if player in player_id_map:
-                    continue
-                    
-                logger.debug(f"Searching for player ID mapping for: {player}")
-                
-                # Use more specific and efficient patterns to avoid catastrophic backtracking
-                patterns = [
-                    # Look for player name followed by digits within reasonable distance (max 100 chars)
-                    rf'{re.escape(player)}.{{0,100}}?(\d{{8,}})',
-                    # Look for digits followed by player name within reasonable distance
-                    rf'(\d{{8,}}).{{0,100}}?{re.escape(player)}',
-                    # Look in player board contexts
-                    rf'player_board.{{0,200}}?{re.escape(player)}.{{0,100}}?(\d{{8,}})',
-                    rf'(\d{{8,}}).{{0,100}}?player_board.{{0,200}}?{re.escape(player)}',
-                ]
-                
-                for i, pattern in enumerate(patterns):
-                    try:
-                        # Use a more targeted search by looking in smaller chunks
-                        matches = re.findall(pattern, html_content, re.IGNORECASE | re.DOTALL)
-                        logger.debug(f"Pattern {i+1} for {player}: found {len(matches)} matches")
-                        
-                        if matches:
-                            for match in matches:
-                                match_id = match if isinstance(match, str) else match[0] if isinstance(match, tuple) else str(match)
-                                if len(match_id) >= 8 and match_id in valid_player_ids:
-                                    player_id_map[player] = match_id
-                                    logger.info(f"Mapped {player} -> {match_id}")
-                                    break
-                            
-                            if player in player_id_map:
-                                break
-                                
-                    except re.error as e:
-                        logger.warning(f"Regex error for pattern {i+1} with player {player}: {e}")
-                        continue
-                
-                # If still not found, try a simpler approach
-                if player not in player_id_map:
-                    # Look for the player name in a smaller context around player boards
-                    try:
-                        player_sections = re.findall(rf'player_board[^>]*>.{{0,500}}?{re.escape(player)}.{{0,500}}?</div>', 
-                                                    html_content, re.IGNORECASE | re.DOTALL)
-                        
-                        for section in player_sections:
-                            digit_matches = re.findall(r'\d{8,}', section)
-                            for digit_match in digit_matches:
-                                if digit_match in valid_player_ids:
-                                    player_id_map[player] = digit_match
-                                    logger.info(f"Mapped {player} -> {digit_match} (fallback method)")
-                                    break
-                            if player in player_id_map:
-                                break
-                    except re.error as e:
-                        logger.warning(f"Regex error in fallback method for player {player}: {e}")
-            
-            # Final fallback mapping if HTML-based mapping fails
-            if len(player_id_map) < len(valid_player_ids):
-                logger.warning(f"Only mapped {len(player_id_map)}/{len(valid_player_ids)} players, using fallback")
-                player_ids = sorted(valid_player_ids)
-                mapped_ids = set(player_id_map.values())
-                
-                # Map any remaining unmapped IDs to remaining names
-                unmapped_ids = [pid for pid in player_ids if pid not in mapped_ids]
-                unmapped_names = [name for name in names_to_try if name not in player_id_map]
-                
-                for i, player in enumerate(unmapped_names):
-                    if i < len(unmapped_ids):
-                        player_id_map[player] = unmapped_ids[i]
-                        logger.info(f"Fallback mapping: {player} -> {unmapped_ids[i]}")
-            
-            logger.info(f"Final player ID mapping: {player_id_map}")
-            return player_id_map
-            
-        except Exception as e:
-            logger.error(f"Error in player ID mapping extraction: {e}")
-            
-            # Return simple fallback mapping
-            fallback_map = {}
-            for i, player in enumerate(player_names):
-                fallback_map[player] = f"unknown_{i}"
-            
-            return fallback_map
-    
-    def _extract_player_mapping_from_gamelogs(self, gamelogs: Dict[str, Any], valid_player_ids: set) -> Dict[str, str]:
-        """Extract player name to ID mapping from gamelogs data"""
-        mapping = {}
-        
-        try:
-            data_entries = gamelogs.get('data', {}).get('data', [])
-            
-            for entry in data_entries:
-                if not isinstance(entry, dict):
-                    continue
-                
-                entry_data = entry.get('data', [])
-                if not isinstance(entry_data, list):
-                    continue
-                
-                for data_item in entry_data:
-                    if not isinstance(data_item, dict):
-                        continue
-                    
-                    args = data_item.get('args', {})
-                    
-                    # Look for entries that have both player_id and player_name
-                    if 'player_id' in args and 'player_name' in args:
-                        player_id = str(args['player_id'])
-                        player_name = args['player_name']
-                        
-                        # Only use if it's a valid player ID
-                        if player_id in valid_player_ids:
-                            mapping[player_name] = player_id
-                            logger.debug(f"Gamelogs mapping: {player_name} -> {player_id}")
-            
-            logger.info(f"Extracted {len(mapping)} player mappings from gamelogs")
-            return mapping
-            
-        except Exception as e:
-            logger.error(f"Error extracting player mapping from gamelogs: {e}")
-            return {}
     
     def _extract_corporations(self, soup: BeautifulSoup) -> Dict[str, str]:
         """Extract corporation assignments"""
@@ -1614,31 +1708,6 @@ class Parser:
         
         logger.info(f"Total corporations extracted: {corporations}")
         return corporations
-    
-    def _determine_winner(self, players_info: Dict[str, Player]) -> str:
-        """Determine the winner based on final VP"""
-        if not players_info:
-            return "Unknown"
-        
-        max_vp = max(player.final_vp for player in players_info.values())
-        winners = [player.player_name for player in players_info.values() if player.final_vp == max_vp]
-        
-        return winners[0] if winners else "Unknown"
-    
-    def _extract_game_date(self, soup: BeautifulSoup, assignment_metadata: Optional[AssignmentMetadata] = None) -> str:
-        """Extract game date from HTML or assignment metadata"""
-        # If assignment metadata is provided and has playedAt timestamp, use it
-        if assignment_metadata and assignment_metadata.played_at:
-            try:
-                # Parse the ISO timestamp and convert to date
-                played_at_dt = datetime.fromisoformat(assignment_metadata.played_at.replace('Z', '+00:00'))
-                return played_at_dt.strftime("%Y-%m-%d")
-            except (ValueError, AttributeError) as e:
-                logger.warning(f"Failed to parse playedAt timestamp '{assignment_metadata.played_at}': {e}")
-        
-        # Fallback: Look for date information in the HTML
-        # This would need to be customized based on BGA's HTML structure
-        return datetime.now().strftime("%Y-%m-%d")
     
     def _calculate_game_duration(self, moves: List[Move]) -> str:
         """Calculate game duration from moves"""
@@ -1839,112 +1908,6 @@ class Parser:
         
         return mappings.get(base_id, f"Unknown ({base_id})")
 
-    def _infer_tracker_display_name(self, tracker_id: str, html_content: str) -> str:
-        """Infer display name for a tracker from HTML context"""
-        try:
-            # Find the section of HTML around this tracker ID
-            tracker_pattern = rf'id="{re.escape(tracker_id)}"'
-            match = re.search(tracker_pattern, html_content)
-            
-            if not match:
-                return ""
-            
-            # Extract surrounding context (500 chars before and after)
-            start = max(0, match.start() - 500)
-            end = min(len(html_content), match.end() + 500)
-            context = html_content[start:end]
-            
-            # Look for common patterns that indicate the tracker type
-            if "counter_hand" in tracker_id:
-                return "Hand Counter"
-            elif "tracker_m_" in tracker_id and "production" not in context.lower():
-                return "MC"
-            elif "tracker_pm_" in tracker_id or ("tracker_m_" in tracker_id and "production" in context.lower()):
-                return "MC Production"
-            elif "tracker_s_" in tracker_id and "production" not in context.lower():
-                return "Steel"
-            elif "tracker_ps_" in tracker_id or ("tracker_s_" in tracker_id and "production" in context.lower()):
-                return "Steel Production"
-            elif "tracker_u_" in tracker_id and "production" not in context.lower():
-                return "Titanium"
-            elif "tracker_pu_" in tracker_id or ("tracker_u_" in tracker_id and "production" in context.lower()):
-                return "Titanium Production"
-            elif "tracker_p_" in tracker_id and "production" not in context.lower():
-                return "Plant"
-            elif "tracker_pp_" in tracker_id or ("tracker_p_" in tracker_id and "production" in context.lower()):
-                return "Plant Production"
-            elif "tracker_e_" in tracker_id and "production" not in context.lower():
-                return "Energy"
-            elif "tracker_pe_" in tracker_id or ("tracker_e_" in tracker_id and "production" in context.lower()):
-                return "Energy Production"
-            elif "tracker_h" in tracker_id and "production" not in context.lower():
-                return "Heat"
-            elif "tracker_ph_" in tracker_id or ("tracker_h" in tracker_id and "production" in context.lower()):
-                return "Heat Production"
-            elif "tracker_tagBuilding" in tracker_id:
-                return "Count of Building tags"
-            elif "tracker_tagSpace" in tracker_id:
-                return "Count of Space tags"
-            elif "tracker_tagScience" in tracker_id:
-                return "Count of Science tags"
-            elif "tracker_tagEnergy" in tracker_id:
-                return "Count of Power tags"
-            elif "tracker_tagEarth" in tracker_id:
-                return "Count of Earth tags"
-            elif "tracker_tagJovian" in tracker_id:
-                return "Count of Jovian tags"
-            elif "tracker_tagCity" in tracker_id:
-                return "Count of City tags"
-            elif "tracker_tagPlant" in tracker_id:
-                return "Count of Plant tags"
-            elif "tracker_tagMicrobe" in tracker_id:
-                return "Count of Microbe tags"
-            elif "tracker_tagAnimal" in tracker_id:
-                return "Count of Animal tags"
-            elif "tracker_tagWild" in tracker_id:
-                return "Count of Wild tags"
-            elif "tracker_tagEvent" in tracker_id:
-                return "Count of played Events cards"
-            
-            return ""
-            
-        except Exception as e:
-            logger.error(f"Error inferring display name for {tracker_id}: {e}")
-            return ""
-
-    def _extract_player_color_codes(self, html_content: str) -> List[str]:
-        """Extract player color codes from HTML elements"""
-        color_codes = set()
-        
-        try:
-            # Pattern 1: Extract from player_panel_content_XXXXXX
-            panel_pattern = r'id="player_panel_content_([a-f0-9]{6})"'
-            panel_matches = re.findall(panel_pattern, html_content, re.IGNORECASE)
-            color_codes.update(panel_matches)
-            
-            # Pattern 2: Extract from miniboard_XXXXXX
-            miniboard_pattern = r'id="miniboard_([a-f0-9]{6})"'
-            miniboard_matches = re.findall(miniboard_pattern, html_content, re.IGNORECASE)
-            color_codes.update(miniboard_matches)
-            
-            # Pattern 3: Extract from tracker IDs directly
-            tracker_pattern = r'id="(?:counter_hand|tracker_[a-z]+)_([a-f0-9]{6})"'
-            tracker_matches = re.findall(tracker_pattern, html_content, re.IGNORECASE)
-            color_codes.update(tracker_matches)
-            
-            # Pattern 4: Extract from player_board_inner_XXXXXX
-            board_inner_pattern = r'id="player_board_inner_([a-f0-9]{6})"'
-            board_inner_matches = re.findall(board_inner_pattern, html_content, re.IGNORECASE)
-            color_codes.update(board_inner_matches)
-            
-            result = sorted(list(color_codes))
-            logger.info(f"Extracted {len(result)} player color codes: {result}")
-            return result
-            
-        except Exception as e:
-            logger.error(f"Error extracting player color codes: {e}")
-            return []
-
     def _track_resources_and_production(self, gamelogs: Dict[str, Any], player_ids: List[str], 
                                        tracker_dict: Dict[str, str]) -> List[Dict[str, Any]]:
         """Track comprehensive player state through all moves using gamelogs JSON"""
@@ -2095,65 +2058,6 @@ class Parser:
             logger.error(f"Error in comprehensive tracking: {e}")
             return []
 
-    def _create_player_color_mapping(self, player_ids: List[str], tracker_dict: Dict[str, str]) -> Dict[str, str]:
-        """Create mapping from player color codes to actual player IDs"""
-        color_to_id = {}
-        
-        # Extract color codes from tracker dictionary keys
-        color_codes = set()
-        for tracker_id in tracker_dict.keys():
-            # Extract color code from tracker IDs like "counter_hand_ff0000"
-            parts = tracker_id.split('_')
-            if len(parts) >= 3 and len(parts[-1]) == 6:
-                color_codes.add(parts[-1])
-        
-        # Map color codes to player IDs (simple mapping by order)
-        color_list = sorted(list(color_codes))
-        player_list = sorted(player_ids)
-        
-        for i, color in enumerate(color_list):
-            if i < len(player_list):
-                color_to_id[color] = player_list[i]
-        
-        return color_to_id
-
-    def _categorize_tracker_data(self, tracker_name: str, value) -> Tuple[str, str, int]:
-        """Categorize tracker data into resources, production, tags, etc."""
-        # Convert value to int if it's a string
-        try:
-            validated_value = int(value)
-        except (ValueError, TypeError):
-            validated_value = 0
-        
-        if "Production" in tracker_name:
-            # Production values - validate with minimums
-            if "MC" in tracker_name:
-                validated_value = max(-5, validated_value)  # MC production can go to -5
-            else:
-                validated_value = max(0, validated_value)  # Other production can't go below 0
-            category = "production"
-            clean_name = tracker_name.replace(" Production", "")
-        elif "Count of" in tracker_name or "tags" in tracker_name.lower():
-            # Tag counts - can't be negative
-            validated_value = max(0, validated_value)
-            category = "tags"
-            clean_name = tracker_name.replace("Count of ", "").replace(" tags", "")
-        elif "Hand Counter" in tracker_name:
-            # Hand count - can't be negative
-            validated_value = max(0, validated_value)
-            category = "hand_count"
-            clean_name = "Hand"
-        else:
-            # Regular resources
-            if tracker_name == "MC":
-                validated_value = validated_value  # MC can be negative
-            else:
-                validated_value = max(0, validated_value)  # Other resources can't be negative
-            category = "resources"
-            clean_name = tracker_name
-        
-        return category, clean_name, validated_value
-
     def _update_game_states_with_tracking(self, moves: List[Move], tracking_progression: List[Dict[str, Any]]):
         """Update GameState objects with comprehensive tracking data"""
         logger.info(f"Updating {len(moves)} game states with tracking data")
@@ -2197,38 +2101,25 @@ class Parser:
         logger.info("Completed updating game states with comprehensive tracking data")
 
     def parse_complete_game_with_elo(self, replay_html: str, table_html: str, table_id: str, player_perspective: str) -> GameData:
-        """Parse a complete game with ELO data from both replay and table HTML"""
-        logger.info(f"Starting parsing with ELO data for game {table_id}")
+        """Parse a complete game with ELO data from both replay and table HTML (legacy method for backward compatibility)"""
+        logger.info(f"Starting parsing with ELO data for game {table_id} (legacy method)")
         
-        # Parse ELO data from table HTML first to get player names
-        elo_data = self.parse_elo_data(table_html)
-        logger.info(f"Found ELO data for players: {list(elo_data.keys())}")
+        # Parse table metadata first
+        game_metadata = self.parse_table_metadata(table_html)
         
-        # Parse the main game data from replay HTML
-        game_data = self.parse_complete_game(replay_html, table_id, player_perspective)
+        game_data = self.parse_complete_game(
+            replay_html=replay_html,
+            game_metadata=game_metadata,
+            table_id=table_id,
+            player_perspective=player_perspective
+        )
         
-        # Validate that we have meaningful game data before proceeding
-        has_meaningful_data = self._validate_meaningful_game_data(game_data, replay_html)
+        # Update metadata to indicate ELO data was included (for backward compatibility)
+        if game_metadata.players:
+            game_data.metadata['elo_data_included'] = len(game_metadata.players) > 0
+            game_data.metadata['elo_players_found'] = len(game_metadata.players)
         
-        # If no players were found in replay HTML, create them from ELO data
-        if not game_data.players and elo_data:
-            logger.info("No players found in replay HTML, creating from ELO data")
-            game_data.players = self._create_players_from_elo_data(elo_data, replay_html, table_id)
-        
-        # Merge ELO data into player information
-        self._merge_elo_with_players(game_data.players, elo_data)
-        
-        # Update metadata to indicate ELO data was included
-        game_data.metadata['elo_data_included'] = len(elo_data) > 0
-        game_data.metadata['elo_players_found'] = len(elo_data)
-        
-        # If we only have ELO data and no meaningful game data, this should be considered a parsing failure
-        if not has_meaningful_data:
-            logger.warning(f"Game {table_id} only has ELO data, no meaningful replay data found")
-            logger.warning("This indicates the replay HTML is missing or corrupted")
-            raise ValueError(f"No meaningful game data found for {table_id} - only ELO data available. This suggests replay HTML is missing or incomplete.")
-        
-        logger.info(f"Parsing with ELO complete for game {table_id}: ELO data found for {len(elo_data)} players")
+        logger.info(f"Legacy parsing with ELO complete for game {table_id}")
         return game_data
     
     def parse_elo_data(self, table_html: str) -> Dict[str, EloData]:
@@ -2264,7 +2155,6 @@ class Parser:
         except Exception as e:
             logger.error(f"Error parsing ELO data: {e}")
             return {}
-    
     
     def parse_game_mode(self, table_html: str) -> str:
         
@@ -2357,225 +2247,6 @@ class Parser:
             logger.error(f"Error parsing player from score entry: {e}")
             return None
 
-    def _parse_single_player_elo(self, rank_section: Tag, html_content: str) -> Optional[Dict[str, Any]]:
-        """Parse ELO data for a single player from their rank section"""
-        try:
-            player_data = {}
-            
-            # Extract player name
-            player_name_elem = rank_section.find('span', class_='playername')
-            if not player_name_elem:
-                return None
-            
-            player_data['player_name'] = player_name_elem.get_text().strip()
-            
-            # Extract Arena points (current season points)
-            arena_points_elem = rank_section.find('div', id=lambda x: x and 'winpoints' in x)
-            if arena_points_elem:
-                # Look for the points value - typically a number like "1754"
-                points_text = arena_points_elem.get_text()
-                arena_points_match = re.search(r'(\d+)\s*pts', points_text)
-                if arena_points_match:
-                    player_data['arena_points'] = int(arena_points_match.group(1))
-                else:
-                    # Try to find just a number
-                    number_match = re.search(r'(\d+)', points_text)
-                    if number_match:
-                        player_data['arena_points'] = int(number_match.group(1))
-            
-            # Extract Arena points change (gain/loss from this game)
-            # Look for patterns like "+24" or "-5"
-            change_pattern = r'([+-]\d+)'
-            change_matches = re.findall(change_pattern, str(rank_section))
-            if change_matches:
-                # Take the first change value found
-                player_data['arena_points_change'] = int(change_matches[0])
-            
-            # Extract Game rank (actual ELO rating)
-            # Look for gamerank elements or patterns
-            gamerank_elem = rank_section.find('div', class_='gamerank')
-            if gamerank_elem:
-                rank_text = gamerank_elem.get_text()
-                rank_match = re.search(r'(\d+)', rank_text)
-                if rank_match:
-                    player_data['game_rank'] = int(rank_match.group(1))
-            else:
-                # Alternative: look for rank patterns in the HTML
-                rank_pattern = r'gamerank[^>]*>.*?(\d+)'
-                rank_match = re.search(rank_pattern, str(rank_section))
-                if rank_match:
-                    player_data['game_rank'] = int(rank_match.group(1))
-            
-            # Extract Game rank change
-            # This might be in a separate element or combined with the rank
-            rank_change_pattern = r'gamerank[^>]*>.*?([+-]\d+)'
-            rank_change_match = re.search(rank_change_pattern, str(rank_section))
-            if rank_change_match:
-                player_data['game_rank_change'] = int(rank_change_match.group(1))
-            
-            return player_data if len(player_data) > 1 else None  # Must have more than just player_name
-            
-        except Exception as e:
-            logger.error(f"Error parsing single player ELO: {e}")
-            return None
-
-    def _find_associated_player_name(self, element: Tag, soup: BeautifulSoup) -> Optional[str]:
-        """Find the player name associated with an ELO element"""
-        # Look for player name in parent elements
-        current = element
-        for _ in range(5):  # Search up to 5 levels up
-            if current.parent:
-                current = current.parent
-                player_elem = current.find('span', class_='playername')
-                if player_elem:
-                    return player_elem.get_text().strip()
-        
-        # Look for player name in sibling elements
-        siblings = element.find_next_siblings() + element.find_previous_siblings()
-        for sibling in siblings:
-            if hasattr(sibling, 'find'):
-                player_elem = sibling.find('span', class_='playername')
-                if player_elem:
-                    return player_elem.get_text().strip()
-        
-        return None
-    
-    def _create_players_from_elo_data(self, elo_data: Dict[str, EloData], replay_html: str, table_id: str) -> Dict[str, Player]:
-        """Create player objects from ELO data when replay HTML doesn't contain player info"""
-        logger.info(f"Creating players from ELO data for {len(elo_data)} players")
-        
-        players = {}
-        soup = BeautifulSoup(replay_html, 'html.parser')
-        
-        # Get VP data for final scores
-        vp_data = self._extract_vp_data_from_html(replay_html)
-        
-        # Get corporations from replay HTML
-        corporations = self._extract_corporations(soup)
-        
-        for i, (player_name, elo_info) in enumerate(elo_data.items()):
-            # Create a player ID - try to find from VP data or use fallback
-            player_id = None
-            
-            # Try to find player ID from VP data
-            for vp_player_id, vp_player_data in vp_data.items():
-                # This is a simple heuristic - could be improved
-                if len(vp_data) == len(elo_data):
-                    # If we have the same number of players in both, map by order
-                    player_ids = sorted(vp_data.keys())
-                    if i < len(player_ids):
-                        player_id = player_ids[i]
-                        break
-            
-            if not player_id:
-                player_id = f"player_{i}"
-            
-            # Get final VP and breakdown
-            final_vp = 0
-            vp_breakdown = {}
-            if player_id in vp_data:
-                final_vp = vp_data[player_id].get('total', 0)
-                vp_breakdown = vp_data[player_id].get('total_details', {})
-            
-            # Create player object
-            player = Player(
-                player_id=player_id,
-                player_name=player_name,
-                corporation=corporations.get(player_name, 'Unknown'),
-                final_vp=final_vp,
-                final_tr=vp_breakdown.get('tr', 20),
-                vp_breakdown=vp_breakdown,
-                cards_played=[],  # Will be populated from moves
-                milestones_claimed=[],  # Will be populated from moves
-                awards_funded=[],  # Will be populated from moves
-                elo_data=elo_info
-            )
-            
-            players[player_id] = player
-            logger.info(f"Created player {player_name} with ID {player_id}")
-        
-        return players
-
-    def _validate_meaningful_game_data(self, game_data: GameData, replay_html: str) -> bool:
-        """
-        Validate that we have meaningful game data, not just ELO fallback data
-        
-        Args:
-            game_data: Parsed game data
-            replay_html: Original replay HTML content
-            
-        Returns:
-            bool: True if we have meaningful game data, False if only ELO fallback
-        """
-        try:
-            # Check for meaningful indicators of actual game data
-            meaningful_indicators = 0
-            
-            # 1. Check if we have actual moves (not just 0)
-            if len(game_data.moves) > 0:
-                meaningful_indicators += 1
-                logger.debug(f"Found {len(game_data.moves)} moves")
-            
-            # 2. Check if we have corporation data
-            corporations_found = 0
-            for player in game_data.players.values():
-                if player.corporation and player.corporation != 'Unknown':
-                    corporations_found += 1
-            
-            if corporations_found > 0:
-                meaningful_indicators += 1
-                logger.debug(f"Found {corporations_found} corporations")
-            
-            # 3. Check if we have card mappings in the HTML (indicates replay data)
-            card_names = self._extract_card_names(replay_html)
-            if len(card_names) > 0:
-                meaningful_indicators += 1
-                logger.debug(f"Found {len(card_names)} card mappings")
-            
-            # 4. Check if we have milestone/award mappings
-            milestone_names = self._extract_milestone_names(replay_html)
-            award_names = self._extract_award_names(replay_html)
-            if len(milestone_names) > 0 or len(award_names) > 0:
-                meaningful_indicators += 1
-                logger.debug(f"Found {len(milestone_names)} milestones, {len(award_names)} awards")
-            
-            # 5. Check if we have gamelogs data (strong indicator of replay HTML)
-            gamelogs = self._extract_g_gamelogs(replay_html)
-            if gamelogs and 'data' in gamelogs:
-                meaningful_indicators += 1
-                logger.debug("Found gamelogs data")
-            
-            # 6. Check if we have VP progression data
-            vp_progression = self._extract_vp_progression(replay_html)
-            if len(vp_progression) > 1:  # More than just initial state
-                meaningful_indicators += 1
-                logger.debug(f"Found {len(vp_progression)} VP progression entries")
-            
-            # 7. Check if we have actual game generations > 1
-            if game_data.generations > 1:
-                meaningful_indicators += 1
-                logger.debug(f"Found {game_data.generations} generations")
-            
-            # We need at least 3 meaningful indicators AND must have moves OR corporations
-            # This prevents cases where we have some replay data but no actual gameplay
-            has_core_gameplay = len(game_data.moves) > 0 or corporations_found > 0
-            is_meaningful = meaningful_indicators >= 3 and has_core_gameplay
-            
-            logger.info(f"Validation result: {meaningful_indicators}/7 indicators found, meaningful={is_meaningful}")
-            
-            if not is_meaningful:
-                logger.warning("Game data validation failed - appears to be ELO-only fallback data")
-                logger.warning(f"Indicators found: moves={len(game_data.moves)}, corporations={corporations_found}, "
-                             f"cards={len(card_names)}, milestones/awards={len(milestone_names)+len(award_names)}, "
-                             f"gamelogs={'yes' if gamelogs else 'no'}, vp_entries={len(vp_progression)}, "
-                             f"generations={game_data.generations}")
-            
-            return is_meaningful
-            
-        except Exception as e:
-            logger.error(f"Error validating game data: {e}")
-            return False
-
     def _merge_elo_with_players(self, players: Dict[str, Player], elo_data: Dict[str, EloData]):
         """Merge ELO data into player objects"""
         logger.info(f"Merging ELO data for {len(elo_data)} players")
@@ -2605,65 +2276,21 @@ class Parser:
         try:
             logger.info(f"Parsing replay with assignment metadata for game {table_id}")
             
-            # Create AssignmentMetadata object from the raw assignment data
-            assignment_meta_obj = AssignmentMetadata(
-                played_at=assignment_metadata.get('playedAt'),
-                map=assignment_metadata.get('map'),
-                prelude_on=assignment_metadata.get('preludeOn'),
-                colonies_on=assignment_metadata.get('coloniesOn'),
-                corporate_era_on=assignment_metadata.get('corporateEraOn'),
-                draft_on=assignment_metadata.get('draftOn'),
-                beginners_corporations_on=assignment_metadata.get('beginnersCorporationsOn'),
-                game_speed=assignment_metadata.get('gameSpeed'),
-                game_mode=assignment_metadata.get('gameMode', 'Arena mode'),
-                version_id=assignment_metadata.get('versionId'),
-                players=assignment_metadata.get('players', [])
+            # Convert assignment metadata to GameMetadata format
+            game_metadata = self.convert_assignment_to_game_metadata(assignment_metadata)
+            
+            # Use unified parsing method
+            game_data = self.parse_complete_game(
+                replay_html=replay_html,
+                game_metadata=game_metadata,
+                table_id=table_id,
+                player_perspective=player_perspective
             )
             
-            # Parse basic game data from replay HTML with assignment metadata
-            game_data = self.parse_complete_game(replay_html, table_id, player_perspective, assignment_meta_obj)
-            
-            # Extract assignment metadata for ELO processing
-            game_mode = assignment_metadata.get('gameMode', 'Arena mode')
-            version_id = assignment_metadata.get('versionId')
-            players_metadata = assignment_metadata.get('players', [])
-            
-            # Create ELO data from assignment metadata
-            elo_data = {}
-            for player_meta in players_metadata:
-                player_name = player_meta.get('playerName', 'Unknown')
-                player_id = str(player_meta.get('playerId', ''))
-                elo = player_meta.get('elo', 0)
-                elo_change = player_meta.get('eloChange', 0)
-                arena_points = player_meta.get('arenaPoints')
-                arena_points_change = player_meta.get('arenaPointsChange')
-                position = player_meta.get('position', 1)
-                
-                # Create EloData object from assignment metadata with full data
-                elo_data[player_name] = EloData(
-                    player_name=player_name,
-                    player_id=player_id,
-                    position=position,
-                    arena_points=arena_points,
-                    arena_points_change=arena_points_change,
-                    game_rank=elo,
-                    game_rank_change=elo_change
-                )
-            
-            # If no players were found in replay HTML, create them from assignment metadata
-            if not game_data.players and elo_data:
-                logger.info("No players found in replay HTML, creating from assignment metadata")
-                game_data.players = self._create_players_from_assignment_metadata(elo_data, assignment_metadata, replay_html, table_id)
-            
-            # Merge ELO data into player information
-            self._merge_elo_with_players(game_data.players, elo_data)
-            
-            # Add assignment metadata to game data
-            game_data.metadata['game_mode'] = game_mode
-            game_data.metadata['version_id'] = version_id
+            # Add assignment metadata to game data metadata
             game_data.metadata['assignment_metadata_used'] = True
-            game_data.metadata['elo_data_included'] = len(elo_data) > 0
-            game_data.metadata['elo_players_found'] = len(elo_data)
+            game_data.metadata['elo_data_included'] = len(game_metadata.players) > 0 if game_metadata.players else False
+            game_data.metadata['elo_players_found'] = len(game_metadata.players) if game_metadata.players else 0
             game_data.metadata['parsed_at'] = datetime.now().isoformat()
             
             # Convert to dictionary format for API upload
@@ -2746,6 +2373,176 @@ class Parser:
             logger.error(f"Error converting game data to API format: {e}")
             return {}
 
+    def _extract_all_moves_simple(self, soup: BeautifulSoup, name_to_id: Dict[str, str], gamelogs: Dict[str, Any] = None) -> List[Move]:
+        """Extract all moves with simple name-to-ID mapping"""
+        moves = []
+        move_divs = soup.find_all('div', class_='replaylogs_move')
+        
+        for move_div in move_divs:
+            move = self._parse_single_move_detailed(move_div, name_to_id, gamelogs)
+            if move:
+                moves.append(move)
+        
+        return moves
+
+    def _build_game_states_simple(self, moves: List[Move], vp_progression: List[Dict[str, Any]], player_ids: List[str], gamelogs: Dict[str, Any] = None) -> List[Move]:
+        """Build game states for each move with simple player ID list"""
+        # Initialize tracking variables
+        current_temp = -30
+        current_oxygen = 0
+        current_oceans = 0
+        current_generation = 1
+        
+        # Track milestones and awards state throughout the game
+        current_milestones = {}
+        current_awards = {}
+        
+        # Initialize default VP data for all players
+        default_vp_data = {}
+        for player_id in player_ids:
+            default_vp_data[player_id] = {
+                "total": 20,
+                "total_details": {
+                    "tr": 20,
+                    "awards": 0,
+                    "milestones": 0,
+                    "cities": 0,
+                    "greeneries": 0,
+                    "cards": 0
+                }
+            }
+        
+        # Track the last known VP data to carry forward when no new data is available
+        last_vp_data = dict(default_vp_data)
+        
+        # Create a mapping from move_number to VP data for proper correlation
+        vp_by_move_number = {}
+        for vp_entry in vp_progression:
+            move_number = vp_entry.get('move_number')
+            if move_number:
+                # Convert move_number to string for consistent matching
+                vp_by_move_number[str(move_number)] = vp_entry.get('vp_data', {})
+        
+        logger.info(f"Built VP mapping for {len(vp_by_move_number)} moves")
+        
+        # Extract parameter changes from gamelogs if available
+        parameter_changes_by_move = {}
+        if gamelogs:
+            parameter_changes_by_move = self._extract_parameter_changes_from_gamelogs(gamelogs)
+            logger.info(f"Extracted parameter changes for {len(parameter_changes_by_move)} moves from gamelogs")
+        
+        # Process each move and build game state
+        for i, move in enumerate(moves):
+            # Update generation
+            if 'New generation' in move.description:
+                gen_match = re.search(r'New generation (\d+)', move.description)
+                if gen_match:
+                    current_generation = int(gen_match.group(1))
+            
+            # Update parameters from gamelogs data
+            move_parameter_changes = parameter_changes_by_move.get(move.move_number, {})
+            if move_parameter_changes:
+                if 'temperature' in move_parameter_changes:
+                    current_temp = move_parameter_changes['temperature']
+                    logger.debug(f"Move {move.move_number}: Temperature updated to {current_temp}")
+                if 'oxygen' in move_parameter_changes:
+                    current_oxygen = move_parameter_changes['oxygen']
+                    logger.debug(f"Move {move.move_number}: Oxygen updated to {current_oxygen}")
+                if 'oceans' in move_parameter_changes:
+                    current_oceans = move_parameter_changes['oceans']
+                    logger.debug(f"Move {move.move_number}: Oceans updated to {current_oceans}")
+            
+            # Update milestone and award tracking
+            if move.action_type == 'claim_milestone':
+                milestone_match = re.search(r'claims milestone (\w+)', move.description)
+                if milestone_match:
+                    milestone_name = milestone_match.group(1)
+                    current_milestones[milestone_name] = {
+                        'claimed_by': move.player_name,
+                        'player_id': move.player_id,
+                        'move_number': move.move_number,
+                        'timestamp': move.timestamp
+                    }
+            
+            if move.action_type == 'fund_award':
+                award_match = re.search(r'funds (\w+) award', move.description)
+                if award_match:
+                    award_name = award_match.group(1)
+                    current_awards[award_name] = {
+                        'funded_by': move.player_name,
+                        'player_id': move.player_id,
+                        'move_number': move.move_number,
+                        'timestamp': move.timestamp
+                    }
+            
+            # Get VP data for this move by matching move_number
+            move_vp_data = vp_by_move_number.get(str(move.move_number), {})
+            
+            # Ensure VP data is always present
+            if move_vp_data:
+                # Update last known VP data with new data
+                last_vp_data = dict(move_vp_data)
+                logger.debug(f"Updated VP data for move {move.move_number}")
+            else:
+                # Use last known VP data if no new data available
+                move_vp_data = dict(last_vp_data)
+                logger.debug(f"Using carried-forward VP data for move {move.move_number}")
+            
+            # Ensure all players have VP data (fill in missing players with defaults)
+            for player_id in player_ids:
+                if player_id not in move_vp_data:
+                    move_vp_data[player_id] = dict(default_vp_data[player_id])
+                    logger.debug(f"Added default VP data for missing player {player_id} in move {move.move_number}")
+            
+            # Create game state (without resource/production tracking)
+            game_state = GameState(
+                move_number=move.move_number,
+                generation=current_generation,
+                temperature=current_temp,
+                oxygen=current_oxygen,
+                oceans=current_oceans,
+                player_vp=move_vp_data,
+                milestones=dict(current_milestones),
+                awards=dict(current_awards)
+            )
+            
+            move.game_state = game_state
+        
+        return moves
+
+    def _determine_winner_from_game_states(self, moves_with_states: List[Move], players_info: Dict[str, Player]) -> str:
+        """Determine winner from final game state VP data"""
+        if not moves_with_states or not players_info:
+            return "Unknown"
+        
+        # Get final VP data from the last move with game state
+        final_vp_data = {}
+        for move in reversed(moves_with_states):
+            if move.game_state and move.game_state.player_vp:
+                final_vp_data = move.game_state.player_vp
+                break
+        
+        if not final_vp_data:
+            # Fallback to player info
+            max_vp = max(player.final_vp for player in players_info.values())
+            winners = [player.player_name for player in players_info.values() if player.final_vp == max_vp]
+            return winners[0] if winners else "Unknown"
+        
+        # Find player with highest VP
+        max_vp = 0
+        winner_id = None
+        
+        for player_id, vp_data in final_vp_data.items():
+            total_vp = vp_data.get('total', 0)
+            if total_vp > max_vp:
+                max_vp = total_vp
+                winner_id = player_id
+        
+        # Convert player ID to player name
+        if winner_id and winner_id in players_info:
+            return players_info[winner_id].player_name
+        
+        return "Unknown"
 
     def export_to_json(self, game_data: GameData, output_path: str, player_perspective: str = None):
         """Export game data to JSON with player perspective folder structure"""
