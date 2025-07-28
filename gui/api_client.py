@@ -214,22 +214,25 @@ class APIClient:
             logger.error(f"Error updating players: {e}")
             return False
     
-    def get_next_assignment(self, email: str) -> Optional[Dict[str, Any]]:
+    def get_next_assignment(self, email: str, count: Optional[int] = None) -> Optional[Dict[str, Any]]:
         """
         Get the next assignment for a user
         
         Args:
             email: User's BGA email
+            count: Optional number of games to request (max 200, defaults to API default)
             
         Returns:
             dict: Assignment data or None if no assignment available
         """
         try:
             params = {'email': email}
+            if count is not None:
+                params['count'] = count
             response = self._make_request("GetNextAssignment", params=params)
             
             if response:
-                logger.info(f"Got assignment from API for {email}")
+                logger.info(f"Got assignment from API for {email}" + (f" (count: {count})" if count else ""))
                 return response
             else:
                 logger.info(f"No assignment available for {email}")

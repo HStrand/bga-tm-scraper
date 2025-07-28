@@ -48,6 +48,9 @@ class ScrapingTab:
         # Create the UI
         self.create_widgets()
         
+        # Load saved game count
+        self._load_game_count()
+        
         # Check for existing assignment
         self.check_assignment()
     
@@ -101,13 +104,38 @@ class ScrapingTab:
         control_frame = ttk.Frame(main_frame)
         control_frame.pack(fill="x", pady=(0, 20))
         
+        # Game count input frame
+        game_count_frame = ttk.Frame(control_frame)
+        game_count_frame.pack(side="left", padx=(0, 10))
+        
+        ttk.Label(game_count_frame, text="Games (max 200):").pack(side="left")
+        self.game_count_var = tk.StringVar()
+        self.game_count_spinbox = ttk.Spinbox(
+            game_count_frame,
+            from_=1,
+            to=200,
+            textvariable=self.game_count_var,
+            width=8,
+            validate="key",
+            validatecommand=(self.frame.register(self._validate_game_count), "%P")
+        )
+        self.game_count_spinbox.pack(side="left", padx=(5, 0))
+        
+        # Error label for validation (initially hidden)
+        self.game_count_error_label = ttk.Label(
+            main_frame,
+            text="",
+            foreground="red",
+            font=("TkDefaultFont", 9)
+        )
+        
         # Get assignment button
         self.get_assignment_btn = ttk.Button(
             control_frame,
             text="🎯 Get Next Assignment",
             command=self.get_assignment
         )
-        self.get_assignment_btn.pack(side="left", padx=(0, 10))
+        self.get_assignment_btn.pack(side="left", padx=(10, 10))
         
         # Start button
         self.start_btn = ttk.Button(
@@ -233,31 +261,27 @@ class ScrapingTab:
                 self.frame.after(0, lambda: self._show_config_error("BGA email is not configured. Please set it in Settings."))
                 return
             
-            # Build API URL
-            base_url = "https://bga-tm-scraper-functions.azurewebsites.net/api/GetNextAssignment"
-            params = {
-                "code": api_key,
-                "email": bga_email
-            }
+            # Validate and get game count
+            game_count = self._get_validated_game_count()
+            if game_count is False:  # Invalid input
+                self.frame.after(0, lambda: self.get_assignment_btn.config(state="normal", text="� Get Next Assignment"))
+                return
             
-            self.frame.after(0, lambda: self.log_message(f"🌐 Requesting assignment from API..."))
-            
-            # Make API request
-            response = requests.get(base_url, params=params, timeout=30)
-            
-            if response.status_code == 200:
-                assignment_data = response.json()
-                self.frame.after(0, lambda: self._process_api_assignment(assignment_data))
-            elif response.status_code == 404:
-                self.frame.after(0, lambda: self._show_no_assignments())
+            # Save game count to config if valid
+            if game_count is not None:
+                self._save_game_count()
+                self.frame.after(0, lambda: self.log_message(f"🌐 Requesting assignment from API (requesting {game_count} games)..."))
             else:
-                error_msg = f"API returned status {response.status_code}"
-                try:
-                    error_detail = response.json().get("error", "Unknown error")
-                    error_msg += f": {error_detail}"
-                except:
-                    pass
-                self.frame.after(0, lambda: self._show_api_error(error_msg))
+                self.frame.after(0, lambda: self.log_message(f"🌐 Requesting assignment from API..."))
+            
+            # Create API client and make request
+            api_client = self._create_api_client(api_key)
+            assignment_data = api_client.get_next_assignment(bga_email, game_count)
+            
+            if assignment_data:
+                self.frame.after(0, lambda: self._process_api_assignment(assignment_data))
+            else:
+                self.frame.after(0, lambda: self._show_no_assignments())
                 
         except requests.exceptions.Timeout:
             self.frame.after(0, lambda: self._show_api_error("Request timed out. Please check your internet connection."))
@@ -1242,3 +1266,60 @@ class ScrapingTab:
             self.should_stop = True
             if self.scraping_thread and self.scraping_thread.is_alive():
                 self.scraping_thread.join(timeout=2.0)  # Wait up to 2 seconds
+    
+    def _validate_game_count(self, value):
+        """Validate game count input"""
+        # Clear any existing error
+        self.game_count_error_label.pack_forget()
+        
+        # Allow empty value
+        if not value:
+            return True
+        
+        try:
+            # Check if it's a valid integer
+            count = int(value)
+            
+            # Check range
+            if count < 1 or count > 200:
+                self._show_game_count_error("Must be between 1 and 200")
+                return False
+            
+            return True
+        except ValueError:
+            self._show_game_count_error("Must be a valid number")
+            return False
+    
+    def _show_game_count_error(self, message):
+        """Show game count validation error"""
+        self.game_count_error_label.config(text=message)
+        self.game_count_error_label.pack(pady=(5, 0))
+    
+    def _load_game_count(self):
+        """Load saved game count from config"""
+        saved_count = self.config_manager.get_value("assignment_settings", "game_count", "")
+        self.game_count_var.set(str(saved_count) if saved_count else "")
+    
+    def _save_game_count(self):
+        """Save game count to config"""
+        value = self.game_count_var.get().strip()
+        self.config_manager.set_value("assignment_settings", "game_count", value)
+        self.config_manager.save_config()
+    
+    def _get_validated_game_count(self):
+        """Get validated game count or None if invalid/empty"""
+        value = self.game_count_var.get().strip()
+        
+        if not value:
+            return None
+        
+        try:
+            count = int(value)
+            if 1 <= count <= 200:
+                return count
+            else:
+                self._show_game_count_error("Must be between 1 and 200")
+                return False  # Invalid
+        except ValueError:
+            self._show_game_count_error("Must be a valid number")
+            return False  # Invalid
