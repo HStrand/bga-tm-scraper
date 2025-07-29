@@ -40,7 +40,7 @@ def process_game_for_animal_vp(file_path):
             game_data = json.load(f)
         
         # Check if final_state exists
-        final_state = game_data.get('final_state')
+        final_state = game_data["moves"][-1]["game_state"]
         if not final_state:
             print(f"Warning: No final_state found in {file_path}")
             return []
