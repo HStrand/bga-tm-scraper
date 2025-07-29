@@ -155,7 +155,7 @@ class ConfigManager:
         }
         
         # Check BGA credentials
-        email, password = self.get_bga_credentials()
+        email, password, _ = self.get_bga_credentials()
         if not email:
             issues["errors"].append("BGA email is required")
         if not password:

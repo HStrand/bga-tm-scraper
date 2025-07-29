@@ -295,7 +295,7 @@ class InMemoryScraper:
             logger.error(f"Error scraping and parsing game {table_id} in memory: {e}")
             return None
 
-    def scrape_replay_only_with_assignment_metadata(self, table_id: str, version_id: str, player_perspective: str, assignment_metadata: Dict[str, Any]) -> Optional[Dict]:
+    def scrape_replay_only_with_assignment_metadata(self, table_id: str, version_id: str, player_perspective: str, assignment_metadata: Dict[str, Any], version: Optional[str] = None) -> Optional[Dict]:
         """
         Scrape only replay page using assignment metadata (optimized for replay scraping assignments)
         
@@ -304,6 +304,7 @@ class InMemoryScraper:
             version_id: Version ID from assignment
             player_perspective: Player ID for perspective
             assignment_metadata: Assignment data containing ELO info, player data, etc.
+            version: Optional GUI version string
             
         Returns:
             dict: Parsed game data ready for API upload, or None if failed
@@ -358,6 +359,8 @@ class InMemoryScraper:
             if game_data:
                 # Convert GameData object to dictionary format for GUI
                 result = self.parser._convert_game_data_to_api_format(game_data, table_id, player_perspective)
+                if version and result.get("metadata"):
+                    result["metadata"]["scraper_version"] = version
                 logger.info(f"Successfully parsed replay-only game {table_id} with assignment metadata")
                 return result
             else:
@@ -414,7 +417,7 @@ def create_scraper_from_gui_config(config_manager, progress_callback: Optional[C
     """
     try:
         # Get BGA credentials using the proper decoding method
-        email, password = config_manager.get_bga_credentials()
+        email, password, _ = config_manager.get_bga_credentials()
         
         # Get all config values
         config_dict = {

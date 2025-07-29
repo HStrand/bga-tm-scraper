@@ -956,11 +956,13 @@ class ScrapingTab:
                         }
                         
                         # Scrape replay only with assignment metadata (more efficient)
+                        from ..version import BUILD_VERSION
                         parsed_game_data = scraper.scrape_replay_only_with_assignment_metadata(
                             table_id=table_id,
                             version_id=version_id,
                             player_perspective=game_player_perspective,
-                            assignment_metadata=assignment_metadata
+                            assignment_metadata=assignment_metadata,
+                            version=BUILD_VERSION
                         )
                         
                         # Check for daily limit reached
