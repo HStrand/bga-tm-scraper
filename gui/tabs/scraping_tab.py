@@ -726,7 +726,15 @@ class ScrapingTab:
     def _create_api_client(self, api_key):
         """Create API client instance"""
         from ..api_client import APIClient
-        return APIClient(api_key)
+        
+        # Get base URL and timeout from config
+        base_url = self.config_manager.get_value("api_settings", "base_url")
+        timeout = self.config_manager.get_value("api_settings", "timeout", 30)
+        
+        # Create client with saved config values
+        client = APIClient(api_key, base_url)
+        client.timeout = timeout
+        return client
     
     def _create_scraper(self):
         """Create scraper instance"""
@@ -823,7 +831,14 @@ class ScrapingTab:
                             'version': version,
                             'player_perspective': player_id,
                             'scraped_at': result.get('scraped_at'),
-                            'players': players_list
+                            'players': players_list,
+                            'map': result.get('map'),
+                            'prelude_on': result.get('prelude_on'),
+                            'colonies_on': result.get('colonies_on'),
+                            'corporate_era_on': result.get('corporate_era_on'),
+                            'draft_on': result.get('draft_on'),
+                            'beginners_corporations_on': result.get('beginners_corporations_on'),
+                            'game_speed': result.get('game_speed')
                         }
                         
                         # Upload to API immediately
