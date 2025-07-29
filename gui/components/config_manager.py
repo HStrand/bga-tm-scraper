@@ -23,7 +23,8 @@ class ConfigManager:
         return {
             "bga_credentials": {
                 "email": "",
-                "password": ""  # Will be base64 encoded for basic obfuscation
+                "password": "",  # Will be base64 encoded for basic obfuscation
+                "display_name": ""
             },
             "browser_settings": {
                 "chrome_path": "",
@@ -129,20 +130,22 @@ class ConfigManager:
         except:
             return ""  # Return empty string if decoding fails
     
-    def set_bga_credentials(self, email: str, password: str):
+    def set_bga_credentials(self, email: str, password: str, display_name: str):
         """Set BGA credentials with password encoding"""
         self.update_section("bga_credentials", {
             "email": email,
-            "password": self.encode_password(password)
+            "password": self.encode_password(password),
+            "display_name": display_name
         })
     
-    def get_bga_credentials(self) -> tuple[str, str]:
+    def get_bga_credentials(self) -> tuple[str, str, str]:
         """Get BGA credentials with password decoding"""
         creds = self.get_section("bga_credentials")
         email = creds.get("email", "")
         encoded_password = creds.get("password", "")
         password = self.decode_password(encoded_password)
-        return email, password
+        display_name = creds.get("display_name", "")
+        return email, password, display_name
     
     def validate_config(self) -> Dict[str, list]:
         """Validate current configuration and return issues"""

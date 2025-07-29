@@ -347,6 +347,27 @@ class APIClient:
             logger.error(f"Unexpected error during download: {e}")
             return False
     
+    def submit_display_name(self, bga_username: str, display_name: str) -> bool:
+        """
+        Submit a display name for a BGA account
+        
+        Args:
+            bga_username: The user's BGA username or email
+            display_name: The desired display name
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            # This is a mock implementation
+            logger.info(f"MOCK API CALL: Submitting display name '{display_name}' for BGA user '{bga_username}'")
+            # In a real implementation, you would make a POST request to the API
+            # For now, we just simulate a successful response
+            return True
+        except Exception as e:
+            logger.error(f"Error submitting display name: {e}")
+            return False
+
     def test_connection(self) -> bool:
         """
         Test the API connection
