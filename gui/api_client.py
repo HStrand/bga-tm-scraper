@@ -359,14 +359,41 @@ class APIClient:
             bool: True if successful, False otherwise
         """
         try:
-            # This is a mock implementation
-            logger.info(f"MOCK API CALL: Submitting display name '{display_name}' for BGA user '{bga_username}'")
-            # In a real implementation, you would make a POST request to the API
-            # For now, we just simulate a successful response
-            return True
+            payload = {
+                "username": bga_username,
+                "displayName": display_name
+            }
+            response = self._make_request("StoreUserMapping", method="POST", data=payload)
+            
+            if response is not None:
+                logger.info(f"Successfully submitted display name '{display_name}' for BGA user '{bga_username}'")
+                return True
+            else:
+                logger.error(f"Failed to submit display name for BGA user '{bga_username}'")
+                return False
         except Exception as e:
             logger.error(f"Error submitting display name: {e}")
             return False
+
+    def get_scraper_leaderboard(self) -> Optional[List[Dict[str, Any]]]:
+        """
+        Get the scraper leaderboard from the API
+        
+        Returns:
+            list: A list of dictionaries, where each dictionary represents a scraper.
+                  Returns None if the request fails.
+        """
+        try:
+            response = self._make_request("GetScraperLeaderboard")
+            if response:
+                logger.info("Got scraper leaderboard from API")
+                return response
+            else:
+                logger.info("No scraper leaderboard available from API")
+                return None
+        except Exception as e:
+            logger.error(f"Error getting scraper leaderboard from API: {e}")
+            return None
 
     def test_connection(self) -> bool:
         """

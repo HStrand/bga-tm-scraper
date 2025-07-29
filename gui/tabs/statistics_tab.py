@@ -24,6 +24,7 @@ class StatisticsTab:
         
         # Statistics data
         self.statistics_data = None
+        self.leaderboard_data = None
         self.is_loading = False
         
         # Create the UI
@@ -171,6 +172,31 @@ class StatisticsTab:
         
         self.personal_stats_frame = ttk.Frame(personal_frame)
         self.personal_stats_frame.pack(fill="both", expand=True)
+
+        # Leaderboard section
+        leaderboard_frame = ttk.LabelFrame(
+            left_column,
+            text="🏆 Scraper Leaderboard",
+            padding=15
+        )
+        leaderboard_frame.pack(fill="both", expand=True, pady=(10, 0))
+
+        self.leaderboard_tree = ttk.Treeview(
+            leaderboard_frame,
+            columns=("Rank", "Scraper", "Scraped Count"),
+            show="headings"
+        )
+        self.leaderboard_tree.heading("Rank", text="#")
+        self.leaderboard_tree.heading("Scraper", text="Scraper")
+        self.leaderboard_tree.heading("Scraped Count", text="Scraped Count")
+        self.leaderboard_tree.column("Rank", width=40, anchor="center")
+        self.leaderboard_tree.column("Scraper", width=150)
+        self.leaderboard_tree.column("Scraped Count", width=100, anchor="center")
+        self.leaderboard_tree.pack(fill="both", expand=True)
+
+        # Add styling for alternating row colors
+        self.leaderboard_tree.tag_configure("oddrow", background="#f0f0f0")
+        self.leaderboard_tree.tag_configure("evenrow", background="white")
         
         # Right column - Global Statistics
         right_column = ttk.Frame(details_container)
@@ -299,9 +325,11 @@ class StatisticsTab:
             
             # Fetch statistics
             statistics_data = api_client.get_statistics(bga_email)
+            leaderboard_data = api_client.get_scraper_leaderboard()
             
             if statistics_data:
                 self.statistics_data = statistics_data
+                self.leaderboard_data = leaderboard_data
                 self.frame.after(0, self.show_statistics)
             else:
                 self.frame.after(0, lambda: self.show_error(
@@ -421,6 +449,14 @@ class StatisticsTab:
             )
             motivation_label.pack()
         
+        # Populate leaderboard
+        if self.leaderboard_data:
+            for item in self.leaderboard_tree.get_children():
+                self.leaderboard_tree.delete(item)
+            for i, scraper_data in enumerate(self.leaderboard_data):
+                tag = "evenrow" if i % 2 == 0 else "oddrow"
+                self.leaderboard_tree.insert("", "end", values=(i + 1, scraper_data["scraper"], scraper_data["scrapedCount"]), tags=(tag,))
+
         # Global statistics section
         avg_elo = self.statistics_data.get("averageEloInScrapedGames", 0)
         median_elo = self.statistics_data.get("medianEloInScrapedGames", 0)
