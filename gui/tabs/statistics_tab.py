@@ -321,7 +321,8 @@ class StatisticsTab:
             
             # Create API client
             from ..api_client import APIClient
-            api_client = APIClient(api_key)
+            from ..version import BUILD_VERSION
+            api_client = APIClient(api_key, version=BUILD_VERSION)
             
             # Fetch statistics
             statistics_data = api_client.get_statistics(bga_email)

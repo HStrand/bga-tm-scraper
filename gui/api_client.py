@@ -14,16 +14,18 @@ logger = logging.getLogger(__name__)
 class APIClient:
     """Client for communicating with the BGA TM Scraper API"""
     
-    def __init__(self, api_key: str, base_url: str = "https://bga-tm-scraper-functions.azurewebsites.net/api"):
+    def __init__(self, api_key: str, base_url: str = "https://bga-tm-scraper-functions.azurewebsites.net/api", version: Optional[str] = None):
         """
         Initialize API client
         
         Args:
             api_key: API key for authentication
             base_url: Base URL for the API
+            version: Optional GUI version string
         """
         self.api_key = api_key
         self.base_url = base_url
+        self.version = version
         self.timeout = 60  # Default timeout for requests
     
     def _make_request(self, endpoint: str, method: str = "GET", data: Dict = None, params: Dict = None) -> Optional[Dict]:
@@ -47,6 +49,8 @@ class APIClient:
             if params is None:
                 params = {}
             params['code'] = self.api_key
+            if self.version:
+                params['version'] = self.version
             
             # Make request
             if method.upper() == "GET":

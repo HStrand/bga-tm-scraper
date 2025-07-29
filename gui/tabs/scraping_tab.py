@@ -726,13 +726,14 @@ class ScrapingTab:
     def _create_api_client(self, api_key):
         """Create API client instance"""
         from ..api_client import APIClient
+        from ..version import BUILD_VERSION
         
         # Get base URL and timeout from config
         base_url = self.config_manager.get_value("api_settings", "base_url")
         timeout = self.config_manager.get_value("api_settings", "timeout", 30)
         
         # Create client with saved config values
-        client = APIClient(api_key, base_url)
+        client = APIClient(api_key, base_url, version=BUILD_VERSION)
         client.timeout = timeout
         return client
     
