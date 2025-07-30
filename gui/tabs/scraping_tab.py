@@ -53,6 +53,9 @@ class ScrapingTab:
         
         # Check for existing assignment
         self.check_assignment()
+
+        # Check for daily limit timer
+        self.check_daily_limit_timer()
     
     def create_widgets(self):
         """Create all UI widgets"""
@@ -100,6 +103,18 @@ class ScrapingTab:
         self.assignment_summary_frame = ttk.Frame(self.assignment_details_frame)
         self.assignment_summary_frame.pack(fill="x", pady=(0, 10))
         
+        # Daily limit countdown frame (initially hidden)
+        self.daily_limit_frame = ttk.LabelFrame(main_frame, text="Daily Limit Status", padding=15)
+        
+        self.limit_hit_at_label = ttk.Label(self.daily_limit_frame, text="")
+        self.limit_hit_at_label.pack(anchor="w")
+        
+        self.resume_at_label = ttk.Label(self.daily_limit_frame, text="")
+        self.resume_at_label.pack(anchor="w")
+        
+        self.countdown_label = ttk.Label(self.daily_limit_frame, text="", font=("TkDefaultFont", 10, "bold"))
+        self.countdown_label.pack(anchor="w", pady=(5, 0))
+
         # Control buttons frame
         control_frame = ttk.Frame(main_frame)
         control_frame.pack(fill="x", pady=(0, 20))
@@ -774,7 +789,15 @@ class ScrapingTab:
                 text=f"Scraping player {player_id} game history...", foreground="blue"
             ))
             
-            games_data = scraper.scrape_player_game_history(player_id, max_clicks=1000)
+            stop_event = threading.Event()
+            def check_stop():
+                if self.should_stop:
+                    stop_event.set()
+                else:
+                    self.frame.after(100, check_stop)
+            self.frame.after(100, check_stop)
+
+            games_data = scraper.scrape_player_game_history(player_id, max_clicks=1000, stop_event=stop_event)
             
             if not games_data:
                 raise RuntimeError(f"No games found for player {player_id}")
@@ -1073,6 +1096,9 @@ class ScrapingTab:
         self.config_manager.set_value("current_assignment", "status", "paused_daily_limit")
         self.config_manager.save_config()
         
+        # Refresh the UI to show the timer immediately
+        self.check_daily_limit_timer()
+        
         # Show user-friendly message
         elapsed_time = datetime.now() - self.start_time if self.start_time else None
         elapsed_str = str(elapsed_time).split('.')[0] if elapsed_time else "Unknown"
@@ -1341,3 +1367,43 @@ class ScrapingTab:
         except ValueError:
             self._show_game_count_error("Must be a valid number")
             return False  # Invalid
+
+    def check_daily_limit_timer(self):
+        """Check and display the daily limit countdown timer"""
+        limit_hit_at_str = self.config_manager.get_replay_limit_hit_at()
+
+        if limit_hit_at_str:
+            self.daily_limit_frame.pack(fill="x", pady=(0, 20), before=self.assignment_status_frame)
+            self._update_countdown()
+        else:
+            self.daily_limit_frame.pack_forget()
+
+    def _update_countdown(self):
+        """Update the countdown timer labels"""
+        from datetime import datetime, timedelta
+
+        limit_hit_at_str = self.config_manager.get_replay_limit_hit_at()
+        if not limit_hit_at_str:
+            self.daily_limit_frame.pack_forget()
+            return
+
+        try:
+            limit_hit_at = datetime.fromisoformat(limit_hit_at_str)
+            resume_at = limit_hit_at + timedelta(hours=24)
+            now = datetime.now()
+
+            self.limit_hit_at_label.config(text=f"Limit hit at: {limit_hit_at.strftime('%Y-%m-%d %H:%M:%S')}")
+            self.resume_at_label.config(text=f"Can resume at: {resume_at.strftime('%Y-%m-%d %H:%M:%S')}")
+
+            if now < resume_at:
+                remaining = resume_at - now
+                remaining_str = str(remaining).split('.')[0]
+                self.countdown_label.config(text=f"Time remaining: {remaining_str}", foreground="orange")
+                self.frame.after(1000, self._update_countdown)
+            else:
+                self.countdown_label.config(text="Ready to resume scraping!", foreground="green")
+                # Optionally, clear the timestamp automatically
+                # self.config_manager.set_replay_limit_hit_at(None)
+        except (ValueError, TypeError):
+            # Invalid timestamp in config, hide the frame
+            self.daily_limit_frame.pack_forget()

@@ -39,7 +39,8 @@ class ConfigManager:
             "scraping_settings": {
                 "request_delay": 1.0,
                 "max_retries": 3,
-                "speed_profile": "FAST"
+                "speed_profile": "FAST",
+                "replay_limit_hit_at": None
             },
             "email_settings": {
                 "enabled": False,
@@ -250,6 +251,15 @@ class ConfigManager:
         profile_name = self.get_value("scraping_settings", "speed_profile", "NORMAL")
         profiles = self.get_speed_profiles()
         return profiles.get(profile_name, profiles["NORMAL"])
+
+    def set_replay_limit_hit_at(self, timestamp: Optional[str]):
+        """Set the timestamp when the daily replay limit was hit"""
+        self.set_value("scraping_settings", "replay_limit_hit_at", timestamp)
+        self.save_config()
+
+    def get_replay_limit_hit_at(self) -> Optional[str]:
+        """Get the timestamp when the daily replay limit was hit"""
+        return self.get_value("scraping_settings", "replay_limit_hit_at", None)
     
     def generate_assignment_id(self, assignment_data: Dict[str, Any]) -> str:
         """Generate a unique ID for an assignment"""
