@@ -41,6 +41,49 @@ STOLEN_ANIMAL_VP = {
     "Penguins": 1  # Assuming Penguins is a custom card or expansion
 }
 
+PLANT_REDUCTION_CARDS = {
+    "Fish": 1,
+    "Birds": 2,
+    "Small Animals": 1,
+    "Herbivores": 1,
+    "Livestock": 1
+}
+
+def calculate_plants_denied(moves, move_index, player_id, card_name, reduction_value, final_generation):
+    """
+    Calculate plants denied to self or opponents from a card play, considering generations.
+    """
+    plants_denied_opponent = 0
+    plants_denied_self = 0
+
+    # Get the generation the card was played
+    card_play_move = moves[move_index]
+    game_state = card_play_move.get('game_state')
+    if not game_state:
+        return 0, 0 # Cannot determine generation
+        
+    card_play_generation = game_state.get('generation')
+
+    if card_play_generation is None:
+        return 0, 0
+
+    generations_affected = final_generation - card_play_generation + 1
+    total_reduction = reduction_value * generations_affected
+
+    if card_name == "Livestock":
+        return 0, total_reduction
+
+    # Check the next move for the reduction effect
+    if move_index + 1 < len(moves):
+        next_move = moves[move_index + 1]
+        if "reduces" in next_move.get('description', ''):
+            if next_move.get('player_id') == player_id:
+                plants_denied_self = total_reduction
+            else:
+                plants_denied_opponent = total_reduction
+    
+    return plants_denied_opponent, plants_denied_self
+
 def calculate_predators_stolen_vp(moves, player_id):
     """
     Calculate the total VP stolen by a player using the Predators card.
@@ -80,10 +123,15 @@ def process_game_for_animal_vp(file_path):
         with open(file_path, 'r', encoding='utf-8') as f:
             game_data = json.load(f)
         
-        # Check if final_state exists
-        final_state = game_data["moves"][-1]["game_state"]
+        # Check if final_state exists and get final generation
+        final_move = game_data["moves"][-1]
+        final_state = final_move.get("game_state")
         if not final_state:
             print(f"Warning: No final_state found in {file_path}")
+            return []
+        final_generation = final_state.get('generation')
+        if final_generation is None:
+            print(f"Warning: No final_generation found in {file_path}")
             return []
         
         # Check if player_vp exists
@@ -127,11 +175,24 @@ def process_game_for_animal_vp(file_path):
                         if animal_card == "Predators":
                             stolen_vp = calculate_predators_stolen_vp(game_data.get('moves', []), player_id)
                         
+                        plants_denied_opponent = 0
+                        plants_denied_self = 0
+                        if animal_card in PLANT_REDUCTION_CARDS:
+                            # Find the move index where the card was played to check the next move
+                            for i, move in enumerate(game_data.get('moves', [])):
+                                if move.get('player_id') == player_id and move.get('card_played') == animal_card:
+                                    plants_denied_opponent, plants_denied_self = calculate_plants_denied(
+                                        game_data.get('moves', []), i, player_id, animal_card, PLANT_REDUCTION_CARDS[animal_card], final_generation
+                                    )
+                                    break
+
                         # Add to results (include even if VP is 0, since card was played)
                         animal_vp_data.append({
                             'card_name': animal_card,
                             'vp': vp_value,
                             'stolen_vp': stolen_vp,
+                            'plants_denied_opponent': plants_denied_opponent,
+                            'plants_denied_self': plants_denied_self,
                             'player_id': player_id,
                             'player_name': player_name,
                             'corporation': corporation,
@@ -185,9 +246,13 @@ def analyze_animal_cards_vp(data_dir):
     card_stats = defaultdict(lambda: {
         'total_vp': 0,
         'total_stolen_vp': 0,
+        'total_plants_denied_opponent': 0,
+        'total_plants_denied_self': 0,
         'times_played': 0,
         'vp_values': [],
         'stolen_vp_values': [],
+        'plants_denied_opponent_values': [],
+        'plants_denied_self_values': [],
         'instances': []
     })
     
@@ -207,6 +272,8 @@ def analyze_animal_cards_vp(data_dir):
                 card_name = animal_data['card_name']
                 vp_value = animal_data['vp']
                 stolen_vp = animal_data.get('stolen_vp', 0)
+                plants_denied_opponent = animal_data.get('plants_denied_opponent', 0)
+                plants_denied_self = animal_data.get('plants_denied_self', 0)
                 
                 # Update card statistics
                 card_stats[card_name]['total_vp'] += vp_value
@@ -217,6 +284,14 @@ def analyze_animal_cards_vp(data_dir):
                 if stolen_vp > 0:
                     card_stats[card_name]['total_stolen_vp'] += stolen_vp
                     card_stats[card_name]['stolen_vp_values'].append(stolen_vp)
+                
+                if plants_denied_opponent > 0:
+                    card_stats[card_name]['total_plants_denied_opponent'] += plants_denied_opponent
+                    card_stats[card_name]['plants_denied_opponent_values'].append(plants_denied_opponent)
+
+                if plants_denied_self > 0:
+                    card_stats[card_name]['total_plants_denied_self'] += plants_denied_self
+                    card_stats[card_name]['plants_denied_self_values'].append(plants_denied_self)
                 
                 # Add to overall data
                 all_animal_data.append(animal_data)
@@ -237,6 +312,8 @@ def analyze_animal_cards_vp(data_dir):
         if stats['times_played'] > 0:
             avg_vp = stats['total_vp'] / stats['times_played']
             avg_stolen_vp = stats['total_stolen_vp'] / stats['times_played'] if stats['times_played'] > 0 else 0
+            avg_plants_denied_opponent = stats['total_plants_denied_opponent'] / stats['times_played'] if stats['times_played'] > 0 else 0
+            avg_plants_denied_self = stats['total_plants_denied_self'] / stats['times_played'] if stats['times_played'] > 0 else 0
             
             # Calculate additional statistics
             vp_values = stats['vp_values']
@@ -250,6 +327,8 @@ def analyze_animal_cards_vp(data_dir):
                 'total_vp': stats['total_vp'],
                 'avg_vp': avg_vp,
                 'avg_stolen_vp': avg_stolen_vp,
+                'avg_plants_denied_opponent': avg_plants_denied_opponent,
+                'avg_plants_denied_self': avg_plants_denied_self,
                 'min_vp': min_vp,
                 'max_vp': max_vp,
                 'std_dev': std_dev,
@@ -276,13 +355,15 @@ def display_results(card_results):
                          key=lambda x: x[1]['avg_vp'], 
                          reverse=True)
     
-    print(f"\n{'Rank':<4} {'Card Name':<18} {'Times Played':<12} {'Avg VP':<8} {'Avg Stolen VP':<15} {'Total VP':<9} {'Min':<4} {'Max':<4} {'Std Dev':<8}")
-    print("-" * 120)
+    print(f"\n{'Rank':<4} {'Card Name':<18} {'Times Played':<12} {'Avg VP':<8} {'Avg Stolen VP':<15} {'Avg Plants Denied Opponent':<28} {'Avg Plants Denied Self':<25} {'Total VP':<9} {'Min':<4} {'Max':<4} {'Std Dev':<8}")
+    print("-" * 180)
     
     for rank, (card_name, stats) in enumerate(sorted_cards, 1):
         avg_stolen_vp_str = f"{stats.get('avg_stolen_vp', 0):.2f}" if card_name == "Predators" else "-"
+        avg_plants_denied_opponent_str = f"{stats.get('avg_plants_denied_opponent', 0):.2f}" if card_name in PLANT_REDUCTION_CARDS else "-"
+        avg_plants_denied_self_str = f"{stats.get('avg_plants_denied_self', 0):.2f}" if card_name in PLANT_REDUCTION_CARDS else "-"
         print(f"{rank:<4} {card_name:<18} {stats['times_played']:<12} "
-              f"{stats['avg_vp']:<8.2f} {avg_stolen_vp_str:<15} {stats['total_vp']:<9} "
+              f"{stats['avg_vp']:<8.2f} {avg_stolen_vp_str:<15} {avg_plants_denied_opponent_str:<28} {avg_plants_denied_self_str:<25} {stats['total_vp']:<9} "
               f"{stats['min_vp']:<4} {stats['max_vp']:<4} "
               f"{stats['std_dev']:<8.2f}")
     
@@ -307,8 +388,8 @@ def save_detailed_results_to_csv(all_animal_data, output_file):
         return
     
     try:
-        fieldnames = ['card_name', 'vp', 'stolen_vp', 'player_id', 'player_name', 
-                     'corporation', 'replay_id', 'game_date']
+        fieldnames = ['card_name', 'vp', 'stolen_vp', 'plants_denied_opponent', 'plants_denied_self', 
+                     'player_id', 'player_name', 'corporation', 'replay_id', 'game_date']
         
         with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
@@ -334,7 +415,8 @@ def save_card_summary_to_csv(card_results, output_file):
     
     try:
         fieldnames = ['card_name', 'times_played', 'total_vp', 'avg_vp', 
-                     'avg_stolen_vp', 'min_vp', 'max_vp', 'std_dev']
+                     'avg_stolen_vp', 'avg_plants_denied_opponent', 'avg_plants_denied_self', 
+                     'min_vp', 'max_vp', 'std_dev']
         
         with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
@@ -352,6 +434,8 @@ def save_card_summary_to_csv(card_results, output_file):
                     'total_vp': stats['total_vp'],
                     'avg_vp': round(stats['avg_vp'], 4),
                     'avg_stolen_vp': round(stats.get('avg_stolen_vp', 0), 4),
+                    'avg_plants_denied_opponent': round(stats.get('avg_plants_denied_opponent', 0), 4),
+                    'avg_plants_denied_self': round(stats.get('avg_plants_denied_self', 0), 4),
                     'min_vp': stats['min_vp'],
                     'max_vp': stats['max_vp'],
                     'std_dev': round(stats['std_dev'], 4)
