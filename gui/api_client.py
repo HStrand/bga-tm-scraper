@@ -14,16 +14,18 @@ logger = logging.getLogger(__name__)
 class APIClient:
     """Client for communicating with the BGA TM Scraper API"""
     
-    def __init__(self, api_key: str, base_url: str = "https://bga-tm-scraper-functions.azurewebsites.net/api"):
+    def __init__(self, api_key: str, base_url: str = "https://bga-tm-scraper-functions.azurewebsites.net/api", version: Optional[str] = None):
         """
         Initialize API client
         
         Args:
             api_key: API key for authentication
             base_url: Base URL for the API
+            version: Optional GUI version string
         """
         self.api_key = api_key
         self.base_url = base_url
+        self.version = version
         self.timeout = 60  # Default timeout for requests
     
     def _make_request(self, endpoint: str, method: str = "GET", data: Dict = None, params: Dict = None) -> Optional[Dict]:
@@ -47,6 +49,8 @@ class APIClient:
             if params is None:
                 params = {}
             params['code'] = self.api_key
+            if self.version:
+                params['version'] = self.version
             
             # Make request
             if method.upper() == "GET":
@@ -347,6 +351,54 @@ class APIClient:
             logger.error(f"Unexpected error during download: {e}")
             return False
     
+    def submit_display_name(self, bga_username: str, display_name: str) -> bool:
+        """
+        Submit a display name for a BGA account
+        
+        Args:
+            bga_username: The user's BGA username or email
+            display_name: The desired display name
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            payload = {
+                "username": bga_username,
+                "displayName": display_name
+            }
+            response = self._make_request("StoreUserMapping", method="POST", data=payload)
+            
+            if response is not None:
+                logger.info(f"Successfully submitted display name '{display_name}' for BGA user '{bga_username}'")
+                return True
+            else:
+                logger.error(f"Failed to submit display name for BGA user '{bga_username}'")
+                return False
+        except Exception as e:
+            logger.error(f"Error submitting display name: {e}")
+            return False
+
+    def get_scraper_leaderboard(self) -> Optional[List[Dict[str, Any]]]:
+        """
+        Get the scraper leaderboard from the API
+        
+        Returns:
+            list: A list of dictionaries, where each dictionary represents a scraper.
+                  Returns None if the request fails.
+        """
+        try:
+            response = self._make_request("GetScraperLeaderboard")
+            if response:
+                logger.info("Got scraper leaderboard from API")
+                return response
+            else:
+                logger.info("No scraper leaderboard available from API")
+                return None
+        except Exception as e:
+            logger.error(f"Error getting scraper leaderboard from API: {e}")
+            return None
+
     def test_connection(self) -> bool:
         """
         Test the API connection

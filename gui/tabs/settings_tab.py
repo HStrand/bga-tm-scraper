@@ -16,6 +16,7 @@ from datetime import datetime
 # Add the parent directory to the path to import bga_tm_scraper
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 from bga_tm_scraper.bga_session import BGASession
+from gui.api_client import APIClient
 
 
 class SettingsTab:
@@ -24,6 +25,7 @@ class SettingsTab:
     def __init__(self, parent, config_manager):
         self.parent = parent
         self.config_manager = config_manager
+        self.bga_connection_verified = False
         
         # Create main frame
         self.frame = ttk.Frame(parent)
@@ -45,6 +47,7 @@ class SettingsTab:
         # BGA Credentials
         self.email_var = tk.StringVar()
         self.password_var = tk.StringVar()
+        self.display_name_var = tk.StringVar()
         
         # Browser Settings
         self.chrome_path_var = tk.StringVar()
@@ -130,7 +133,7 @@ class SettingsTab:
         section_frame.pack(fill="x", padx=10, pady=5)
         
         # Email field
-        ttk.Label(section_frame, text="Email:").pack(anchor="w", pady=(0, 2))
+        ttk.Label(section_frame, text="Email or BGA Username:").pack(anchor="w", pady=(0, 2))
         email_entry = ttk.Entry(section_frame, textvariable=self.email_var, width=50)
         email_entry.pack(fill="x", pady=(0, 5))
         
@@ -157,6 +160,29 @@ class SettingsTab:
         test_btn = ttk.Button(section_frame, text="Test Connection", 
                              command=self.test_bga_connection)
         test_btn.pack(pady=5)
+
+        # Separator
+        ttk.Separator(section_frame, orient="horizontal").pack(fill="x", pady=10)
+
+        # Display name field
+        ttk.Label(section_frame, text="Leaderboard Display Name (Optional):").pack(anchor="w", pady=(0, 2))
+        display_name_frame = ttk.Frame(section_frame)
+        display_name_frame.pack(fill="x", pady=(0, 5))
+        display_name_entry = ttk.Entry(display_name_frame, textvariable=self.display_name_var, width=40)
+        display_name_entry.pack(side="left", fill="x", expand=True)
+        
+        set_to_username_btn = ttk.Button(display_name_frame, text="Use Username",
+                                        command=self.set_display_name_to_username)
+        set_to_username_btn.pack(side="right", padx=(5, 0))
+
+        # Submit display name button
+        self.submit_display_name_btn = ttk.Button(section_frame, text="Submit Display Name", 
+                                                 command=self.submit_display_name, state="disabled")
+        self.submit_display_name_btn.pack(pady=5)
+        
+        self.display_name_status_label = ttk.Label(section_frame, text="Verify BGA connection to enable submission",
+                                                  foreground="blue")
+        self.display_name_status_label.pack(anchor="w", pady=2)
     
     def create_browser_section(self, parent):
         """Create browser settings section"""
@@ -376,9 +402,10 @@ class SettingsTab:
     def load_settings(self):
         """Load current settings from config manager"""
         # BGA Credentials
-        email, password = self.config_manager.get_bga_credentials()
+        email, password, display_name = self.config_manager.get_bga_credentials()
         self.email_var.set(email)
         self.password_var.set(password)
+        self.display_name_var.set(display_name)
         
         # Browser Settings with Chrome auto-detection
         browser_settings = self.config_manager.get_section("browser_settings")
@@ -421,7 +448,8 @@ class SettingsTab:
             # BGA Credentials
             self.config_manager.set_bga_credentials(
                 self.email_var.get(),
-                self.password_var.get()
+                self.password_var.get(),
+                self.display_name_var.get()
             )
             
             # Browser Settings
@@ -484,8 +512,8 @@ class SettingsTab:
         email = self.email_var.get()
         password = self.password_var.get()
         
-        if not email or "@" not in email or "." not in email or len(email) <= 5:
-            issues["errors"].append("Valid BGA email is required")
+        if not email or len(email) <= 2:
+            issues["errors"].append("Valid BGA email or username is required")
         
         if not password or len(password) == 0:
             issues["errors"].append("BGA password is required")
@@ -535,7 +563,8 @@ class SettingsTab:
     def validate_email(self, *args):
         """Validate email field"""
         email = self.email_var.get()
-        is_valid = "@" in email and "." in email and len(email) > 5
+        # BGA username is also allowed, so we can't enforce email format
+        is_valid = len(email) > 2
         self.email_valid.set(is_valid)
     
     def validate_password(self, *args):
@@ -778,15 +807,54 @@ class SettingsTab:
         if dialog and dialog.winfo_exists():
             dialog.message_label.config(text=message)
     
+    def set_display_name_to_username(self):
+        """Set the display name to the current BGA username/email"""
+        self.display_name_var.set(self.email_var.get())
+
+    def submit_display_name(self):
+        """Submit the display name to the API"""
+        display_name = self.display_name_var.get()
+        if not display_name:
+            messagebox.showwarning("Submit Display Name", "Display name cannot be empty.")
+            return
+
+        bga_username = self.email_var.get()
+        if not bga_username:
+            messagebox.showwarning("Submit Display Name", "BGA username/email cannot be empty.")
+            return
+
+        api_key = self.api_key_var.get()
+        api_url = self.api_url_var.get()
+        if not api_key or not api_url:
+            messagebox.showwarning("Submit Display Name", "API key and URL must be configured.")
+            return
+
+        api_client = APIClient(api_key=api_key, base_url=api_url)
+        
+        self.display_name_status_label.config(text=f"Submitting '{display_name}'...", foreground="blue")
+
+        def submit_worker():
+            success = api_client.submit_display_name(bga_username, display_name)
+            if success:
+                self.frame.after(0, lambda: self.display_name_status_label.config(text=f"✅ Display name '{display_name}' submitted successfully!", foreground="green"))
+            else:
+                self.frame.after(0, lambda: self.display_name_status_label.config(text="❌ Failed to submit display name.", foreground="red"))
+
+        submit_thread = threading.Thread(target=submit_worker, daemon=True)
+        submit_thread.start()
+
     def _show_bga_test_result(self, progress_dialog, success, result):
         """Show BGA test result and close progress dialog"""
         if progress_dialog and progress_dialog.winfo_exists():
             progress_dialog.destroy()
         
         if success:
+            self.bga_connection_verified = True
             auth_status = result
             # Show green success text
             self.bga_status_label.config(text="✅ BGA connection verified", foreground="green")
+            self.submit_display_name_btn.config(state="normal")
+            self.display_name_status_label.config(text="Ready to submit display name.", foreground="blue")
             
             # Also show detailed dialog
             message = "✅ BGA Connection Successful!\n\n"
@@ -797,8 +865,11 @@ class SettingsTab:
             
             messagebox.showinfo("BGA Connection Test", message)
         else:
+            self.bga_connection_verified = False
             # Clear any previous success message
             self.bga_status_label.config(text="", foreground="green")
+            self.submit_display_name_btn.config(state="disabled")
+            self.display_name_status_label.config(text="Verify BGA connection to enable submission", foreground="blue")
             
             error_msg = str(result)
             message = "❌ BGA Connection Failed\n\n"

@@ -5,6 +5,7 @@ import time
 import os
 import logging
 import re
+import threading
 import requests
 from typing import List, Optional, Dict, Tuple
 from selenium import webdriver
@@ -1714,8 +1715,10 @@ class TMScraper:
             print(f"❌ Error scraping replay: {e}")
             return None
     
-    def scrape_player_game_history(self, player_id: str, max_clicks: int = 1000, 
-                                 click_delay: Optional[float] = None) -> List[Dict]:
+    def scrape_player_game_history(self, player_id: str, max_clicks: int = 1000,
+                                 click_delay: Optional[float] = None,
+                                 progress_callback: Optional[callable] = None,
+                                 stop_event: Optional[threading.Event] = None) -> List[Dict]:
         """
         Scrape all table IDs and datetimes from a player's game history by auto-clicking "See more"
         
@@ -1723,6 +1726,8 @@ class TMScraper:
             player_id: BGA player ID
             max_clicks: Maximum number of "See more" clicks to prevent infinite loops
             click_delay: Delay between clicks in seconds (uses speed profile if None)
+            progress_callback: Optional callback for progress updates
+            stop_event: Optional threading event to signal stopping
             
         Returns:
             list: List of dictionaries containing table_id, raw_datetime, parsed_datetime, and date_type
@@ -1757,6 +1762,10 @@ class TMScraper:
             print("Starting to load all games by clicking 'See more'...")
             
             while click_count < max_clicks:
+                if stop_event and stop_event.is_set():
+                    print("Stop event received, halting game history scraping.")
+                    break
+
                 # Primary strategy: Look for the specific ID "see_more_tables"
                 see_more_element = None
                 
@@ -1794,7 +1803,10 @@ class TMScraper:
                         break
                     
                     games_loaded += 10
-                    print(f"Progress: ~{games_loaded} games loaded so far...")
+                    progress_message = f"{games_loaded} games from game history discovered"
+                    print(progress_message)
+                    if progress_callback:
+                        progress_callback(progress_message)
                     
                 except Exception as e:
                     logger.warning(f"Error clicking 'See more' button: {e}")

@@ -4,6 +4,7 @@ Handles scraping operations without saving files locally
 """
 
 import logging
+import threading
 import time
 from typing import Dict, Any, List, Optional, Callable
 from datetime import datetime
@@ -14,14 +15,16 @@ logger = logging.getLogger(__name__)
 class InMemoryScraper:
     """Wrapper for TMScraper that works entirely in memory"""
     
-    def __init__(self, config_dict: Dict[str, Any], progress_callback: Optional[Callable] = None):
+    def __init__(self, config_manager, config_dict: Dict[str, Any], progress_callback: Optional[Callable] = None):
         """
         Initialize in-memory scraper
         
         Args:
+            config_manager: The configuration manager instance.
             config_dict: Configuration dictionary from GUI
             progress_callback: Optional callback for progress updates
         """
+        self.config_manager = config_manager
         self.config_dict = config_dict
         self.progress_callback = progress_callback
         self.scraper = None
@@ -145,13 +148,14 @@ class InMemoryScraper:
             logger.error(f"Error starting browser and login: {e}")
             return False
     
-    def scrape_player_game_history(self, player_id: str, max_clicks: int = 1000) -> List[Dict]:
+    def scrape_player_game_history(self, player_id: str, max_clicks: int = 1000, stop_event: Optional[threading.Event] = None) -> List[Dict]:
         """
         Scrape player's game history
         
         Args:
             player_id: Player ID to scrape
             max_clicks: Maximum clicks on "See more"
+            stop_event: Optional threading event to signal stopping
             
         Returns:
             list: List of game data dictionaries
@@ -163,7 +167,12 @@ class InMemoryScraper:
             if self.progress_callback:
                 self.progress_callback(f"🔍 Scraping player {player_id} game history...")
             
-            games_data = self.scraper.scrape_player_game_history(player_id, max_clicks)
+            games_data = self.scraper.scrape_player_game_history(
+                player_id,
+                max_clicks,
+                progress_callback=self.progress_callback,
+                stop_event=stop_event
+            )
             
             logger.info(f"Scraped {len(games_data)} games for player {player_id}")
             return games_data
@@ -241,22 +250,31 @@ class InMemoryScraper:
             # Check for daily limit reached in main result
             if result.get('limit_reached'):
                 logger.warning(f"Daily replay limit reached when processing game {table_id} (main result)")
+                if not self.config_manager.get_replay_limit_hit_at():
+                    self.config_manager.set_replay_limit_hit_at(datetime.now().isoformat())
                 return {'daily_limit_reached': True}
-            
+
             # Check for daily limit reached in replay_data
             replay_data = result.get('replay_data', {})
             if replay_data and replay_data.get('limit_reached'):
                 logger.warning(f"Daily replay limit reached when processing game {table_id} (replay data)")
+                if not self.config_manager.get_replay_limit_hit_at():
+                    self.config_manager.set_replay_limit_hit_at(datetime.now().isoformat())
                 return {'daily_limit_reached': True}
-            
+
             # Check for error indicating daily limit
             if replay_data and replay_data.get('error') == 'replay_limit_reached':
                 logger.warning(f"Daily replay limit reached when processing game {table_id} (error flag)")
+                if not self.config_manager.get_replay_limit_hit_at():
+                    self.config_manager.set_replay_limit_hit_at(datetime.now().isoformat())
                 return {'daily_limit_reached': True}
-            
+
             if not result.get('success'):
                 logger.warning(f"Failed to scrape table and replay for {table_id}")
                 return None
+
+            # On successful scrape, clear the limit timestamp
+            self.config_manager.set_replay_limit_hit_at(None)
             
             # Extract HTML content from result
             table_html = result.get('table_data', {}).get('html_content', '')
@@ -295,7 +313,7 @@ class InMemoryScraper:
             logger.error(f"Error scraping and parsing game {table_id} in memory: {e}")
             return None
 
-    def scrape_replay_only_with_assignment_metadata(self, table_id: str, version_id: str, player_perspective: str, assignment_metadata: Dict[str, Any]) -> Optional[Dict]:
+    def scrape_replay_only_with_assignment_metadata(self, table_id: str, version_id: str, player_perspective: str, assignment_metadata: Dict[str, Any], version: Optional[str] = None) -> Optional[Dict]:
         """
         Scrape only replay page using assignment metadata (optimized for replay scraping assignments)
         
@@ -304,6 +322,7 @@ class InMemoryScraper:
             version_id: Version ID from assignment
             player_perspective: Player ID for perspective
             assignment_metadata: Assignment data containing ELO info, player data, etc.
+            version: Optional GUI version string
             
         Returns:
             dict: Parsed game data ready for API upload, or None if failed
@@ -331,12 +350,19 @@ class InMemoryScraper:
             # Check for daily limit reached
             if replay_result.get('limit_reached'):
                 logger.warning(f"Daily replay limit reached when processing game {table_id}")
+                if not self.config_manager.get_replay_limit_hit_at():
+                    self.config_manager.set_replay_limit_hit_at(datetime.now().isoformat())
                 return {'daily_limit_reached': True}
-            
+
             # Check for error indicating daily limit
             if replay_result.get('error') == 'replay_limit_reached':
                 logger.warning(f"Daily replay limit reached when processing game {table_id} (error flag)")
+                if not self.config_manager.get_replay_limit_hit_at():
+                    self.config_manager.set_replay_limit_hit_at(datetime.now().isoformat())
                 return {'daily_limit_reached': True}
+
+            # On successful scrape, clear the limit timestamp
+            self.config_manager.set_replay_limit_hit_at(None)
             
             # Extract replay HTML
             replay_html = replay_result.get('html_content', '')
@@ -358,6 +384,8 @@ class InMemoryScraper:
             if game_data:
                 # Convert GameData object to dictionary format for GUI
                 result = self.parser._convert_game_data_to_api_format(game_data, table_id, player_perspective)
+                if version and result.get("metadata"):
+                    result["metadata"]["scraper_version"] = version
                 logger.info(f"Successfully parsed replay-only game {table_id} with assignment metadata")
                 return result
             else:
@@ -414,7 +442,7 @@ def create_scraper_from_gui_config(config_manager, progress_callback: Optional[C
     """
     try:
         # Get BGA credentials using the proper decoding method
-        email, password = config_manager.get_bga_credentials()
+        email, password, _ = config_manager.get_bga_credentials()
         
         # Get all config values
         config_dict = {
@@ -435,7 +463,7 @@ def create_scraper_from_gui_config(config_manager, progress_callback: Optional[C
             }
         }
         
-        return InMemoryScraper(config_dict, progress_callback)
+        return InMemoryScraper(config_manager, config_dict, progress_callback)
         
     except Exception as e:
         logger.error(f"Error creating scraper from GUI config: {e}")

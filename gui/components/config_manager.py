@@ -23,7 +23,8 @@ class ConfigManager:
         return {
             "bga_credentials": {
                 "email": "",
-                "password": ""  # Will be base64 encoded for basic obfuscation
+                "password": "",  # Will be base64 encoded for basic obfuscation
+                "display_name": ""
             },
             "browser_settings": {
                 "chrome_path": "",
@@ -38,7 +39,8 @@ class ConfigManager:
             "scraping_settings": {
                 "request_delay": 1.0,
                 "max_retries": 3,
-                "speed_profile": "FAST"
+                "speed_profile": "FAST",
+                "replay_limit_hit_at": None
             },
             "email_settings": {
                 "enabled": False,
@@ -129,20 +131,22 @@ class ConfigManager:
         except:
             return ""  # Return empty string if decoding fails
     
-    def set_bga_credentials(self, email: str, password: str):
+    def set_bga_credentials(self, email: str, password: str, display_name: str):
         """Set BGA credentials with password encoding"""
         self.update_section("bga_credentials", {
             "email": email,
-            "password": self.encode_password(password)
+            "password": self.encode_password(password),
+            "display_name": display_name
         })
     
-    def get_bga_credentials(self) -> tuple[str, str]:
+    def get_bga_credentials(self) -> tuple[str, str, str]:
         """Get BGA credentials with password decoding"""
         creds = self.get_section("bga_credentials")
         email = creds.get("email", "")
         encoded_password = creds.get("password", "")
         password = self.decode_password(encoded_password)
-        return email, password
+        display_name = creds.get("display_name", "")
+        return email, password, display_name
     
     def validate_config(self) -> Dict[str, list]:
         """Validate current configuration and return issues"""
@@ -152,7 +156,7 @@ class ConfigManager:
         }
         
         # Check BGA credentials
-        email, password = self.get_bga_credentials()
+        email, password, _ = self.get_bga_credentials()
         if not email:
             issues["errors"].append("BGA email is required")
         if not password:
@@ -247,6 +251,15 @@ class ConfigManager:
         profile_name = self.get_value("scraping_settings", "speed_profile", "NORMAL")
         profiles = self.get_speed_profiles()
         return profiles.get(profile_name, profiles["NORMAL"])
+
+    def set_replay_limit_hit_at(self, timestamp: Optional[str]):
+        """Set the timestamp when the daily replay limit was hit"""
+        self.set_value("scraping_settings", "replay_limit_hit_at", timestamp)
+        self.save_config()
+
+    def get_replay_limit_hit_at(self) -> Optional[str]:
+        """Get the timestamp when the daily replay limit was hit"""
+        return self.get_value("scraping_settings", "replay_limit_hit_at", None)
     
     def generate_assignment_id(self, assignment_data: Dict[str, Any]) -> str:
         """Generate a unique ID for an assignment"""

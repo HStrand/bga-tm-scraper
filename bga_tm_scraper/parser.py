@@ -81,6 +81,13 @@ class Move:
     game_state: Optional[GameState] = None
 
 @dataclass
+class StartingHand:
+    """Represents the hand for a player"""
+    corporations: List[str]
+    preludes: List[str]
+    project_cards: List[str]
+
+@dataclass
 class Player:
     """Represents a player in the game"""
     player_id: str
@@ -92,6 +99,7 @@ class Player:
     cards_played: List[str]
     milestones_claimed: List[str]
     awards_funded: List[str]
+    starting_hand: Optional[StartingHand] = None
     elo_data: Optional[EloData] = None
 
 @dataclass
@@ -104,8 +112,6 @@ class GameData:
     game_duration: str
     winner: str
     generations: int
-    
-    # New assignment metadata fields (top-level)
     map: Optional[str] = None
     prelude_on: Optional[bool] = None
     colonies_on: Optional[bool] = None
@@ -572,8 +578,11 @@ class Parser:
             # Update game states with tracking data
             self._update_game_states_with_tracking(moves_with_states, tracking_progression)
 
+        # Extract starting hand
+        starting_hands = self._extract_starting_hands(soup, player_perspective)
+
         # Build final player objects from collected data
-        players_info = self._build_final_players(player_id_map, corporations, moves_with_states, game_metadata)
+        players_info = self._build_final_players(player_id_map, corporations, moves_with_states, game_metadata, starting_hands)
         
         # Determine winner from final game state
         winner = self._determine_winner_from_game_states(moves_with_states, players_info)
@@ -582,8 +591,8 @@ class Parser:
         metadata = self._extract_metadata(soup, replay_html, moves_with_states)
         
         # Calculate max generation from vp_progression or moves
-        max_generation = self._calculate_max_generation(vp_progression, moves_with_states)
-        
+        max_generation = self._calculate_max_generation(vp_progression, moves_with_states)            
+
         # Create game data with game metadata fields
         game_data = GameData(
             replay_id=table_id,
@@ -592,7 +601,6 @@ class Parser:
             game_duration=self._calculate_game_duration(moves_with_states),
             winner=winner,
             generations=max_generation,
-            # Add game metadata fields to top level
             map=game_metadata.map,
             prelude_on=game_metadata.prelude_on,
             colonies_on=game_metadata.colonies_on,
@@ -628,7 +636,8 @@ class Parser:
         raise ValueError("Parser requires GameMetadata with player information")
     
     def _build_final_players(self, player_id_map: Dict[str, str], corporations: Dict[str, str], 
-                                               moves_with_states: List[Move], game_metadata: GameMetadata) -> Dict[str, Player]:
+                                               moves_with_states: List[Move], game_metadata: GameMetadata,
+                                               starting_hands: Optional[Dict[str, StartingHand]]) -> Dict[str, Player]:
         """Build final player objects from collected data using GameMetadata"""
         players = {}
         
@@ -671,6 +680,9 @@ class Parser:
             elo_data = None
             if game_metadata and game_metadata.players and player_id in game_metadata.players:
                 elo_data = game_metadata.players[player_id]
+
+            # Get starting hand for this player
+            starting_hand = starting_hands.get(player_id) if starting_hands else None
             
             players[player_id] = Player(
                 player_id=player_id,
@@ -679,6 +691,7 @@ class Parser:
                 final_vp=final_vp,
                 final_tr=vp_breakdown.get('tr', 20),
                 vp_breakdown=vp_breakdown,
+                starting_hand=starting_hand,
                 cards_played=cards_played,
                 milestones_claimed=milestones_claimed,
                 awards_funded=awards_funded,
@@ -1772,6 +1785,47 @@ class Parser:
         
         logger.info(f"Calculated max generation: {max_generation}")
         return max_generation
+
+    def _extract_starting_hands(self, soup: BeautifulSoup, player_perspective: str) -> Optional[Dict[str, StartingHand]]:
+        """Extracts the starting hand for the player of perspective from the hand area."""
+        logger.info("Extracting starting hands")
+        try:
+            hand_area = soup.find('div', id='hand_area')
+            if not hand_area:
+                logger.warning("Hand area not found")
+                return None
+
+            corporations = []
+            preludes = []
+            project_cards = []
+
+            cards = hand_area.find_all('div', class_='card')
+            for card in cards:
+                card_name = card.get('data-name')
+                if not card_name:
+                    continue
+
+                card_id = card.get('id', '')
+                if 'corp' in card_id:
+                    corporations.append(card_name)
+                elif 'prelude' in card_id:
+                    preludes.append(card_name)
+                else:
+                    project_cards.append(card_name)
+            
+            player_hand = StartingHand(
+                corporations=corporations,
+                preludes=preludes,
+                project_cards=project_cards
+            )
+            
+            starting_hands = {player_perspective: player_hand}
+            logger.info(f"Extracted starting hands: {starting_hands}")
+            return starting_hands
+
+        except Exception as e:
+            logger.error(f"Error extracting starting hands: {e}")
+            return None
 
     def _extract_metadata(self, soup: BeautifulSoup, html_content: str, moves: List[Move]) -> Dict[str, Any]:
         """Extract metadata about the parsing process"""
