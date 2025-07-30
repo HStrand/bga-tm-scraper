@@ -865,8 +865,11 @@ class ScrapingTab:
                             'game_speed': result.get('game_speed')
                         }
                         
+                        # Get BGA email for indexedBy parameter
+                        bga_email = self.config_manager.get_value("bga_credentials", "email", "")
+                        
                         # Upload to API immediately
-                        if api_client.update_single_game(game_api_data):
+                        if api_client.update_single_game(game_api_data, indexed_by_email=bga_email):
                             self.successful_items += 1
                             self.frame.after(0, lambda tid=table_id, mode=game_mode: 
                                            self.log_message(f"✅ Game {tid} ({mode}) indexed successfully"))
