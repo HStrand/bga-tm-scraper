@@ -73,14 +73,15 @@ def calculate_plants_denied(moves, move_index, player_id, card_name, reduction_v
     if card_name == "Livestock":
         return 0, total_reduction
 
-    # Check the next move for the reduction effect
-    if move_index + 1 < len(moves):
-        next_move = moves[move_index + 1]
-        if "reduces" in next_move.get('description', ''):
-            if next_move.get('player_id') == player_id:
+    # Search for the reduction effect in subsequent moves (with a lookahead limit)
+    for i in range(move_index + 1, min(move_index + 10, len(moves))):
+        subsequent_move = moves[i]
+        if "reduces" in subsequent_move.get('description', ''):
+            if subsequent_move.get('player_id') == player_id:
                 plants_denied_self = total_reduction
             else:
                 plants_denied_opponent = total_reduction
+            break  # Found the first reduction, stop searching
     
     return plants_denied_opponent, plants_denied_self
 
@@ -122,6 +123,10 @@ def process_game_for_animal_vp(file_path):
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             game_data = json.load(f)
+
+        # Check player count
+        if len(game_data.get('players', [])) > 2:
+            return []
         
         # Check if final_state exists and get final generation
         final_move = game_data["moves"][-1]
