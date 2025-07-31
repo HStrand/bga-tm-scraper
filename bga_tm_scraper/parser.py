@@ -551,7 +551,7 @@ class Parser:
         vp_progression = self._extract_vp_progression(replay_html, gamelogs)
         
         # Extract corporations from HTML
-        corporations = self._extract_corporations(soup)
+        corporations = self._extract_corporations(soup, player_perspective, player_id_map)
         
         # Create simple name_to_id mapping for move processing
         name_to_id = {name: player_id for player_id, name in player_id_map.items()}
@@ -1692,7 +1692,7 @@ class Parser:
         logger.warning("Failed to extract VP data from HTML using all methods")
         return {}
     
-    def _extract_corporations(self, soup: BeautifulSoup) -> Dict[str, str]:
+    def _extract_corporations(self, soup: BeautifulSoup, player_perspective: str, player_id_map: Dict[str, str]) -> Dict[str, str]:
         """Extract corporation assignments"""
         corporations = {}
         
@@ -1709,6 +1709,22 @@ class Parser:
                     corp_name = match.group(2).strip()
                     corporations[player_name] = corp_name
                     logger.info(f"Extracted corporation: {player_name} -> {corp_name}")
+
+        # Fallback for player_perspective
+        player_perspective_name = player_id_map.get(player_perspective)
+        if player_perspective_name and player_perspective_name not in corporations:
+            for entry in log_entries:
+                text = entry.get_text()
+                if 'You choose corporation' in text:
+                    pattern = r"You choose corporation\s+([A-Za-z\s]+)"
+                    match = re.search(pattern, text)
+                    if match:
+                        corp_name = match.group(1).strip()
+                        if '|' in corp_name:
+                            corp_name = corp_name.split('|')[0].strip()
+                        corporations[player_perspective_name] = corp_name
+                        logger.info(f"Extracted corporation for player perspective ({player_perspective_name}): {corp_name}")
+                        break
         
         logger.info(f"Total corporations extracted: {corporations}")
         return corporations
