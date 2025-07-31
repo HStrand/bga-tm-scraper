@@ -92,80 +92,138 @@ class BGASession:
         logger.info("✅ Authentication completed successfully!")
         return True
     
-    def _login_session(self) -> bool:
+    def _login_session(self, max_retries: int = 3, retry_delay: int = 2) -> bool:
         """
-        Perform session-based login using requests
+        Perform session-based login using requests with retry logic
         
+        Args:
+            max_retries: Maximum number of retries for token extraction and login
+            retry_delay: Delay between retries in seconds
+            
         Returns:
             bool: True if session login successful
         """
-        try:
-            logger.info("Performing session-based login...")
-            
-            # First, get a page to extract request token
-            logger.debug("Fetching initial page to extract request token...")
-            resp = self.session.get(f'{self.BASE_URL}/gamestats', params={'player': "689196352"})
-            resp.raise_for_status()
-            
-            # Extract request token from JavaScript
-            self.request_token = self._extract_request_token(resp.content)
-            if not self.request_token:
-                logger.error("Failed to extract request token")
-                return False
-            
-            logger.debug(f"Extracted request token: {self.request_token[:10]}...")
-            
-            # Set headers for authenticated requests
-            self.session.headers.update({
-                'X-Request-Token': self.request_token,
-                'X-Requested-With': 'XMLHttpRequest',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            })
-            
-            # Perform login
-            logger.info("Submitting login credentials...")
-            login_data = {
-                'email': self.email,
-                'password': self.password,
-                'rememberme': 'off',
-                'redirect': 'join',
-                'form_id': 'loginform',
-                'request_token': self.request_token
-            }
-            
-            login_resp = self.session.post(f'{self.BASE_URL}{self.LOGIN_URL}', data=login_data)
-            login_resp.raise_for_status()
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"Performing session-based login (attempt {attempt + 1}/{max_retries})...")
+                
+                # First, get a page to extract request token with retries
+                self.request_token = self._extract_request_token_with_retry(max_retries=max_retries, retry_delay=retry_delay)
+                if not self.request_token:
+                    logger.error("Failed to extract request token after multiple retries")
+                    return False
+                
+                logger.debug(f"Extracted request token: {self.request_token[:10]}...")
+                
+                # Set headers for authenticated requests
+                self.session.headers.update({
+                    'X-Request-Token': self.request_token,
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                })
+                
+                # Perform login
+                logger.info("Submitting login credentials...")
+                login_data = {
+                    'email': self.email,
+                    'password': self.password,
+                    'rememberme': 'off',
+                    'redirect': 'join',
+                    'form_id': 'loginform',
+                    'request_token': self.request_token
+                }
+                
+                login_resp = self.session.post(f'{self.BASE_URL}{self.LOGIN_URL}', data=login_data, timeout=15)
+                login_resp.raise_for_status()
 
-            # Verify login by checking for authentication indicators
-            if self._verify_session_authentication():
-                self.is_session_logged_in = True
-                logger.info("✅ Session-based login successful")
-                return True
-            else:
-                logger.error("Session login verification failed")
+                # Verify login by checking for authentication indicators
+                if self._verify_session_authentication():
+                    self.is_session_logged_in = True
+                    logger.info("✅ Session-based login successful")
+                    return True
+                else:
+                    logger.warning(f"Session login verification failed on attempt {attempt + 1}")
+                    if attempt < max_retries - 1:
+                        time.sleep(retry_delay * (attempt + 1))  # Exponential backoff
+                
+            except requests.exceptions.RequestException as e:
+                logger.error(f"Session login failed on attempt {attempt + 1}: {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay * (attempt + 1))
+                else:
+                    logger.error("Max retries reached for session login")
+                    return False
+            except Exception as e:
+                logger.error(f"An unexpected error occurred during session login: {e}")
                 return False
-            
-        except Exception as e:
-            logger.error(f"Session login failed: {e}")
-            return False
+        
+        logger.error("Session login failed after all retries")
+        return False
     
+    def _extract_request_token_with_retry(self, max_retries: int = 3, retry_delay: int = 2) -> Optional[str]:
+        """
+        Extract request token from a BGA page with retry logic
+        
+        Args:
+            max_retries: Maximum number of retries
+            retry_delay: Delay between retries in seconds
+            
+        Returns:
+            str: Request token, or None if failed
+        """
+        for attempt in range(max_retries):
+            try:
+                logger.debug(f"Fetching initial page to extract request token (attempt {attempt + 1}/{max_retries})...")
+                
+                # Use a page that is less likely to be rate-limited
+                resp = self.session.get(f'{self.BASE_URL}/gamelist', timeout=15)
+                resp.raise_for_status()
+                
+                # Extract request token from JavaScript
+                token = self._extract_request_token(resp.content)
+                if token:
+                    return token
+                
+                logger.warning(f"Failed to extract request token on attempt {attempt + 1}")
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                    
+            except requests.exceptions.RequestException as e:
+                logger.error(f"Error fetching page for token extraction on attempt {attempt + 1}: {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+        
+        return None
+
     def _extract_request_token(self, html_content: bytes) -> Optional[str]:
         """Extract request token from HTML content"""
         try:
+            # Use regex for faster extraction without full parsing
+            # Pattern looks for: requestToken: '...'
+            token_pattern = re.compile(rb"requestToken:\s*'([^']+)'")
+            match = token_pattern.search(html_content)
+            
+            if match:
+                token = match.group(1).decode('utf-8')
+                logger.debug(f"Extracted token with regex: {token[:10]}...")
+                return token
+            
+            # Fallback to BeautifulSoup if regex fails
+            logger.debug("Regex for token failed, falling back to BeautifulSoup")
             soup = BeautifulSoup(html_content, 'html.parser')
-            regex = re.compile(r"'(.*?)'")
             
             for script_tag in soup.find_all('script'):
                 if script_tag.string:
                     script_content = script_tag.string
                     if 'requestToken: ' in script_content:
-                        token_split = script_content.split('requestToken: ')
-                        if len(token_split) > 1:
-                            match = regex.match(token_split[1])
-                            if match:
-                                token = match.group().strip("'")
-                                return token
+                        # More robust extraction from script content
+                        token_match = re.search(r"requestToken:\s*'([^']+)'", script_content)
+                        if token_match:
+                            token = token_match.group(1)
+                            logger.debug(f"Extracted token with BeautifulSoup: {token[:10]}...")
+                            return token
             
+            logger.warning("Request token not found in HTML content")
             return None
             
         except Exception as e:
