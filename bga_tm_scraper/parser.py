@@ -1701,23 +1701,14 @@ class Parser:
         for entry in log_entries:
             text = entry.get_text()
             if 'chooses corporation' in text:
-                # Pattern: "PlayerName chooses corporation CorporationName"
-                # Updated to handle multi-word player names and corporation names
-                # Use greedy matching for corporation name to capture full names like "Cheung Shing Mars"
-                match = re.search(r'([A-Za-z][A-Za-z0-9\s_]+?) chooses corporation ([A-Za-z][A-Za-z0-9\s]+)(?:\s*\||$)', text)
+                # This pattern is more robust and handles Unicode characters in player names.
+                pattern = r'(.+?) chooses corporation ([A-Za-z][A-Za-z0-9\s]+)(?:\s*\||$)'
+                match = re.search(pattern, text)
                 if match:
                     player_name = match.group(1).strip()
                     corp_name = match.group(2).strip()
                     corporations[player_name] = corp_name
                     logger.info(f"Extracted corporation: {player_name} -> {corp_name}")
-                else:
-                    # Fallback pattern for simpler cases - also use greedy matching
-                    fallback_match = re.search(r'(\w+(?:\s+\w+)*) chooses corporation ([A-Za-z][A-Za-z0-9\s]+)', text)
-                    if fallback_match:
-                        player_name = fallback_match.group(1).strip()
-                        corp_name = fallback_match.group(2).strip()
-                        corporations[player_name] = corp_name
-                        logger.info(f"Extracted corporation (fallback): {player_name} -> {corp_name}")
         
         logger.info(f"Total corporations extracted: {corporations}")
         return corporations
