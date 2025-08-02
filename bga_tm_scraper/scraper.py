@@ -1910,7 +1910,31 @@ class TMScraper:
             dict: Dictionary with raw_datetime, parsed_datetime, and date_type, or None if not found
         """
         try:
-            # Pattern 1: Relative dates like "yesterday at 00:08"
+            # Pattern 1: Relative dates like "52 minutes ago" or "1 hour ago"
+            relative_ago_pattern = r'(\d+)\s+(minute|hour|day)s?\s+ago'
+            relative_ago_match = re.search(relative_ago_pattern, text.lower())
+
+            if relative_ago_match:
+                value = int(relative_ago_match.group(1))
+                unit = relative_ago_match.group(2)
+                
+                delta = timedelta()
+                if unit == 'minute':
+                    delta = timedelta(minutes=value)
+                elif unit == 'hour':
+                    delta = timedelta(hours=value)
+                elif unit == 'day':
+                    delta = timedelta(days=value)
+                
+                parsed_datetime = datetime.now() - delta
+                
+                return {
+                    'raw_datetime': text,
+                    'parsed_datetime': parsed_datetime.isoformat(),
+                    'date_type': 'relative_ago'
+                }
+
+            # Pattern 2: Relative dates like "yesterday at 00:08"
             relative_pattern = r'(yesterday|today)\s+at\s+(\d{1,2}:\d{2})'
             relative_match = re.search(relative_pattern, text.lower())
             
@@ -1939,7 +1963,7 @@ class TMScraper:
                     'date_type': 'relative'
                 }
             
-            # Pattern 2: Absolute dates like "2025-06-15 at 00:29"
+            # Pattern 3: Absolute dates like "2025-06-15 at 00:29"
             absolute_pattern = r'(\d{4}-\d{2}-\d{2})\s+at\s+(\d{1,2}:\d{2})'
             absolute_match = re.search(absolute_pattern, text)
             
@@ -1957,7 +1981,7 @@ class TMScraper:
                     'date_type': 'absolute'
                 }
             
-            # Pattern 3: Alternative absolute format like "15/06/2025 at 00:29"
+            # Pattern 4: Alternative absolute format like "15/06/2025 at 00:29"
             alt_absolute_pattern = r'(\d{1,2}/\d{1,2}/\d{4})\s+at\s+(\d{1,2}:\d{2})'
             alt_absolute_match = re.search(alt_absolute_pattern, text)
             
@@ -1985,7 +2009,7 @@ class TMScraper:
                     'date_type': 'absolute'
                 }
             
-            # Pattern 4: Just time like "00:08" (assume today)
+            # Pattern 5: Just time like "00:08" (assume today)
             time_only_pattern = r'\b(\d{1,2}:\d{2})\b'
             time_only_match = re.search(time_only_pattern, text)
             

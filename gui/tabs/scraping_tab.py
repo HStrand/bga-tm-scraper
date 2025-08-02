@@ -824,10 +824,18 @@ class ScrapingTab:
                 
                 try:
                     # Scrape table only (in memory)
-                    result = scraper.scrape_table_only_memory(table_id, player_id)
+                    result = scraper.scrape_table_only(table_id, player_id, save_raw=False)
                     
                     if result and result.get('success'):
                         game_mode = result.get('game_mode', 'Normal mode')
+                        # Fallback to table date if game history date is invalid
+                        if not game_info.get('parsed_datetime'):
+                            table_date_info = result.get('game_date_info')
+                            if table_date_info:
+                                game_info['raw_datetime'] = table_date_info.get('raw_datetime', 'unknown')
+                                game_info['parsed_datetime'] = table_date_info.get('parsed_datetime')
+                                self.frame.after(0, lambda tid=table_id: 
+                                               self.log_message(f"ℹ️ Used fallback date for game {tid}"))
                         elo_data = result.get('elo_data', {})
                         version = result.get('version')
                         
