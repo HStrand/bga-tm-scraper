@@ -138,18 +138,24 @@ class APIClient:
             logger.error(f"Error getting indexed games for player {player_id}: {e}")
             return []
     
-    def update_single_game(self, game_data: Dict[str, Any]) -> bool:
+    def update_single_game(self, game_data: Dict[str, Any], indexed_by_email: str = None) -> bool:
         """
         POST a single game's data to the API
         
         Args:
             game_data: Dictionary containing the single game data to upload
+            indexed_by_email: BGA email of the user who indexed this game
             
         Returns:
             bool: True if successful, False otherwise
         """
         try:
-            response = self._make_request("UpdateSingleGame", method="POST", data=game_data)
+            # Add indexedBy parameter if email is provided
+            params = {}
+            if indexed_by_email:
+                params['indexedBy'] = indexed_by_email
+            
+            response = self._make_request("UpdateSingleGame", method="POST", data=game_data, params=params)
             
             if response is not None:
                 logger.info(f"Successfully updated single game {game_data.get('table_id')} for player {game_data.get('player_perspective')}")

@@ -1589,54 +1589,15 @@ class TMScraper:
                     'limit_reached': True
                 }
             
-            # Check for authentication errors - but first check if it's actually a daily limit issue
-            if 'must be logged' in page_source.lower() or 'fatalerror' in page_source.lower():
-                # Before trying to re-authenticate, check if this is actually a daily limit issue
-                # Sometimes BGA shows auth errors when the daily limit is reached
-                if self._check_replay_limit_reached(page_source):
-                    logger.warning(f"Daily replay limit reached (detected via auth error page) when accessing {url}")
-                    print("🚫 Daily replay limit reached!")
-                    print("   BGA sometimes shows authentication errors when the daily limit is reached.")
-                    print("   Please try again tomorrow or wait for the limit to reset.")
-                    return {
-                        'replay_id': replay_id,
-                        'url': url,
-                        'scraped_at': datetime.now().isoformat(),
-                        'error': 'replay_limit_reached',
-                        'limit_reached': True
-                    }
-                
-                logger.warning("Authentication error detected, attempting re-authentication...")
-                print("⚠️  Session expired! Attempting to re-authenticate...")
-                
-                # Try to re-authenticate using session or fallback to manual
-                if not self.refresh_authentication():
-                    print("❌ Authentication refresh failed")
+            # Check for authentication errors with retry logic
+            if self._is_authentication_error(page_source):
+                if not self._handle_authentication_error_with_retry(url):
+                    logger.error(f"Authentication failed permanently for {url}")
+                    print(f"❌ Authentication failed permanently for replay {replay_id}")
                     return None
                 
-                # Retry the replay page
-                print(f"Retrying replay page: {url}")
-                self.driver.get(url)
-                time.sleep(5)
-                
-                # Check again
+                # After successful re-authentication, get the fresh page source
                 page_source = self.driver.page_source
-                if 'must be logged' in page_source.lower() or 'fatalerror' in page_source.lower():
-                    # Check one more time if this is a daily limit issue after retry
-                    if self._check_replay_limit_reached(page_source):
-                        logger.warning(f"Daily replay limit reached (detected after retry) when accessing {url}")
-                        print("🚫 Daily replay limit reached after retry!")
-                        return {
-                            'replay_id': replay_id,
-                            'url': url,
-                            'scraped_at': datetime.now().isoformat(),
-                            'error': 'replay_limit_reached',
-                            'limit_reached': True
-                        }
-                    print("❌ Authentication failed even after re-authentication")
-                    return None
-                else:
-                    print("✅ Re-authentication successful!")
             
             if 'fatal error' in page_source.lower() and 'must be logged' not in page_source.lower():
                 print("❌ Fatal error on page - replay might not be accessible")
@@ -1949,7 +1910,31 @@ class TMScraper:
             dict: Dictionary with raw_datetime, parsed_datetime, and date_type, or None if not found
         """
         try:
-            # Pattern 1: Relative dates like "yesterday at 00:08"
+            # Pattern 1: Relative dates like "52 minutes ago" or "1 hour ago"
+            relative_ago_pattern = r'(\d+)\s+(minute|hour|day)s?\s+ago'
+            relative_ago_match = re.search(relative_ago_pattern, text.lower())
+
+            if relative_ago_match:
+                value = int(relative_ago_match.group(1))
+                unit = relative_ago_match.group(2)
+                
+                delta = timedelta()
+                if unit == 'minute':
+                    delta = timedelta(minutes=value)
+                elif unit == 'hour':
+                    delta = timedelta(hours=value)
+                elif unit == 'day':
+                    delta = timedelta(days=value)
+                
+                parsed_datetime = datetime.now() - delta
+                
+                return {
+                    'raw_datetime': text,
+                    'parsed_datetime': parsed_datetime.isoformat(),
+                    'date_type': 'relative_ago'
+                }
+
+            # Pattern 2: Relative dates like "yesterday at 00:08"
             relative_pattern = r'(yesterday|today)\s+at\s+(\d{1,2}:\d{2})'
             relative_match = re.search(relative_pattern, text.lower())
             
@@ -1978,7 +1963,7 @@ class TMScraper:
                     'date_type': 'relative'
                 }
             
-            # Pattern 2: Absolute dates like "2025-06-15 at 00:29"
+            # Pattern 3: Absolute dates like "2025-06-15 at 00:29"
             absolute_pattern = r'(\d{4}-\d{2}-\d{2})\s+at\s+(\d{1,2}:\d{2})'
             absolute_match = re.search(absolute_pattern, text)
             
@@ -1996,7 +1981,7 @@ class TMScraper:
                     'date_type': 'absolute'
                 }
             
-            # Pattern 3: Alternative absolute format like "15/06/2025 at 00:29"
+            # Pattern 4: Alternative absolute format like "15/06/2025 at 00:29"
             alt_absolute_pattern = r'(\d{1,2}/\d{1,2}/\d{4})\s+at\s+(\d{1,2}:\d{2})'
             alt_absolute_match = re.search(alt_absolute_pattern, text)
             
@@ -2024,7 +2009,7 @@ class TMScraper:
                     'date_type': 'absolute'
                 }
             
-            # Pattern 4: Just time like "00:08" (assume today)
+            # Pattern 5: Just time like "00:08" (assume today)
             time_only_pattern = r'\b(\d{1,2}:\d{2})\b'
             time_only_match = re.search(time_only_pattern, text)
             
@@ -2304,16 +2289,24 @@ class TMScraper:
             finally:
                 self.requests_session = None
 
-    def refresh_authentication(self) -> bool:
+    def refresh_authentication(self, max_retries: int = 3, retry_delay: int = 2) -> bool:
         """
-        Refresh authentication when session expires
+        Refresh authentication with retry logic when session expires
         
+        Args:
+            max_retries: Maximum number of retries for authentication
+            retry_delay: Delay between retries in seconds
+            
         Returns:
             bool: True if refresh successful, False otherwise
         """
-        if self.session:
-            logger.info("Refreshing session authentication...")
-            print("🔄 Refreshing authentication...")
+        if not self.session:
+            logger.warning("No session available for refresh, falling back to manual login")
+            return self.login_to_bga()
+
+        for attempt in range(max_retries):
+            logger.info(f"Refreshing session authentication (attempt {attempt + 1}/{max_retries})...")
+            print(f"🔄 Refreshing authentication (attempt {attempt + 1}/{max_retries})...")
             
             try:
                 if self.session.refresh_authentication():
@@ -2321,16 +2314,61 @@ class TMScraper:
                     print("✅ Authentication refreshed successfully!")
                     return True
                 else:
-                    print("❌ Authentication refresh failed")
-                    return False
+                    logger.warning(f"Authentication refresh failed on attempt {attempt + 1}")
+                    if attempt < max_retries - 1:
+                        time.sleep(retry_delay * (attempt + 1))  # Exponential backoff
             except Exception as e:
-                logger.error(f"Error refreshing authentication: {e}")
-                print(f"❌ Error refreshing authentication: {e}")
-                return False
-        else:
-            logger.warning("No session available for refresh")
-            print("⚠️  No session available - falling back to manual login")
-            return self.login_to_bga()
+                logger.error(f"Error refreshing authentication on attempt {attempt + 1}: {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay * (attempt + 1))
+
+        print("❌ Authentication refresh failed after multiple retries")
+        return False
+
+    def _is_authentication_error(self, page_source: str) -> bool:
+        """Check if the page source indicates an authentication error"""
+        page_content = page_source.lower()
+        return 'must be logged' in page_content or 'fatalerror' in page_content
+
+    def _handle_authentication_error_with_retry(self, url: str, max_retries: int = 3, retry_delay: int = 5) -> bool:
+        """
+        Handle authentication errors with a retry mechanism
+        
+        Args:
+            url: The URL that failed
+            max_retries: Maximum number of retries
+            retry_delay: Delay between retries in seconds
+            
+        Returns:
+            bool: True if authentication was successful, False otherwise
+        """
+        for attempt in range(max_retries):
+            logger.warning(f"Authentication error detected on attempt {attempt + 1}/{max_retries}, attempting re-authentication...")
+            print(f"⚠️  Session expired! Attempting to re-authenticate (attempt {attempt + 1}/{max_retries})...")
+            
+            # Perform authentication refresh
+            if self.refresh_authentication():
+                # Retry the original URL
+                print(f"Retrying replay page: {url}")
+                self.driver.get(url)
+                
+                # Wait for page to load
+                time.sleep(self.speed_settings.get('page_load_delay', 2))
+                
+                # Check if authentication is now successful
+                page_source = self.driver.page_source
+                if not self._is_authentication_error(page_source):
+                    print("✅ Re-authentication successful!")
+                    return True
+                else:
+                    logger.warning(f"Authentication still failed after successful refresh on attempt {attempt + 1}")
+            
+            # If we are here, re-authentication failed or the page still shows an error
+            if attempt < max_retries - 1:
+                print(f"Waiting {retry_delay}s before next retry...")
+                time.sleep(retry_delay)
+        
+        return False
     
     def _check_replay_limit_reached(self, page_source: str) -> bool:
         """
