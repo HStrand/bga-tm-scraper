@@ -824,7 +824,7 @@ class ScrapingTab:
                 
                 try:
                     # Scrape table only (in memory)
-                    result = scraper.scrape_table_only(table_id, player_id, save_raw=False)
+                    result = scraper.scrape_table_only_memory(table_id, player_id)
                     
                     if result and result.get('success'):
                         game_mode = result.get('game_mode', 'Normal mode')
