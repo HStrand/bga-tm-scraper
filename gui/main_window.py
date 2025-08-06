@@ -389,18 +389,9 @@ class MainWindow:
     
     def show_about(self):
         """Show about dialog"""
-        about_text = """BGA TM Scraper v1.0
+        about_text = """Terraforming Mars gamelog scraper for Board Game Arena
 
-A desktop GUI application for scraping and managing 
-Terraforming Mars game data from BoardGameArena.
-
-Features:
-• Automated game data collection
-• Progress tracking and statistics
-• Data download and management
-• User-friendly interface
-
-Built with Python and Tkinter"""
+Made by StrandedKnight with contributions and help from the community in the hodgepodge Discord"""
         
         messagebox.showinfo("About BGA TM Scraper", about_text)
     

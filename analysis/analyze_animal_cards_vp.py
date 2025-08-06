@@ -85,11 +85,13 @@ def calculate_plants_denied(moves, move_index, player_id, card_name, reduction_v
     
     return plants_denied_opponent, plants_denied_self
 
-def calculate_predators_stolen_vp(moves, player_id):
+def calculate_predators_stolen_vp(moves, player_id, game_data):
     """
-    Calculate the total VP stolen by a player using the Predators card.
+    Calculate the VP stolen by a player using the Predators card.
+    Returns (stolen_vp_from_opponent, stolen_vp_from_self).
     """
-    stolen_vp = 0
+    stolen_vp_from_opponent = 0
+    stolen_vp_from_self = 0
     player_name = None
 
     # First, find the player's name
@@ -99,7 +101,14 @@ def calculate_predators_stolen_vp(moves, player_id):
             break
     
     if not player_name:
-        return 0
+        return 0, 0
+
+    # Get cards played by each player
+    players = game_data.get('players', {})
+    cards_played_by_player = {}
+    for pid, player_info in players.items():
+        cards_played = player_info.get('cards_played', [])
+        cards_played_by_player[pid] = cards_played
 
     for move in moves:
         description = move.get('description', '')
@@ -111,9 +120,34 @@ def calculate_predators_stolen_vp(moves, player_id):
                 source_part = parts[0]
                 for source, vp in STOLEN_ANIMAL_VP.items():
                     if source in source_part:
-                        stolen_vp += vp
+                        # Determine if the stolen card was played by self or opponent
+                        stolen_from_self = False
+                        stolen_from_opponent = False
+                        
+                        # Check if current player has this card type
+                        if source in cards_played_by_player.get(player_id, []):
+                            stolen_from_self = True
+                        
+                        # Check if any opponent has this card type
+                        for pid, cards in cards_played_by_player.items():
+                            if pid != player_id and source in cards:
+                                stolen_from_opponent = True
+                                break
+                        
+                        # If both players have the card, we need to make a decision
+                        # In this case, we'll assume it's stolen from opponent (more common scenario)
+                        if stolen_from_self and stolen_from_opponent:
+                            stolen_vp_from_opponent += vp
+                        elif stolen_from_self and not stolen_from_opponent:
+                            stolen_vp_from_self += vp
+                        elif stolen_from_opponent and not stolen_from_self:
+                            stolen_vp_from_opponent += vp
+                        # If neither player has the card in cards_played, default to opponent
+                        else:
+                            stolen_vp_from_opponent += vp
                         break
-    return stolen_vp
+    
+    return stolen_vp_from_opponent, stolen_vp_from_self
 
 def process_game_for_animal_vp(file_path):
     """
@@ -154,6 +188,17 @@ def process_game_for_animal_vp(file_path):
             player_info = players.get(player_id, {})
             player_name = player_info.get('player_name', 'Unknown')
             corporation = player_info.get('corporation', 'Unknown')
+
+            # Get player and opponent Elo
+            elo_data = player_info.get('elo_data')
+            player_elo = elo_data.get('game_rank') if elo_data else None
+            opponent_elo = None
+            if len(players) == 2:
+                opponent_id = next((pid for pid in players if pid != player_id), None)
+                if opponent_id:
+                    opponent_info = players.get(opponent_id, {})
+                    opponent_elo_data = opponent_info.get('elo_data')
+                    opponent_elo = opponent_elo_data.get('game_rank') if opponent_elo_data else None
             
             # Check if details exist
             details = vp_data.get('details')
@@ -177,8 +222,11 @@ def process_game_for_animal_vp(file_path):
                         stolen_vp = 0
 
                         # If the card is Predators, calculate stolen VP
+                        stolen_vp_from_opponent = 0
+                        stolen_vp_from_self = 0
                         if animal_card == "Predators":
-                            stolen_vp = calculate_predators_stolen_vp(game_data.get('moves', []), player_id)
+                            stolen_vp_from_opponent, stolen_vp_from_self = calculate_predators_stolen_vp(
+                                game_data.get('moves', []), player_id, game_data)
                         
                         plants_denied_opponent = 0
                         plants_denied_self = 0
@@ -195,12 +243,15 @@ def process_game_for_animal_vp(file_path):
                         animal_vp_data.append({
                             'card_name': animal_card,
                             'vp': vp_value,
-                            'stolen_vp': stolen_vp,
+                            'stolen_vp_from_opponent': stolen_vp_from_opponent,
+                            'stolen_vp_from_self': stolen_vp_from_self,
                             'plants_denied_opponent': plants_denied_opponent,
                             'plants_denied_self': plants_denied_self,
                             'player_id': player_id,
                             'player_name': player_name,
                             'corporation': corporation,
+                            'player_elo': player_elo,
+                            'opponent_elo': opponent_elo,
                             'replay_id': game_data.get('replay_id', 'unknown'),
                             'game_date': game_data.get('game_date', 'unknown')
                         })
@@ -224,8 +275,6 @@ def find_all_game_files(data_dir):
     
     # Look for all JSON files in player subdirectories
     for player_dir in data_path.iterdir():
-        if "86296239" in str(player_dir):
-            continue
 
         if player_dir.is_dir() and player_dir.name.isdigit():
             for game_file in player_dir.glob("*.json"):
@@ -250,12 +299,14 @@ def analyze_animal_cards_vp(data_dir):
     # Data structures for aggregation
     card_stats = defaultdict(lambda: {
         'total_vp': 0,
-        'total_stolen_vp': 0,
+        'total_stolen_vp_from_opponent': 0,
+        'total_stolen_vp_from_self': 0,
         'total_plants_denied_opponent': 0,
         'total_plants_denied_self': 0,
         'times_played': 0,
         'vp_values': [],
-        'stolen_vp_values': [],
+        'stolen_vp_from_opponent_values': [],
+        'stolen_vp_from_self_values': [],
         'plants_denied_opponent_values': [],
         'plants_denied_self_values': [],
         'instances': []
@@ -276,7 +327,8 @@ def analyze_animal_cards_vp(data_dir):
             for animal_data in animal_vp_data:
                 card_name = animal_data['card_name']
                 vp_value = animal_data['vp']
-                stolen_vp = animal_data.get('stolen_vp', 0)
+                stolen_vp_from_opponent = animal_data.get('stolen_vp_from_opponent', 0)
+                stolen_vp_from_self = animal_data.get('stolen_vp_from_self', 0)
                 plants_denied_opponent = animal_data.get('plants_denied_opponent', 0)
                 plants_denied_self = animal_data.get('plants_denied_self', 0)
                 
@@ -286,9 +338,13 @@ def analyze_animal_cards_vp(data_dir):
                 card_stats[card_name]['vp_values'].append(vp_value)
                 card_stats[card_name]['instances'].append(animal_data)
 
-                if stolen_vp > 0:
-                    card_stats[card_name]['total_stolen_vp'] += stolen_vp
-                    card_stats[card_name]['stolen_vp_values'].append(stolen_vp)
+                if stolen_vp_from_opponent > 0:
+                    card_stats[card_name]['total_stolen_vp_from_opponent'] += stolen_vp_from_opponent
+                    card_stats[card_name]['stolen_vp_from_opponent_values'].append(stolen_vp_from_opponent)
+
+                if stolen_vp_from_self > 0:
+                    card_stats[card_name]['total_stolen_vp_from_self'] += stolen_vp_from_self
+                    card_stats[card_name]['stolen_vp_from_self_values'].append(stolen_vp_from_self)
                 
                 if plants_denied_opponent > 0:
                     card_stats[card_name]['total_plants_denied_opponent'] += plants_denied_opponent
@@ -316,7 +372,8 @@ def analyze_animal_cards_vp(data_dir):
     for card_name, stats in card_stats.items():
         if stats['times_played'] > 0:
             avg_vp = stats['total_vp'] / stats['times_played']
-            avg_stolen_vp = stats['total_stolen_vp'] / stats['times_played'] if stats['times_played'] > 0 else 0
+            avg_stolen_vp_from_opponent = stats['total_stolen_vp_from_opponent'] / stats['times_played'] if stats['times_played'] > 0 else 0
+            avg_stolen_vp_from_self = stats['total_stolen_vp_from_self'] / stats['times_played'] if stats['times_played'] > 0 else 0
             avg_plants_denied_opponent = stats['total_plants_denied_opponent'] / stats['times_played'] if stats['times_played'] > 0 else 0
             avg_plants_denied_self = stats['total_plants_denied_self'] / stats['times_played'] if stats['times_played'] > 0 else 0
             
@@ -331,7 +388,8 @@ def analyze_animal_cards_vp(data_dir):
                 'times_played': stats['times_played'],
                 'total_vp': stats['total_vp'],
                 'avg_vp': avg_vp,
-                'avg_stolen_vp': avg_stolen_vp,
+                'avg_stolen_vp_from_opponent': avg_stolen_vp_from_opponent,
+                'avg_stolen_vp_from_self': avg_stolen_vp_from_self,
                 'avg_plants_denied_opponent': avg_plants_denied_opponent,
                 'avg_plants_denied_self': avg_plants_denied_self,
                 'min_vp': min_vp,
@@ -364,7 +422,11 @@ def display_results(card_results):
     print("-" * 180)
     
     for rank, (card_name, stats) in enumerate(sorted_cards, 1):
-        avg_stolen_vp_str = f"{stats.get('avg_stolen_vp', 0):.2f}" if card_name == "Predators" else "-"
+        if card_name == "Predators":
+            total_stolen = stats.get('avg_stolen_vp_from_opponent', 0) + stats.get('avg_stolen_vp_from_self', 0)
+            avg_stolen_vp_str = f"{total_stolen:.2f}"
+        else:
+            avg_stolen_vp_str = "-"
         avg_plants_denied_opponent_str = f"{stats.get('avg_plants_denied_opponent', 0):.2f}" if card_name in PLANT_REDUCTION_CARDS else "-"
         avg_plants_denied_self_str = f"{stats.get('avg_plants_denied_self', 0):.2f}" if card_name in PLANT_REDUCTION_CARDS else "-"
         print(f"{rank:<4} {card_name:<18} {stats['times_played']:<12} "
@@ -393,8 +455,9 @@ def save_detailed_results_to_csv(all_animal_data, output_file):
         return
     
     try:
-        fieldnames = ['card_name', 'vp', 'stolen_vp', 'plants_denied_opponent', 'plants_denied_self', 
-                     'player_id', 'player_name', 'corporation', 'replay_id', 'game_date']
+        fieldnames = ['card_name', 'vp', 'stolen_vp_from_opponent', 'stolen_vp_from_self', 'plants_denied_opponent', 'plants_denied_self',
+                     'player_id', 'player_name', 'corporation', 'player_elo', 'opponent_elo', 
+                     'replay_id', 'game_date']
         
         with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames, quoting=csv.QUOTE_ALL)
@@ -420,7 +483,7 @@ def save_card_summary_to_csv(card_results, output_file):
     
     try:
         fieldnames = ['card_name', 'times_played', 'total_vp', 'avg_vp', 
-                     'avg_stolen_vp', 'avg_plants_denied_opponent', 'avg_plants_denied_self', 
+                     'avg_stolen_vp_from_opponent', 'avg_stolen_vp_from_self', 'avg_plants_denied_opponent', 'avg_plants_denied_self', 
                      'min_vp', 'max_vp', 'std_dev']
         
         with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
@@ -438,7 +501,8 @@ def save_card_summary_to_csv(card_results, output_file):
                     'times_played': stats['times_played'],
                     'total_vp': stats['total_vp'],
                     'avg_vp': round(stats['avg_vp'], 4),
-                    'avg_stolen_vp': round(stats.get('avg_stolen_vp', 0), 4),
+                    'avg_stolen_vp_from_opponent': round(stats.get('avg_stolen_vp_from_opponent', 0), 4),
+                    'avg_stolen_vp_from_self': round(stats.get('avg_stolen_vp_from_self', 0), 4),
                     'avg_plants_denied_opponent': round(stats.get('avg_plants_denied_opponent', 0), 4),
                     'avg_plants_denied_self': round(stats.get('avg_plants_denied_self', 0), 4),
                     'min_vp': stats['min_vp'],
@@ -458,8 +522,8 @@ def main():
     script_dir = Path(__file__).parent
     project_root = script_dir.parent
     data_dir = project_root / "data" / "parsed"
-    detailed_output_file = script_dir / "animal_cards_vp_detailed.csv"
-    summary_output_file = script_dir / "animal_cards_vp_summary.csv"
+    detailed_output_file = script_dir / "data" / "animal_cards_vp_detailed.csv"
+    summary_output_file = script_dir / "data" / "animal_cards_vp_summary.csv"
     
     print("Terraforming Mars - Animal Cards VP Analysis")
     print("=" * 50)
