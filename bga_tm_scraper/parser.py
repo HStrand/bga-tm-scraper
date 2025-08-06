@@ -1839,8 +1839,13 @@ class Parser:
                 card_id = card.get('id', '')
                 if 'corp' in card_id:
                     corporations.append(card_name)
+                    
                 elif 'prelude' in card_id:
                     preludes.append(card_name)
+
+                elif 'stanproj' in card_id:
+                    continue
+
                 else:
                     project_cards.append(card_name)
             
