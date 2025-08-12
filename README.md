@@ -5,6 +5,13 @@ A comprehensive Python tool for scraping and analyzing Terraforming Mars game da
 ## 🚀 Quick Start
 
 ### Desktop GUI (Recommended for most users)
+
+![Desktop GUI Screenshot](assets/scraper_screenshot.png)
+
+#### **Windows Executable Download**
+For Windows users who prefer not to install Python, you can download the latest pre-built executable from the [releases page](https://github.com/HStrand/bga-tm-scraper/releases/latest). Simply download the `.exe` file and run it directly - no installation required!
+
+#### **Python Installation**
 ```bash
 pip install -r requirements_gui.txt
 python gui_main.py
