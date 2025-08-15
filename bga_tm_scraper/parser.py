@@ -809,6 +809,7 @@ class Parser:
             # Map IDs to names and compute per-player card options (draws and drafts)
             card_options_map: Optional[Dict[str, List[str]]] = None
             card_drafted_name: Optional[str] = None
+            draft_desc_text: Optional[str] = None
             try:
                 # Collect per-player draft draws and normal draws separately
                 per_player_draft_ids: Dict[str, List[str]] = {}
@@ -843,6 +844,44 @@ class Parser:
                                                 per_player_draw_ids.setdefault(pid, []).extend(ids)
                                             if isinstance(args.get('player_name'), str) and pid != "unknown":
                                                 per_player_names[pid] = args.get('player_name')
+                                        # Also capture individual token arrivals to a draft area as options (no list provided)
+                                        tok_id = args.get('token_id')
+                                        if isinstance(place_tag, str) and str(place_tag).lower().startswith('draft_') and isinstance(tok_id, str):
+                                            per_player_draft_ids.setdefault(pid, []).append(tok_id)
+                                            if isinstance(args.get('player_name'), str) and pid != "unknown":
+                                                per_player_names[pid] = args.get('player_name')
+                # Merge newPrivateState draft targets into per_player_draft_ids for this move
+                try:
+                    if gamelogs:
+                        data_entries = gamelogs.get('data', {}).get('data', [])
+                        for entry in data_entries:
+                            if entry.get('move_id') == str(move_number):
+                                entry_data = entry.get('data', [])
+                                if isinstance(entry_data, list):
+                                    for data_item in entry_data:
+                                        if isinstance(data_item, dict) and data_item.get('type') == 'newPrivateState':
+                                            nps_args = data_item.get('args', {}) or {}
+                                            inner = nps_args.get('args', {}) if isinstance(nps_args.get('args', {}), dict) else {}
+                                            player_operations = inner.get('player_operations', {})
+                                            if isinstance(player_operations, dict):
+                                                for pid_key, pop in player_operations.items():
+                                                    if not isinstance(pop, dict):
+                                                        continue
+                                                    operations = pop.get('operations', {})
+                                                    if isinstance(operations, dict):
+                                                        for op in operations.values():
+                                                            if not isinstance(op, dict):
+                                                                continue
+                                                            otype = op.get('type') or op.get('typeexpr')
+                                                            if otype == 'draft':
+                                                                targ = op.get('args', {}).get('target', [])
+                                                                if isinstance(targ, list):
+                                                                    ids = [tid for tid in targ if isinstance(tid, str)]
+                                                                    if ids:
+                                                                        per_player_draft_ids.setdefault(str(pid_key), []).extend(ids)
+                except Exception:
+                    pass
+
                 # Build unified card_options map (player_id -> list of names) from both sources
                 if card_names_map and (per_player_draft_ids or per_player_draw_ids):
                     card_options: Dict[str, List[str]] = {}
@@ -857,7 +896,9 @@ class Parser:
                         names = [card_names_map.get(tid) for tid in ids]
                         names = [n for n in names if isinstance(n, str) and n.strip()]
                         if names:
-                            card_options.setdefault(pid, []).extend(names)
+                            # dedupe preserving order
+                            deduped = list(dict.fromkeys(names))
+                            card_options.setdefault(pid, []).extend(deduped)
                     if card_options:
                         card_options_map = card_options
                         # Override description to map per-player actions clearly
@@ -869,6 +910,8 @@ class Parser:
                             for pid, ids in source.items():
                                 names = [card_names_map.get(tid) for tid in ids]
                                 names = [n for n in names if isinstance(n, str) and n.strip()]
+                                # dedupe for description as well
+                                names = list(dict.fromkeys(names))
                                 pname = per_player_names.get(pid) or id_to_name.get(pid, f"Player_{pid}")
                                 verb = "drafts" if source is per_player_draft_ids else "draws"
                                 if len(names) == 1:
@@ -902,13 +945,22 @@ class Parser:
                                         args = data_item.get('args', {}) or {}
                                         place_tag = str(args.get('place_id', '') or args.get('place_name', '')).lower()
                                         token_id = args.get('token_id')
-                                        # Choose robust draft selection detection:
+                                        # Choose robust draft selection detection scoped to this move's player:
                                         # - log contains 'draft' OR destination looks like draw_*
-                                        if token_id and ('draft' in log_txt or place_tag.startswith('draw_')):
+                                        # - args.player_id matches the resolved player_id for this move
+                                        sel_pid = str(args.get('player_id')) if args.get('player_id') is not None else "unknown"
+                                        if token_id and (('draft' in log_txt) or place_tag.startswith('draw_')) and sel_pid == str(player_id):
                                             if token_id in card_names_map:
                                                 card_drafted_name = card_names_map[token_id]
                                             else:
                                                 card_drafted_name = token_id
+                                            # Prepare precise description from this data item log
+                                            try:
+                                                log_template = data_item.get('log') or ''
+                                                if isinstance(log_template, str) and card_drafted_name:
+                                                    draft_desc_text = re.sub(r'\$\{token_name\}', card_drafted_name, log_template)
+                                            except Exception:
+                                                pass
                                             # Normalize action_type and mark reason if not already present
                                             if action_type in ('other', 'draw', 'draft_card'):
                                                 action_type = 'draft'
@@ -922,6 +974,16 @@ class Parser:
             except Exception as map_err:
                 logger.debug(f"Move {move_number}: mapping card IDs to names failed: {map_err}")
             
+            # Prefer specific draft selection description when available
+            try:
+                if card_drafted_name:
+                    if isinstance(draft_desc_text, str) and draft_desc_text.strip():
+                        full_description = draft_desc_text.strip()
+                    else:
+                        full_description = f"{player_name} drafts {card_drafted_name}"
+            except Exception:
+                pass
+
             move = Move(
                 move_number=move_number,
                 timestamp=timestamp,
@@ -949,49 +1011,48 @@ class Parser:
             return "Unknown", "unknown"
         
         try:
-            # Find the move entry in gamelogs
+            # Find all entries for this move in gamelogs (across all channels)
             data_entries = gamelogs.get('data', {}).get('data', [])
-            move_entry = None
-            
-            for entry in data_entries:
-                if entry.get('move_id') == str(move_number):
-                    move_entry = entry
-                    break
-            
-            if not move_entry:
+            move_entries = [entry for entry in data_entries if entry.get('move_id') == str(move_number)]
+
+            if not move_entries:
                 logger.debug(f"No gamelogs entry found for move {move_number}")
                 return "Unknown", "unknown"
-            
-            # Check the first data item in the move for player information
-            move_data = move_entry.get('data', [])
-            if not move_data:
-                logger.debug(f"No data found in gamelogs for move {move_number}")
+
+            # Search through all data items to find a player_id/active_player
+            found_player_id: Optional[str] = None
+            for entry in move_entries:
+                move_data = entry.get('data', [])
+                if not isinstance(move_data, list):
+                    continue
+                for data_item in move_data:
+                    if not isinstance(data_item, dict):
+                        continue
+                    args = data_item.get('args', {}) or {}
+                    if 'active_player' in args:
+                        found_player_id = str(args['active_player'])
+                        logger.debug(f"Move {move_number}: Found active_player = {found_player_id}")
+                        break
+                    if 'player_id' in args:
+                        found_player_id = str(args['player_id'])
+                        logger.debug(f"Move {move_number}: Found player_id = {found_player_id}")
+                        break
+                if found_player_id:
+                    break
+
+            if not found_player_id:
+                logger.debug(f"Move {move_number}: No player ID found in gamelogs args across entries")
                 return "Unknown", "unknown"
-            
-            # Get the first data item (usually contains the main action)
-            first_data_item = move_data[0]
-            args = first_data_item.get('args', {})
-            
-            # Check for active_player first (preferred)
-            if 'active_player' in args:
-                player_id = str(args['active_player'])
-                logger.debug(f"Move {move_number}: Found active_player = {player_id}")
-            elif 'player_id' in args:
-                player_id = str(args['player_id'])
-                logger.debug(f"Move {move_number}: Found player_id = {player_id}")
-            else:
-                logger.debug(f"Move {move_number}: No player ID found in gamelogs args")
-                return None, None
-            
-            # Try to find the player name from the name_to_id mapping
+
+            # Map to name using provided mapping
             for player_name, mapped_id in name_to_id.items():
-                if mapped_id == player_id:
-                    logger.debug(f"Move {move_number}: Mapped player_id {player_id} to {player_name}")
-                    return player_name, player_id
-            
+                if mapped_id == found_player_id:
+                    logger.debug(f"Move {move_number}: Mapped player_id {found_player_id} to {player_name}")
+                    return player_name, found_player_id
+
             # If no mapping found, return the player_id as both name and id
-            logger.debug(f"Move {move_number}: No name mapping found for player_id {player_id}, using ID as name")
-            return f"Player_{player_id}", player_id
+            logger.debug(f"Move {move_number}: No name mapping found for player_id {found_player_id}, using ID as name")
+            return f"Player_{found_player_id}", found_player_id
             
         except Exception as e:
             logger.error(f"Error determining player from gamelogs for move {move_number}: {e}")
@@ -1088,7 +1149,16 @@ class Parser:
                                     card_id = card_list[0]
                                     card_played = card_id  # temporary store ID
                                     logger.debug(f"Move {move_number}: Detected card draw - {card_id}")
-                        
+                        elif 'token_id' in args:
+                            # Concrete draft selection (no list): e.g., "You draft ${token_name}" to draw_* area
+                            log_txt = (data_item.get('log') or '').lower()
+                            place_tag = str(args.get('place_id', '') or args.get('place_name', '')).lower()
+                            if 'draft' in log_txt or place_tag.startswith('draw_'):
+                                if action_type == 'other':
+                                    action_type = 'draft'
+                                if reason is None:
+                                    reason = 'draft'
+                                logger.debug(f"Move {move_number}: Detected draft selection token_id={args.get('token_id')}")
                         elif args.get('place_from') == 'hand' or 'hand' in args.get('place_from', ''):
                             # Card played from hand
                             action_type = 'play_card'
@@ -3000,7 +3070,232 @@ class Parser:
             if move:
                 moves.append(move)
         
+        # Augment with gamelogs-only moves that might be missing from HTML (e.g., opponent's channel)
+        try:
+            if gamelogs:
+                seen_move_numbers = {m.move_number for m in moves}
+                data_entries = gamelogs.get('data', {}).get('data', [])
+                gl_move_ids: List[int] = []
+                for entry in data_entries:
+                    mid = entry.get('move_id')
+                    if mid and str(mid).isdigit():
+                        try:
+                            gl_move_ids.append(int(mid))
+                        except ValueError:
+                            pass
+                for move_number in sorted(set(gl_move_ids)):
+                    if move_number not in seen_move_numbers:
+                        synthetic = self._build_move_from_gamelogs(move_number, name_to_id, gamelogs, card_names_map)
+                        if synthetic:
+                            moves.append(synthetic)
+                # Keep moves sorted by move number
+                moves.sort(key=lambda m: m.move_number)
+        except Exception as e:
+            logger.debug(f"Failed augmenting moves from gamelogs: {e}")
+        
         return moves
+
+    def _build_move_from_gamelogs(self, move_number: int, name_to_id: Dict[str, str], gamelogs: Dict[str, Any], card_names_map: Dict[str, str] = None) -> Optional[Move]:
+        """
+        Construct a Move purely from gamelogs when the HTML does not contain that move block.
+        Focuses on draft/draw actions and sets card_options and card_drafted accordingly.
+        """
+        try:
+            # Derive timestamp (HH:MM:SS) from the first entry with a time field for this move
+            timestamp = ""
+            data_entries = gamelogs.get('data', {}).get('data', [])
+            for entry in data_entries:
+                if entry.get('move_id') == str(move_number):
+                    t = entry.get('time')
+                    if t and str(t).isdigit():
+                        try:
+                            # Convert epoch seconds to HH:MM:SS (UTC)
+                            ts = datetime.utcfromtimestamp(int(t))
+                            timestamp = ts.strftime("%H:%M:%S")
+                            break
+                        except Exception:
+                            pass
+            
+            # Determine player based on gamelogs
+            player_name, player_id = self._determine_player_from_gamelogs(move_number, gamelogs, name_to_id)
+            if not player_name:
+                player_name = "Unknown"
+            if not player_id:
+                player_id = "unknown"
+            
+            # Extract action details using existing helper
+            action_type, card_played, tile_placed, tile_location, reason = self._extract_enhanced_action_details(
+                move_number, gamelogs, [], ""
+            )
+            
+            # Build per-player options (draft/draw) and drafted selection
+            card_options_map: Optional[Dict[str, List[str]]] = None
+            card_drafted_name: Optional[str] = None
+            draft_desc_text: Optional[str] = None
+            full_description = ""
+            try:
+                per_player_draft_ids: Dict[str, List[str]] = {}
+                per_player_draw_ids: Dict[str, List[str]] = {}
+                per_player_names: Dict[str, str] = {}
+                
+                # Aggregate tokenMoved events for this move across all channels
+                for entry in data_entries:
+                    if entry.get('move_id') != str(move_number):
+                        continue
+                    entry_data = entry.get('data', [])
+                    if not isinstance(entry_data, list):
+                        continue
+                    for data_item in entry_data:
+                        if not isinstance(data_item, dict):
+                            continue
+                        if data_item.get('type') == 'tokenMoved':
+                            args = data_item.get('args', {}) or {}
+                            place_tag = args.get('place_id', '') or args.get('place_name', '')
+                            pid = str(args.get('player_id')) if args.get('player_id') is not None else "unknown"
+                            # Collect options (list of token ids)
+                            if isinstance(args.get('list'), list):
+                                ids = [tid for tid in args.get('list') if isinstance(tid, str)]
+                                if isinstance(place_tag, str) and place_tag.lower().startswith('draft_'):
+                                    if ids:
+                                        per_player_draft_ids.setdefault(pid, []).extend(ids)
+                                else:
+                                    if ids:
+                                        per_player_draw_ids.setdefault(pid, []).extend(ids)
+                            # Also capture individual token arrivals to a draft area as options (no list provided)
+                            tok_id = args.get('token_id')
+                            if isinstance(place_tag, str) and place_tag.lower().startswith('draft_') and isinstance(tok_id, str):
+                                per_player_draft_ids.setdefault(pid, []).append(tok_id)
+                            # Track better player names
+                            if isinstance(args.get('player_name'), str) and pid != "unknown":
+                                per_player_names[pid] = args.get('player_name')
+                        # Detect a concrete drafted selection (token_id present)
+                        if isinstance(data_item, dict) and data_item.get('type') == 'tokenMoved':
+                            args = data_item.get('args', {}) or {}
+                            token_id = args.get('token_id')
+                            if token_id:
+                                log_txt = (data_item.get('log') or '').lower()
+                                place_tag = str(args.get('place_id', '') or args.get('place_name', '')).lower()
+                                sel_pid = str(args.get('player_id')) if args.get('player_id') is not None else "unknown"
+                                if (('draft' in log_txt) or place_tag.startswith('draw_')) and sel_pid == str(player_id):
+                                    if card_names_map and token_id in card_names_map:
+                                        card_drafted_name = card_names_map[token_id]
+                                    else:
+                                        card_drafted_name = token_id
+                                    # Prepare precise description from this data item log
+                                    try:
+                                        log_template = data_item.get('log') or ''
+                                        if isinstance(log_template, str) and card_drafted_name:
+                                            draft_desc_text = re.sub(r'\$\{token_name\}', card_drafted_name, log_template)
+                                    except Exception:
+                                        pass
+                                    if action_type in ('other', 'draw', 'draft_card'):
+                                        action_type = 'draft'
+                                    if not reason:
+                                        reason = 'draft'
+                
+                # Merge newPrivateState draft targets into per_player_draft_ids for this move
+                try:
+                    if gamelogs:
+                        for entry in data_entries:
+                            if entry.get('move_id') != str(move_number):
+                                continue
+                            entry_data = entry.get('data', [])
+                            if not isinstance(entry_data, list):
+                                continue
+                            for data_item in entry_data:
+                                if isinstance(data_item, dict) and data_item.get('type') == 'newPrivateState':
+                                    nps_args = data_item.get('args', {}) or {}
+                                    inner = nps_args.get('args', {}) if isinstance(nps_args.get('args', {}), dict) else {}
+                                    player_operations = inner.get('player_operations', {})
+                                    if isinstance(player_operations, dict):
+                                        for pid_key, pop in player_operations.items():
+                                            if not isinstance(pop, dict):
+                                                continue
+                                            operations = pop.get('operations', {})
+                                            if isinstance(operations, dict):
+                                                for op in operations.values():
+                                                    if not isinstance(op, dict):
+                                                        continue
+                                                    otype = op.get('type') or op.get('typeexpr')
+                                                    if otype == 'draft':
+                                                        targ = op.get('args', {}).get('target', [])
+                                                        if isinstance(targ, list):
+                                                            ids = [tid for tid in targ if isinstance(tid, str)]
+                                                            if ids:
+                                                                per_player_draft_ids.setdefault(str(pid_key), []).extend(ids)
+                except Exception:
+                    pass
+
+                # Build unified card_options from both sources
+                if card_names_map and (per_player_draft_ids or per_player_draw_ids):
+                    card_options: Dict[str, List[str]] = {}
+                    combined: Dict[str, List[str]] = {}
+                    for pid, ids in per_player_draw_ids.items():
+                        combined.setdefault(pid, []).extend(list(ids))
+                    for pid, ids in per_player_draft_ids.items():
+                        combined.setdefault(pid, []).extend(list(ids))
+                    for pid, ids in combined.items():
+                        names = [card_names_map.get(tid) for tid in ids]
+                        names = [n for n in names if isinstance(n, str) and n.strip()]
+                        if names:
+                            # dedupe preserving order
+                            deduped = list(dict.fromkeys(names))
+                            card_options.setdefault(pid, []).extend(deduped)
+                    if card_options:
+                        card_options_map = card_options
+                        # Create a description per player, preferring draft wording if present
+                        id_to_name = {mapped_id: pname for pname, mapped_id in name_to_id.items()}
+                        parts: List[str] = []
+                        source = per_player_draft_ids if per_player_draft_ids else per_player_draw_ids
+                        for pid, ids in source.items():
+                            names = [card_names_map.get(tid) for tid in ids]
+                            names = [n for n in names if isinstance(n, str) and n.strip()]
+                            # dedupe for description as well
+                            names = list(dict.fromkeys(names))
+                            pname = per_player_names.get(pid) or id_to_name.get(pid, f"Player_{pid}")
+                            verb = "drafts" if source is per_player_draft_ids else "draws"
+                            if len(names) == 1:
+                                parts.append(f"{pname} {verb} {names[0]}")
+                            elif len(names) > 1:
+                                parts.append(f"{pname} {verb} {len(names)} cards: {', '.join(names)}")
+                        full_description = " | ".join(parts)
+                        if source is per_player_draft_ids and action_type in ('other', 'draw', 'draft_card'):
+                            action_type = 'draft'
+                        if source is per_player_draw_ids and action_type == 'other':
+                            action_type = 'draw'
+                
+                # Prefer concrete drafted card description over options summary
+                if card_drafted_name:
+                    if isinstance(draft_desc_text, str) and draft_desc_text.strip():
+                        full_description = draft_desc_text.strip()
+                    else:
+                        full_description = f"{player_name} drafts {card_drafted_name}"
+                # If still empty, provide a generic based on action_type
+                if not full_description:
+                    full_description = f"{player_name} {action_type.replace('_', ' ')}"
+            
+            except Exception as map_err:
+                logger.debug(f"Move {move_number}: building from gamelogs mapping failed: {map_err}")
+                # Minimal fallback
+                full_description = f"{player_name} {action_type.replace('_', ' ')}"
+            
+            return Move(
+                move_number=move_number,
+                timestamp=timestamp,
+                player_id=player_id,
+                player_name=player_name,
+                action_type=action_type,
+                description=full_description,
+                card_played=None,
+                card_drafted=card_drafted_name,
+                tile_placed=None,
+                tile_location=None,
+                card_options=card_options_map,
+                reason=reason
+            )
+        except Exception as e:
+            logger.error(f"Error constructing synthetic move {move_number} from gamelogs: {e}")
+            return None
 
     def _build_game_states_simple(self, moves: List[Move], vp_progression: List[Dict[str, Any]], player_ids: List[str], gamelogs: Dict[str, Any] = None) -> List[Move]:
         """Build game states for each move with simple player ID list"""
