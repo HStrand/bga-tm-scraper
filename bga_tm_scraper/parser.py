@@ -1401,21 +1401,28 @@ class Parser:
                     # Look for counter updates with global parameter trackers
                     if data_item.get('type') == 'counter':
                         args = data_item.get('args', {})
-                        token_name = args.get('token_name', '')
+                        # For generation, use counter_name; for others, use token_name from token_div_count
+                        counter_name = args.get('counter_name', '')
+                        token_div_count = args.get('token_div_count', {})
+                        token_name = token_div_count.get('args', {}).get('token_name', '') if isinstance(token_div_count, dict) else ''
                         counter_value = args.get('counter_value')
                         
                         if counter_value is not None:
                             try:
                                 value = int(counter_value)
                                 
-                                # Map tracker names to parameters
-                                if token_name == 'tracker_t':  # Temperature
+                                # Map tracker names to parameters - check both counter_name and token_name
+                                tracker_name = counter_name or token_name
+                                if tracker_name == 'tracker_gen':  # Generation
+                                    move_changes['generation'] = value
+                                    logger.info(f"Move {move_number}: Found generation = {value}")
+                                elif tracker_name == 'tracker_t':  # Temperature
                                     move_changes['temperature'] = value
                                     logger.debug(f"Move {move_number}: Found temperature = {value}")
-                                elif token_name == 'tracker_o':  # Oxygen
+                                elif tracker_name == 'tracker_o':  # Oxygen
                                     move_changes['oxygen'] = value
                                     logger.debug(f"Move {move_number}: Found oxygen = {value}")
-                                elif token_name == 'tracker_w':  # Oceans
+                                elif tracker_name == 'tracker_w':  # Oceans
                                     move_changes['oceans'] = value
                                     logger.debug(f"Move {move_number}: Found oceans = {value}")
                                     
@@ -1505,12 +1512,6 @@ class Parser:
         
         # Process each move and build game state
         for i, move in enumerate(moves):
-            # Update generation
-            if 'New generation' in move.description:
-                gen_match = re.search(r'New generation (\d+)', move.description)
-                if gen_match:
-                    current_generation = int(gen_match.group(1))
-            
             # Update parameters from gamelogs data
             move_parameter_changes = parameter_changes_by_move.get(move.move_number, {})
             if move_parameter_changes:
@@ -1523,6 +1524,10 @@ class Parser:
                 if 'oceans' in move_parameter_changes:
                     current_oceans = move_parameter_changes['oceans']
                     logger.debug(f"Move {move.move_number}: Oceans updated to {current_oceans}")
+                if 'generation' in move_parameter_changes:
+                    current_generation = move_parameter_changes['generation']
+                    logger.debug(f"Move {move.move_number}: Generation updated to {current_generation}")
+                    logger.debug(f"Move {move.move_number}: Generation updated to {current_generation}")
             
             # Update milestone and award tracking
             if move.action_type == 'claim_milestone':
@@ -3466,12 +3471,6 @@ class Parser:
         
         # Process each move and build game state
         for i, move in enumerate(moves):
-            # Update generation
-            if 'New generation' in move.description:
-                gen_match = re.search(r'New generation (\d+)', move.description)
-                if gen_match:
-                    current_generation = int(gen_match.group(1))
-            
             # Update parameters from gamelogs data
             move_parameter_changes = parameter_changes_by_move.get(move.move_number, {})
             if move_parameter_changes:
@@ -3484,6 +3483,9 @@ class Parser:
                 if 'oceans' in move_parameter_changes:
                     current_oceans = move_parameter_changes['oceans']
                     logger.debug(f"Move {move.move_number}: Oceans updated to {current_oceans}")
+                if 'generation' in move_parameter_changes:
+                    current_generation = move_parameter_changes['generation']
+                    logger.debug(f"Move {move.move_number}: Generation updated to {current_generation}")
             
             # Update milestone and award tracking
             if move.action_type == 'claim_milestone':
