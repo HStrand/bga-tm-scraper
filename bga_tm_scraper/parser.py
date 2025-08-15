@@ -1150,11 +1150,14 @@ class Parser:
         Returns:
             Tuple of (action_type, card_played, tile_placed, tile_location, reason)
         """
+        reason_from_gamelogs = None
+
         # First try to extract from gamelogs
         if gamelogs:
             action_type, card_played, tile_placed, tile_location, reason = self._extract_action_details_from_gamelogs(
                 move_number, gamelogs
             )
+            reason_from_gamelogs = reason
             
             # If we got meaningful data from gamelogs, return it
             # Only short-circuit when we truly identified a specific action or the played card.
@@ -1167,7 +1170,7 @@ class Parser:
         card_played = self._extract_card_played(log_entries)
         tile_placed, tile_location = self._extract_tile_placement(log_entries)
         
-        return action_type, card_played, tile_placed, tile_location, None
+        return action_type, card_played, tile_placed, tile_location, reason_from_gamelogs
     
     def _extract_action_details_from_gamelogs(self, move_number: int, gamelogs: Dict[str, Any]) -> Tuple[str, Optional[str], Optional[str], Optional[str], Optional[str]]:
         """Extract detailed action information from gamelogs data"""
@@ -1261,6 +1264,11 @@ class Parser:
                                                 logger.debug(f"Move {move_number}: Found reason '{reason}'")
                                         except Exception:
                                             pass
+                                    elif isinstance(r, str):
+                                        rs = r.strip()
+                                        if rs:
+                                            reason = rs
+                                            logger.debug(f"Move {move_number}: Found reason '{reason}'")
                                 # If operation indicates a draw/draft, classify accordingly
                                 if (op_type == 'draw' or op.get('typeexpr') == 'draw') and action_type == 'other':
                                     action_type = 'draw'
