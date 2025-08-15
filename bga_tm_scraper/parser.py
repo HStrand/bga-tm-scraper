@@ -589,8 +589,11 @@ class Parser:
         token_types = self._extract_token_types(replay_html)
         card_names_map = self._extract_card_names_from_token_types(token_types)
         
-        # Extract all moves with detailed parsing (using simple name mapping)
-        moves = self._extract_all_moves_simple(soup, name_to_id, gamelogs, card_names_map)
+        # Extract tracker dictionary dynamically from HTML
+        tracker_dict = self._extract_tracker_dictionary_from_html(replay_html)
+        
+        # Extract all moves with detailed parsing (using simple name mapping and tracker dict)
+        moves = self._extract_all_moves_simple(soup, name_to_id, gamelogs, card_names_map, tracker_dict)
         
         # Build game states for each move
         moves_with_states = self._build_game_states_simple(moves, vp_progression, list(player_id_map.keys()), gamelogs)
@@ -599,8 +602,6 @@ class Parser:
         tracking_progression = []
         if gamelogs and player_id_map:
             logger.info("Adding comprehensive tracking data to game states")
-            # Extract tracker dictionary dynamically from HTML
-            tracker_dict = self._extract_tracker_dictionary_from_html(replay_html)
             
             # Get player IDs for tracking
             player_ids = list(player_id_map.keys())
@@ -748,8 +749,81 @@ class Parser:
             except (ValueError, AttributeError) as e:
                 logger.warning(f"Failed to parse played_at timestamp '{game_metadata.played_at}': {e}")
         
-        # Fallback: Look for date information in the HTML
-        # This would need to be customized based on BGA's HTML structure
+        # Fallback: Extract date from replay HTML
+        try:
+            # Look for date information in the replay HTML content
+            html_content = str(soup)
+            
+            # Look for the specific replay HTML pattern: Move 1 :<span style="float: right">6/19/2025 6:03:06 PM</span>
+            replay_date_pattern = r'<span[^>]*style="float:\s*right"[^>]*>(\d{1,2}/\d{1,2}/\d{4})\s+\d{1,2}:\d{2}:\d{2}\s+[AP]M</span>'
+            replay_match = re.search(replay_date_pattern, html_content)
+            
+            if replay_match:
+                date_str = replay_match.group(1)  # e.g., "6/19/2025"
+                try:
+                    # Parse as MM/DD/YYYY format (US format commonly used in BGA)
+                    parsed_date = datetime.strptime(date_str, "%m/%d/%Y")
+                    extracted_date = parsed_date.strftime("%Y-%m-%d")
+                    logger.info(f"Extracted game date from replay HTML: {extracted_date} (from: {date_str})")
+                    return extracted_date
+                except ValueError:
+                    # Try DD/MM/YYYY format as fallback
+                    try:
+                        parsed_date = datetime.strptime(date_str, "%d/%m/%Y")
+                        extracted_date = parsed_date.strftime("%Y-%m-%d")
+                        logger.info(f"Extracted game date from replay HTML: {extracted_date} (from: {date_str})")
+                        return extracted_date
+                    except ValueError:
+                        logger.warning(f"Could not parse date from replay HTML: {date_str}")
+            
+            # Additional fallback: Look for other date patterns in HTML text
+            date_patterns = [
+                r'\b(\d{4}-\d{2}-\d{2})\b',  # YYYY-MM-DD
+                r'\b(\d{1,2}/\d{1,2}/\d{4})\b',  # MM/DD/YYYY or DD/MM/YYYY
+                r'\b(\d{1,2}-\d{1,2}-\d{4})\b',  # MM-DD-YYYY or DD-MM-YYYY
+            ]
+            
+            for pattern in date_patterns:
+                matches = re.findall(pattern, html_content)
+                for match in matches:
+                    try:
+                        # Try to parse the date
+                        if '-' in match and len(match.split('-')[0]) == 4:
+                            # YYYY-MM-DD format
+                            parsed_date = datetime.strptime(match, "%Y-%m-%d")
+                        elif '/' in match:
+                            # Try MM/DD/YYYY format first (US format)
+                            try:
+                                parsed_date = datetime.strptime(match, "%m/%d/%Y")
+                            except ValueError:
+                                # Try DD/MM/YYYY format
+                                parsed_date = datetime.strptime(match, "%d/%m/%Y")
+                        elif '-' in match:
+                            # Try MM-DD-YYYY format first
+                            try:
+                                parsed_date = datetime.strptime(match, "%m-%d-%Y")
+                            except ValueError:
+                                # Try DD-MM-YYYY format
+                                parsed_date = datetime.strptime(match, "%d-%m-%Y")
+                        else:
+                            continue
+                        
+                        # Validate that the date is reasonable (not too far in the future or past)
+                        current_date = datetime.now()
+                        if (current_date - timedelta(days=365*5)) <= parsed_date <= (current_date + timedelta(days=30)):
+                            extracted_date = parsed_date.strftime("%Y-%m-%d")
+                            logger.info(f"Extracted game date from HTML pattern: {extracted_date}")
+                            return extracted_date
+                            
+                    except ValueError:
+                        continue
+            
+            logger.warning("Could not extract game date from replay HTML, using current date as fallback")
+            
+        except Exception as e:
+            logger.error(f"Error extracting game date from HTML: {e}")
+        
+        # Final fallback: use current date
         return datetime.now().strftime("%Y-%m-%d")
     
     def _extract_all_moves(self, soup: BeautifulSoup, players_info: Dict[str, Player], gamelogs: Dict[str, Any] = None) -> List[Move]:
@@ -770,7 +844,7 @@ class Parser:
         
         return moves
     
-    def _parse_single_move_detailed(self, move_div: Tag, name_to_id: Dict[str, str], gamelogs: Dict[str, Any] = None, card_names_map: Dict[str, str] = None) -> Optional[Move]:
+    def _parse_single_move_detailed(self, move_div: Tag, name_to_id: Dict[str, str], gamelogs: Dict[str, Any] = None, card_names_map: Dict[str, str] = None, tracker_dict: Dict[str, str] = None) -> Optional[Move]:
         """Parse a single move with comprehensive detail extraction"""
         try:
             # Extract move number and timestamp
@@ -1046,6 +1120,99 @@ class Parser:
                         full_description = draft_desc_text.strip()
                     else:
                         full_description = f"{player_name} drafts {card_drafted_name}"
+            except Exception:
+                pass
+
+            # Enrich counter descriptions from gamelogs (simple rendering):
+            # For each 'counter' item with a non-empty log, render the template by substituting args
+            # (mapping ${token_name} to human-readable via _infer_from_tracker_id) and append reason_tr if present.
+            # Then replace any matching 'player <verb> by N' segment in the current description with this rendered text.
+            try:
+                if gamelogs:
+                    data_entries = gamelogs.get('data', {}).get('data', [])
+                    parts = [p.strip() for p in full_description.split(' | ')] if isinstance(full_description, str) else []
+                    changed = False
+                    for entry in data_entries:
+                        if entry.get('move_id') != str(move_number):
+                            continue
+                        entry_data = entry.get('data', [])
+                        if not isinstance(entry_data, list):
+                            continue
+                        for data_item in entry_data:
+                            if not isinstance(data_item, dict) or data_item.get('type') != 'counter':
+                                continue
+                            log_t = data_item.get('log') or ''
+                            if not isinstance(log_t, str) or not log_t.strip():
+                                continue  # skip counters without log text (e.g., counterAsync-like)
+                            args = data_item.get('args', {}) or {}
+                            # Filter to this move's player when possible
+                            pid = str(args.get('player_id')) if args.get('player_id') is not None else None
+                            if pid and player_id != "unknown" and pid != str(player_id):
+                                continue
+                            # Consider all counter logs with text (including 'pays', 'gains', etc.)
+                            lower_tpl = log_t.lower()
+                            # Render the main log template
+                            rendered = self._render_bga_log_template(log_t, args)
+                            # Render and append reason if available
+                            rtr = args.get('reason_tr')
+                            if isinstance(rtr, dict):
+                                reason_rendered = self._render_bga_log_template(rtr.get('log', ''), rtr.get('args', {}))
+                                if isinstance(reason_rendered, str) and reason_rendered.strip():
+                                    rendered = f"{rendered} ({reason_rendered.strip()})"
+                            # Rendered replacement: replace the matching part for this counter line based on verb and amount
+                            # Determine mod and verb generically from template (no special-casing)
+                            try:
+                                mod_val = args.get('mod')
+                                mod_int = abs(int(mod_val)) if isinstance(mod_val, (int, str)) and re.fullmatch(r'-?\d+', str(mod_val)) else None
+                            except Exception:
+                                mod_int = None
+                            # Try to extract verb from template after ${player_name}
+                            verb_match = re.match(r'\s*\$\{player_name\}\s+([A-Za-z]+)', log_t)
+                            if verb_match:
+                                verb = verb_match.group(1)
+                            else:
+                                # Fallback: extract from rendered text after actual player_name
+                                verb_fallback = re.match(rf'\s*{re.escape(player_name)}\s+([A-Za-z]+)', rendered)
+                                verb = verb_fallback.group(1) if verb_fallback else None
+
+                            if parts and verb:
+                                if mod_int is not None:
+                                    # Match the existing part by same player, same verb, and same numeric amount
+                                    patt = re.compile(rf'(?i)^{re.escape(player_name)}\s+{verb}\b.*?\b{mod_int}\b(?:\s*\((?:[^)]*)\))?$', re.IGNORECASE)
+                                else:
+                                    # If no numeric amount, match just player + verb line
+                                    patt = re.compile(rf'(?i)^{re.escape(player_name)}\s+{verb}\b.*$', re.IGNORECASE)
+                                replaced = False
+                                for i, part in enumerate(parts):
+                                    if patt.match(part):
+                                        parts[i] = rendered
+                                        changed = True
+                                        replaced = True
+                                        break
+                                # Fallback: sometimes HTML omits the player name in that part (e.g., "increases by 1")
+                                # Try matching by verb and amount only, and only replace if the token segment is empty.
+                                if not replaced and (mod_int is not None):
+                                    patt2 = re.compile(
+                                        rf'(?i)^\s*{verb}\s+(.*?)\s+by\s+{mod_int}(\s*\((?:[^)]*)\))?$',
+                                        re.IGNORECASE
+                                    )
+                                    for i, part in enumerate(parts):                                   
+                                        m2 = patt2.match(part)
+                                        if not m2:
+                                            continue
+                                        token_seg = (m2.group(1) or "").strip()
+                                        if token_seg:
+                                            continue  # keep lines that already have a token name                                   
+                                        parts[i] = rendered
+                                        changed = True
+                                        replaced = True
+                                        break
+                                if not replaced:
+                                    if isinstance(rendered, str) and rendered.strip() and rendered not in parts:
+                                        parts.append(rendered)
+                                        changed = True
+                    if changed:
+                        full_description = " | ".join(parts)
             except Exception:
                 pass
 
@@ -2647,12 +2814,15 @@ class Parser:
         # Map common tracker patterns to display names
         mappings = {
             'counter_hand': 'Hand Counter',
-            'tracker_m': 'MC',
-            'tracker_pm': 'MC Production',
+            'tracker_tr': 'TR',
+            'tracker_m': 'M€',
+            'tracker_pm': 'M€ Production',
             'tracker_s': 'Steel',
             'tracker_ps': 'Steel Production',
+            'tracker_ers': 'Steel Exchange Rate',
             'tracker_u': 'Titanium',
             'tracker_pu': 'Titanium Production',
+            'tracker_eru': 'Titanium Exchange Rate',
             'tracker_p': 'Plant',
             'tracker_pp': 'Plant Production',
             'tracker_e': 'Energy',
@@ -2674,6 +2844,42 @@ class Parser:
         }
         
         return mappings.get(base_id, f"Unknown ({base_id})")
+
+    def _render_bga_log_template(self, template: str, args: Dict[str, Any]) -> str:
+        """
+        Render a BGA log template by replacing ${...} placeholders with values from args.
+        - Supports nested templates like {"log": "...", "args": {...}} (e.g., token_div_count).
+        - Maps tracker/counter token names to human-readable via _infer_from_tracker_id.
+        """
+        def _resolve_value(val: Any, key_name: Optional[str] = None) -> str:
+            try:
+                if isinstance(val, dict) and 'log' in val and 'args' in val:
+                    return self._render_bga_log_template(val.get('log', ''), val.get('args', {}))
+                if isinstance(val, str):
+                    # Always check if the value looks like a tracker ID, regardless of key name
+                    if val.startswith('tracker_') or val.startswith('counter_'):
+                        return self._infer_from_tracker_id(val)
+                    # Also check based on key name for safety
+                    if key_name in ('token_name', 'counter_name'):
+                        return self._infer_from_tracker_id(val)
+                    return val
+                return str(val)
+            except Exception:
+                return str(val)
+
+        def _repl(m: re.Match) -> str:
+            name = m.group(1)
+            value = None
+            if isinstance(args, dict):
+                value = args.get(name)
+            return _resolve_value(value, name) if value is not None else m.group(0)
+
+        try:
+            rendered = re.sub(r'\$\{([^}]+)\}', _repl, template)
+            rendered = re.sub(r'\s{2,}', ' ', rendered).strip()
+            return rendered
+        except Exception:
+            return template
 
     def _track_resources_and_production(self, gamelogs: Dict[str, Any], player_ids: List[str], 
                                        tracker_dict: Dict[str, str]) -> List[Dict[str, Any]]:
@@ -3140,13 +3346,13 @@ class Parser:
             logger.error(f"Error converting game data to API format: {e}")
             return {}
 
-    def _extract_all_moves_simple(self, soup: BeautifulSoup, name_to_id: Dict[str, str], gamelogs: Dict[str, Any] = None, card_names_map: Dict[str, str] = None) -> List[Move]:
+    def _extract_all_moves_simple(self, soup: BeautifulSoup, name_to_id: Dict[str, str], gamelogs: Dict[str, Any] = None, card_names_map: Dict[str, str] = None, tracker_dict: Dict[str, str] = None) -> List[Move]:
         """Extract all moves with simple name-to-ID mapping"""
         moves = []
         move_divs = soup.find_all('div', class_='replaylogs_move')
         
         for move_div in move_divs:
-            move = self._parse_single_move_detailed(move_div, name_to_id, gamelogs, card_names_map)
+            move = self._parse_single_move_detailed(move_div, name_to_id, gamelogs, card_names_map, tracker_dict)
             if move:
                 moves.append(move)
         

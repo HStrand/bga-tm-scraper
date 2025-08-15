@@ -73,6 +73,3 @@ Thumbs.db
 *.tmp
 *.temp
 chrome_debug.log
-
-# Auto-generated version file
-gui/version.py
