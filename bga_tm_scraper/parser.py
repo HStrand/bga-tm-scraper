@@ -1152,11 +1152,11 @@ class Parser:
                             # Consider all counter logs with text (including 'pays', 'gains', etc.)
                             lower_tpl = log_t.lower()
                             # Render the main log template
-                            rendered = self._render_bga_log_template(log_t, args)
+                            rendered = self._render_bga_log_template(log_t, args, tracker_dict)
                             # Render and append reason if available
                             rtr = args.get('reason_tr')
                             if isinstance(rtr, dict):
-                                reason_rendered = self._render_bga_log_template(rtr.get('log', ''), rtr.get('args', {}))
+                                reason_rendered = self._render_bga_log_template(rtr.get('log', ''), rtr.get('args', {}), tracker_dict)
                                 if isinstance(reason_rendered, str) and reason_rendered.strip():
                                     rendered = f"{rendered} ({reason_rendered.strip()})"
                             # Rendered replacement: replace the matching part for this counter line based on verb and amount
@@ -2760,6 +2760,10 @@ class Parser:
             
             logger.info(f"Extracted {len(tracker_dict)} tracker mappings dynamically from HTML")
             
+            tracker_dict["tracker_t"] = "Temperature"
+            tracker_dict["tracker_o"] = "Oxygen Level"
+            tracker_dict["tracker_w"] = "Oceans"
+            
             # Log some examples for debugging
             if tracker_dict:
                 sample_items = list(tracker_dict.items())[:5]
@@ -2800,52 +2804,18 @@ class Parser:
                     return name_match.group(1).strip()
             
             # If no explicit name found, try to infer from the tracker ID itself
-            return self._infer_from_tracker_id(tracker_id)
+            return None
             
         except Exception as e:
             logger.error(f"Error inferring display name for {tracker_id}: {e}")
             return ""
 
-    def _infer_from_tracker_id(self, tracker_id: str) -> str:
+    def _infer_from_tracker_id(self, tracker_id: str, tracker_dict: Dict[str, str]) -> str:
         """Infer display name from tracker ID patterns"""
-        # Remove player color code (6-digit hex at the end)
-        base_id = re.sub(r'_[a-f0-9]{6}$', '', tracker_id, flags=re.IGNORECASE)
-        
-        # Map common tracker patterns to display names
-        mappings = {
-            'counter_hand': 'Hand Counter',
-            'tracker_tr': 'TR',
-            'tracker_m': 'M€',
-            'tracker_pm': 'M€ Production',
-            'tracker_s': 'Steel',
-            'tracker_ps': 'Steel Production',
-            'tracker_ers': 'Steel Exchange Rate',
-            'tracker_u': 'Titanium',
-            'tracker_pu': 'Titanium Production',
-            'tracker_eru': 'Titanium Exchange Rate',
-            'tracker_p': 'Plant',
-            'tracker_pp': 'Plant Production',
-            'tracker_e': 'Energy',
-            'tracker_pe': 'Energy Production',
-            'tracker_h': 'Heat',
-            'tracker_ph': 'Heat Production',
-            'tracker_tagBuilding': 'Count of Building tags',
-            'tracker_tagSpace': 'Count of Space tags',
-            'tracker_tagScience': 'Count of Science tags',
-            'tracker_tagEnergy': 'Count of Power tags',
-            'tracker_tagEarth': 'Count of Earth tags',
-            'tracker_tagJovian': 'Count of Jovian tags',
-            'tracker_tagCity': 'Count of City tags',
-            'tracker_tagPlant': 'Count of Plant tags',
-            'tracker_tagMicrobe': 'Count of Microbe tags',
-            'tracker_tagAnimal': 'Count of Animal tags',
-            'tracker_tagWild': 'Count of Wild tags',
-            'tracker_tagEvent': 'Count of played Events cards'
-        }
-        
-        return mappings.get(base_id, f"Unknown ({base_id})")
 
-    def _render_bga_log_template(self, template: str, args: Dict[str, Any]) -> str:
+        return tracker_dict.get(tracker_id, f"Unknown ({tracker_id})")
+
+    def _render_bga_log_template(self, template: str, args: Dict[str, Any], tracker_dict: Dict[str, str]) -> str:
         """
         Render a BGA log template by replacing ${...} placeholders with values from args.
         - Supports nested templates like {"log": "...", "args": {...}} (e.g., token_div_count).
@@ -2854,14 +2824,14 @@ class Parser:
         def _resolve_value(val: Any, key_name: Optional[str] = None) -> str:
             try:
                 if isinstance(val, dict) and 'log' in val and 'args' in val:
-                    return self._render_bga_log_template(val.get('log', ''), val.get('args', {}))
+                    return self._render_bga_log_template(val.get('log', ''), val.get('args', {}), tracker_dict)
                 if isinstance(val, str):
                     # Always check if the value looks like a tracker ID, regardless of key name
                     if val.startswith('tracker_') or val.startswith('counter_'):
-                        return self._infer_from_tracker_id(val)
+                        return self._infer_from_tracker_id(val, tracker_dict)
                     # Also check based on key name for safety
                     if key_name in ('token_name', 'counter_name'):
-                        return self._infer_from_tracker_id(val)
+                        return self._infer_from_tracker_id(val, tracker_dict)
                     return val
                 return str(val)
             except Exception:
