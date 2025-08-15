@@ -74,10 +74,10 @@ class Move:
     
     # Detailed action data
     card_played: Optional[str] = None
+    card_drafted: Optional[str] = None
     tile_placed: Optional[str] = None
     tile_location: Optional[str] = None
-    cards_drawn: Optional[List[str]] = None
-    cards_drafted: Optional[Dict[str, List[str]]] = None
+    card_options: Optional[Dict[str, List[str]]] = None
     reason: Optional[str] = None
     
     # Game state after this move
@@ -806,14 +806,14 @@ class Parser:
                 move_number, gamelogs, log_entries, full_description
             )
             
-            # Map IDs to names and adjust description/cards_drawn for draw/play actions
-            cards_drawn: Optional[List[str]] = None
-            cards_drafted_map: Optional[Dict[str, List[str]]] = None
+            # Map IDs to names and compute per-player card options (draws and drafts)
+            card_options_map: Optional[Dict[str, List[str]]] = None
+            card_drafted_name: Optional[str] = None
             try:
                 # Collect per-player draft draws and normal draws separately
                 per_player_draft_ids: Dict[str, List[str]] = {}
+                per_player_draw_ids: Dict[str, List[str]] = {}
                 per_player_names: Dict[str, str] = {}
-                normal_draw_ids: List[str] = []
                 if gamelogs:
                     data_entries = gamelogs.get('data', {}).get('data', [])
                     for entry in data_entries:
@@ -825,65 +825,100 @@ class Parser:
                                         args = data_item.get('args', {})
                                         if not isinstance(args, dict):
                                             continue
-                                        # Use place_id or place_name to infer draft; do not require place_from
+                                        # Infer draft via place_id/place_name prefix; do not require place_from
                                         place_tag = args.get('place_id', '') or args.get('place_name', '')
                                         id_list = args.get('list', [])
+                                        pid = str(args.get('player_id')) if args.get('player_id') is not None else "unknown"
+                                        if isinstance(id_list, list):
+                                            ids = [tid for tid in id_list if isinstance(tid, str)]
+                                        else:
+                                            ids = []
                                         if isinstance(place_tag, str) and str(place_tag).lower().startswith('draft_'):
-                                            # Draft draws: group by player_id and remember player_name for description
-                                            pid = str(args.get('player_id')) if args.get('player_id') is not None else "unknown"
-                                            if isinstance(id_list, list):
-                                                per_player_draft_ids.setdefault(pid, []).extend(
-                                                    [tid for tid in id_list if isinstance(tid, str)]
-                                                )
+                                            if ids:
+                                                per_player_draft_ids.setdefault(pid, []).extend(ids)
                                             if isinstance(args.get('player_name'), str) and pid != "unknown":
                                                 per_player_names[pid] = args.get('player_name')
                                         else:
-                                            # Normal (non-draft) draws
-                                            if isinstance(id_list, list):
-                                                normal_draw_ids.extend([tid for tid in id_list if isinstance(tid, str)])
-                # Handle draft mapping
-                if per_player_draft_ids and card_names_map:
-                    cards_drafted: Dict[str, List[str]] = {}
+                                            if ids:
+                                                per_player_draw_ids.setdefault(pid, []).extend(ids)
+                                            if isinstance(args.get('player_name'), str) and pid != "unknown":
+                                                per_player_names[pid] = args.get('player_name')
+                # Build unified card_options map (player_id -> list of names) from both sources
+                if card_names_map and (per_player_draft_ids or per_player_draw_ids):
+                    card_options: Dict[str, List[str]] = {}
+                    combined: Dict[str, List[str]] = {}
+                    # Merge keys; ensure copies
+                    for pid, ids in per_player_draw_ids.items():
+                        combined.setdefault(pid, []).extend(list(ids))
                     for pid, ids in per_player_draft_ids.items():
+                        combined.setdefault(pid, []).extend(list(ids))
+                    # Map to names and dedupe while preserving order
+                    for pid, ids in combined.items():
                         names = [card_names_map.get(tid) for tid in ids]
                         names = [n for n in names if isinstance(n, str) and n.strip()]
                         if names:
-                            cards_drafted[pid] = names
-                    if cards_drafted:
-                        cards_drafted_map = cards_drafted  # attach in Move below
-                        # Override description to map drafts to each player explicitly
+                            card_options.setdefault(pid, []).extend(names)
+                    if card_options:
+                        card_options_map = card_options
+                        # Override description to map per-player actions clearly
                         try:
                             id_to_name = {mapped_id: pname for pname, mapped_id in name_to_id.items()}
                             parts: List[str] = []
-                            for pid, names in cards_drafted_map.items():
-                                # Prefer player_name from args; fall back to id->name map; else generic
+                            # Prefer showing draft per-player if exists; else show draws
+                            source = per_player_draft_ids if per_player_draft_ids else per_player_draw_ids
+                            for pid, ids in source.items():
+                                names = [card_names_map.get(tid) for tid in ids]
+                                names = [n for n in names if isinstance(n, str) and n.strip()]
                                 pname = per_player_names.get(pid) or id_to_name.get(pid, f"Player_{pid}")
+                                verb = "drafts" if source is per_player_draft_ids else "draws"
                                 if len(names) == 1:
-                                    parts.append(f"{pname} drafts {names[0]}")
+                                    parts.append(f"{pname} {verb} {names[0]}")
                                 else:
-                                    parts.append(f"{pname} drafts {len(names)} cards: {', '.join(names)}")
+                                    parts.append(f"{pname} {verb} {len(names)} cards: {', '.join(names)}")
                             if parts:
                                 full_description = " | ".join(parts)
-                                action_type = 'draft' if action_type in ('other', 'draw', 'draft_card') else action_type
+                                if source is per_player_draft_ids and action_type in ('other', 'draw', 'draft_card'):
+                                    action_type = 'draft'
+                                if source is per_player_draw_ids and action_type == 'other':
+                                    action_type = 'draw'
                                 card_played = None
-                                cards_drawn = None
                         except Exception:
                             pass
-                # Handle normal draw mapping (single player)
-                if action_type == 'draw' and normal_draw_ids and card_names_map:
-                    mapped = [card_names_map.get(tid) for tid in normal_draw_ids]
-                    cards_drawn = [name for name in mapped if isinstance(name, str) and name.strip()]
-                    if cards_drawn:
-                        # Keep card_played None for draw actions and override description
-                        card_played = None
-                        if len(cards_drawn) == 1:
-                            full_description = f"{player_name} draws {cards_drawn[0]}"
-                        else:
-                            full_description = f"{player_name} draws {len(cards_drawn)} cards: {', '.join(cards_drawn)}"
                 elif action_type == 'play_card' and card_played and card_names_map:
                     # Map played card ID to name
                     if card_played in card_names_map:
                         card_played = card_names_map[card_played]
+
+                # Detect a concrete drafted selection (tokenMoved with 'draft' context)
+                if gamelogs and card_names_map and card_drafted_name is None:
+                    data_entries = gamelogs.get('data', {}).get('data', [])
+                    for entry in data_entries:
+                        if entry.get('move_id') == str(move_number):
+                            entry_data = entry.get('data', [])
+                            if isinstance(entry_data, list):
+                                for data_item in entry_data:
+                                    if isinstance(data_item, dict) and data_item.get('type') == 'tokenMoved':
+                                        log_txt = (data_item.get('log') or '').lower()
+                                        args = data_item.get('args', {}) or {}
+                                        place_tag = str(args.get('place_id', '') or args.get('place_name', '')).lower()
+                                        token_id = args.get('token_id')
+                                        # Choose robust draft selection detection:
+                                        # - log contains 'draft' OR destination looks like draw_*
+                                        if token_id and ('draft' in log_txt or place_tag.startswith('draw_')):
+                                            if token_id in card_names_map:
+                                                card_drafted_name = card_names_map[token_id]
+                                            else:
+                                                card_drafted_name = token_id
+                                            # Normalize action_type and mark reason if not already present
+                                            if action_type in ('other', 'draw', 'draft_card'):
+                                                action_type = 'draft'
+                                            if not reason:
+                                                reason = 'draft'
+                                            break
+                                if card_drafted_name:
+                                    break
+                        if card_drafted_name:
+                            break
             except Exception as map_err:
                 logger.debug(f"Move {move_number}: mapping card IDs to names failed: {map_err}")
             
@@ -895,10 +930,10 @@ class Parser:
                 action_type=action_type,
                 description=full_description,
                 card_played=card_played,
+                card_drafted=card_drafted_name,
                 tile_placed=tile_placed,
                 tile_location=tile_location,
-                cards_drawn=cards_drawn,
-                cards_drafted=cards_drafted_map,
+                card_options=card_options_map,
                 reason=reason
             )
             
