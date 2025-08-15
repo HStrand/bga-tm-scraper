@@ -115,6 +115,7 @@ class GameData:
     game_duration: str
     winner: str
     generations: int
+    conceded: bool = False
     map: Optional[str] = None
     prelude_on: Optional[bool] = None
     colonies_on: Optional[bool] = None
@@ -617,8 +618,8 @@ class Parser:
         # Build final player objects from collected data
         players_info = self._build_final_players(player_id_map, corporations, moves_with_states, game_metadata, starting_hands)
         
-        # Determine winner from final game state
-        winner = self._determine_winner_from_game_states(moves_with_states, players_info)
+        # Determine winner and whether the game was conceded from the final moves' descriptions
+        winner, conceded = self._determine_winner_and_concession(moves_with_states)
         
         # Extract game metadata
         metadata = self._extract_metadata(soup, replay_html, moves_with_states)
@@ -634,6 +635,7 @@ class Parser:
             game_duration=self._calculate_game_duration(moves_with_states),
             winner=winner,
             generations=max_generation,
+            conceded=conceded,
             map=game_metadata.map,
             prelude_on=game_metadata.prelude_on,
             colonies_on=game_metadata.colonies_on,
@@ -3442,39 +3444,43 @@ class Parser:
         
         return moves
 
-    def _determine_winner_from_game_states(self, moves_with_states: List[Move], players_info: Dict[str, Player]) -> str:
-        """Determine winner from final game state VP data"""
-        if not moves_with_states or not players_info:
-            return "Unknown"
-        
-        # Get final VP data from the last move with game state
-        final_vp_data = {}
-        for move in reversed(moves_with_states):
-            if move.game_state and move.game_state.player_vp:
-                final_vp_data = move.game_state.player_vp
+    def _determine_winner_and_concession(self, moves: List[Move]) -> Tuple[str, bool]:
+        """
+        Determine the winner and whether the game was conceded based on final move descriptions.
+
+        - Winner is extracted from: "The end of the game: {NAME} wins!"
+        - Concession is detected if any move description contains "concedes the game."
+        """
+        if not moves:
+            return "Unknown", False
+
+        winner = "Unknown"
+        conceded = False
+
+        # Scan from the last move backwards to find a conclusive winner line and any concession
+        for move in reversed(moves):
+            desc = move.description or ""
+            # Detect concession anywhere in the final moves
+            if "concedes the game" in desc:
+                conceded = True
+            # Extract winner from the standard end-of-game message
+            m = re.search(r"The end of the game:\s*(.+?)\s+wins!?$", desc)
+            if not m:
+                # Sometimes the winner string may be followed by other text or lack trailing punctuation
+                m = re.search(r"The end of the game:\s*(.+?)\s+wins", desc)
+            if m:
+                winner = m.group(1).strip()
                 break
-        
-        if not final_vp_data:
-            # Fallback to player info
-            max_vp = max(player.final_vp for player in players_info.values())
-            winners = [player.player_name for player in players_info.values() if player.final_vp == max_vp]
-            return winners[0] if winners else "Unknown"
-        
-        # Find player with highest VP
-        max_vp = 0
-        winner_id = None
-        
-        for player_id, vp_data in final_vp_data.items():
-            total_vp = vp_data.get('total', 0)
-            if total_vp > max_vp:
-                max_vp = total_vp
-                winner_id = player_id
-        
-        # Convert player ID to player name
-        if winner_id and winner_id in players_info:
-            return players_info[winner_id].player_name
-        
-        return "Unknown"
+
+        return winner, conceded
+
+    def _determine_winner_from_game_states(self, moves_with_states: List[Move], players_info: Dict[str, Player]) -> str:
+        """
+        Legacy method retained for compatibility. Prefer using _determine_winner_and_concession.
+        Falls back to description-based extraction; if unavailable, returns 'Unknown'.
+        """
+        winner, _ = self._determine_winner_and_concession(moves_with_states)
+        return winner
 
     def export_to_json(self, game_data: GameData, output_path: str, player_perspective: str = None):
         """Export game data to JSON with player perspective folder structure"""
