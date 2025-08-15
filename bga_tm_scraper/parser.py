@@ -1033,7 +1033,8 @@ class Parser:
             
             # Prefer specific draft selection description when available
             try:
-                if card_drafted_name:
+                # Do not override a multi-buy summary when cards_kept_map exists
+                if card_drafted_name and not cards_kept_map:
                     if isinstance(draft_desc_text, str) and draft_desc_text.strip():
                         full_description = draft_desc_text.strip()
                     else:
@@ -3373,7 +3374,8 @@ class Parser:
                         except Exception:
                             pass
                 # Prefer concrete drafted card description over options summary
-                if card_drafted_name:
+                # Do not override a multi-buy summary when cards_kept_map exists
+                if card_drafted_name and not cards_kept_map:
                     if isinstance(draft_desc_text, str) and draft_desc_text.strip():
                         full_description = draft_desc_text.strip()
                     else:
