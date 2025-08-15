@@ -814,6 +814,7 @@ class Parser:
                 # Collect per-player draft draws and normal draws separately
                 per_player_draft_ids: Dict[str, List[str]] = {}
                 per_player_draw_ids: Dict[str, List[str]] = {}
+                per_player_setup_ids: Dict[str, List[str]] = {}
                 per_player_names: Dict[str, str] = {}
                 if gamelogs:
                     data_entries = gamelogs.get('data', {}).get('data', [])
@@ -879,17 +880,26 @@ class Parser:
                                                                     ids = [tid for tid in targ if isinstance(tid, str)]
                                                                     if ids:
                                                                         per_player_draft_ids.setdefault(str(pid_key), []).extend(ids)
+                                                            elif otype == 'setuppick':
+                                                                # Starting hand options (corporation, preludes, projects). We only want project cards.
+                                                                targ = op.get('args', {}).get('target', [])
+                                                                if isinstance(targ, list):
+                                                                    ids = [tid for tid in targ if isinstance(tid, str) and tid.startswith('card_main_')]
+                                                                    if ids:
+                                                                        per_player_setup_ids.setdefault(str(pid_key), []).extend(ids)
                 except Exception:
                     pass
 
                 # Build unified card_options map (player_id -> list of names) from both sources
-                if card_names_map and (per_player_draft_ids or per_player_draw_ids):
+                if card_names_map and (per_player_draft_ids or per_player_draw_ids or per_player_setup_ids):
                     card_options: Dict[str, List[str]] = {}
                     combined: Dict[str, List[str]] = {}
                     # Merge keys; ensure copies
                     for pid, ids in per_player_draw_ids.items():
                         combined.setdefault(pid, []).extend(list(ids))
                     for pid, ids in per_player_draft_ids.items():
+                        combined.setdefault(pid, []).extend(list(ids))
+                    for pid, ids in per_player_setup_ids.items():
                         combined.setdefault(pid, []).extend(list(ids))
                     # Map to names and dedupe while preserving order
                     for pid, ids in combined.items():
@@ -3136,6 +3146,7 @@ class Parser:
             try:
                 per_player_draft_ids: Dict[str, List[str]] = {}
                 per_player_draw_ids: Dict[str, List[str]] = {}
+                per_player_setup_ids: Dict[str, List[str]] = {}
                 per_player_names: Dict[str, str] = {}
                 
                 # Aggregate tokenMoved events for this move across all channels
@@ -3223,16 +3234,25 @@ class Parser:
                                                             ids = [tid for tid in targ if isinstance(tid, str)]
                                                             if ids:
                                                                 per_player_draft_ids.setdefault(str(pid_key), []).extend(ids)
+                                                    elif otype == 'setuppick':
+                                                        # Starting hand options (only project cards)
+                                                        targ = op.get('args', {}).get('target', [])
+                                                        if isinstance(targ, list):
+                                                            ids = [tid for tid in targ if isinstance(tid, str) and tid.startswith('card_main_')]
+                                                            if ids:
+                                                                per_player_setup_ids.setdefault(str(pid_key), []).extend(ids)
                 except Exception:
                     pass
 
                 # Build unified card_options from both sources
-                if card_names_map and (per_player_draft_ids or per_player_draw_ids):
+                if card_names_map and (per_player_draft_ids or per_player_draw_ids or per_player_setup_ids):
                     card_options: Dict[str, List[str]] = {}
                     combined: Dict[str, List[str]] = {}
                     for pid, ids in per_player_draw_ids.items():
                         combined.setdefault(pid, []).extend(list(ids))
                     for pid, ids in per_player_draft_ids.items():
+                        combined.setdefault(pid, []).extend(list(ids))
+                    for pid, ids in per_player_setup_ids.items():
                         combined.setdefault(pid, []).extend(list(ids))
                     for pid, ids in combined.items():
                         names = [card_names_map.get(tid) for tid in ids]
