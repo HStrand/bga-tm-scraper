@@ -962,16 +962,19 @@ class Parser:
                             cards_kept[pid] = deduped
                     if cards_kept:
                         cards_kept_map = cards_kept
-                        # If we have explicit kept cards this move, build a concise per-player "buys" description
+                        # If we have explicit kept cards this move, build a concise per-player description
+                        # Use "draws" for action_type=draw, otherwise use "keeps"
                         try:
                             id_to_name = {mapped_id: pname for pname, mapped_id in name_to_id.items()}
                             parts: List[str] = []
                             for pid, names in cards_kept_map.items():
                                 pname = per_player_names.get(pid) or id_to_name.get(pid, f"Player_{pid}")
+                                # Choose verb based on action_type
+                                verb = "draws" if action_type == "draw" else "keeps"
                                 if len(names) == 1:
-                                    parts.append(f"{pname} buys {names[0]}")
+                                    parts.append(f"{pname} {verb} {names[0]}")
                                 else:
-                                    parts.append(f"{pname} buys {len(names)} cards: {', '.join(names)}")
+                                    parts.append(f"{pname} {verb} {len(names)} cards: {', '.join(names)}")
                             if parts:
                                 full_description = " | ".join(parts)
                         except Exception:
@@ -995,17 +998,20 @@ class Parser:
                                         place_tag = str(args.get('place_id', '') or args.get('place_name', '')).lower()
                                         token_id = args.get('token_id')
                                         # Detect a concrete selection (draft/keep) for this move's player:
-                                        # - log contains 'draft' OR destination looks like draw_*
-                                        # - OR log contains 'keep'/'keeps' OR destination looks like hand_*
+                                        # - Only set action_type to 'draft' if log contains 'draft' OR destination looks like draw_*
+                                        # - For keep/hand_ selections without 'draft' markers, do NOT force 'draft'
                                         # - args.player_id matches the resolved player_id for this move
                                         sel_pid = str(args.get('player_id')) if args.get('player_id') is not None else "unknown"
-                                        is_selection = (
+                                        is_draft_selection = (
                                             ('draft' in log_txt) or
-                                            place_tag.startswith('draw_') or
+                                            place_tag.startswith('draw_')
+                                        )
+                                        is_keep_selection = (
                                             ('keep' in log_txt) or
                                             ('keeps' in log_txt) or
                                             place_tag.startswith('hand_')
                                         )
+                                        is_selection = is_draft_selection or is_keep_selection
                                         if token_id and is_selection and sel_pid == str(player_id):
                                             if token_id in card_names_map:
                                                 card_drafted_name = card_names_map[token_id]
@@ -1018,11 +1024,12 @@ class Parser:
                                                     draft_desc_text = re.sub(r'\$\{token_name\}', card_drafted_name, log_template)
                                             except Exception:
                                                 pass
-                                            # Normalize action_type and mark reason if not already present
-                                            if action_type in ('other', 'draw', 'draft_card'):
+                                            # Only set action_type to 'draft' for actual draft selections
+                                            if is_draft_selection and action_type in ('other', 'draw', 'draft_card'):
                                                 action_type = 'draft'
-                                            if not reason:
-                                                reason = 'draft'
+                                                if not reason:
+                                                    reason = 'draft'
+                                            # For keep selections, don't force action_type change
                                             break
                                 if card_drafted_name:
                                     break
@@ -3359,16 +3366,19 @@ class Parser:
                             cards_kept[pid] = deduped
                     if cards_kept:
                         cards_kept_map = cards_kept
-                        # If we have explicit kept cards this move, build a concise per-player "buys" description
+                        # If we have explicit kept cards this move, build a concise per-player description
+                        # Use "draws" for action_type=draw, otherwise use "keeps"
                         try:
                             id_to_name = {mapped_id: pname for pname, mapped_id in name_to_id.items()}
                             parts: List[str] = []
                             for pid, names in cards_kept_map.items():
                                 pname = per_player_names.get(pid) or id_to_name.get(pid, f"Player_{pid}")
+                                # Choose verb based on action_type
+                                verb = "draws" if action_type == "draw" else "keeps"
                                 if len(names) == 1:
-                                    parts.append(f"{pname} buys {names[0]}")
+                                    parts.append(f"{pname} {verb} {names[0]}")
                                 else:
-                                    parts.append(f"{pname} buys {len(names)} cards: {', '.join(names)}")
+                                    parts.append(f"{pname} {verb} {len(names)} cards: {', '.join(names)}")
                             if parts:
                                 full_description = " | ".join(parts)
                         except Exception:
