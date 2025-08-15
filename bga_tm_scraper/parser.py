@@ -77,6 +77,7 @@ class Move:
     tile_placed: Optional[str] = None
     tile_location: Optional[str] = None
     cards_drawn: Optional[List[str]] = None
+    cards_drafted: Optional[Dict[str, List[str]]] = None
     reason: Optional[str] = None
     
     # Game state after this move
@@ -608,8 +609,10 @@ class Parser:
             # Update game states with tracking data
             self._update_game_states_with_tracking(moves_with_states, tracking_progression)
 
-        # Extract starting hand
-        starting_hands = self._extract_starting_hands(soup, player_perspective)
+        # Extract starting hands - prefer gamelogs, fallback to HTML
+        starting_hands = self._extract_starting_hands_from_gamelogs(gamelogs, token_types)
+        if not starting_hands:
+            starting_hands = self._extract_starting_hands(soup, player_perspective)
 
         # Build final player objects from collected data
         players_info = self._build_final_players(player_id_map, corporations, moves_with_states, game_metadata, starting_hands)
@@ -805,9 +808,13 @@ class Parser:
             
             # Map IDs to names and adjust description/cards_drawn for draw/play actions
             cards_drawn: Optional[List[str]] = None
+            cards_drafted_map: Optional[Dict[str, List[str]]] = None
             try:
-                if action_type == 'draw' and gamelogs:
-                    drawn_ids: List[str] = []
+                # Collect per-player draft draws and normal draws separately
+                per_player_draft_ids: Dict[str, List[str]] = {}
+                per_player_names: Dict[str, str] = {}
+                normal_draw_ids: List[str] = []
+                if gamelogs:
                     data_entries = gamelogs.get('data', {}).get('data', [])
                     for entry in data_entries:
                         if entry.get('move_id') == str(move_number):
@@ -816,21 +823,63 @@ class Parser:
                                 for data_item in entry_data:
                                     if isinstance(data_item, dict) and data_item.get('type') == 'tokenMoved':
                                         args = data_item.get('args', {})
-                                        if isinstance(args, dict) and args.get('place_from') == 'deck_main':
-                                            id_list = args.get('list', [])
+                                        if not isinstance(args, dict):
+                                            continue
+                                        # Use place_id or place_name to infer draft; do not require place_from
+                                        place_tag = args.get('place_id', '') or args.get('place_name', '')
+                                        id_list = args.get('list', [])
+                                        if isinstance(place_tag, str) and str(place_tag).lower().startswith('draft_'):
+                                            # Draft draws: group by player_id and remember player_name for description
+                                            pid = str(args.get('player_id')) if args.get('player_id') is not None else "unknown"
                                             if isinstance(id_list, list):
-                                                drawn_ids.extend([tid for tid in id_list if isinstance(tid, str)])
-                    # Map to names
-                    if drawn_ids and card_names_map:
-                        mapped = [card_names_map.get(tid) for tid in drawn_ids]
-                        cards_drawn = [name for name in mapped if isinstance(name, str) and name.strip()]
-                        if cards_drawn:
-                            # Keep card_played None for draw actions and override description
-                            card_played = None
-                            if len(cards_drawn) == 1:
-                                full_description = f"{player_name} draws {cards_drawn[0]}"
-                            else:
-                                full_description = f"{player_name} draws {len(cards_drawn)} cards: {', '.join(cards_drawn)}"
+                                                per_player_draft_ids.setdefault(pid, []).extend(
+                                                    [tid for tid in id_list if isinstance(tid, str)]
+                                                )
+                                            if isinstance(args.get('player_name'), str) and pid != "unknown":
+                                                per_player_names[pid] = args.get('player_name')
+                                        else:
+                                            # Normal (non-draft) draws
+                                            if isinstance(id_list, list):
+                                                normal_draw_ids.extend([tid for tid in id_list if isinstance(tid, str)])
+                # Handle draft mapping
+                if per_player_draft_ids and card_names_map:
+                    cards_drafted: Dict[str, List[str]] = {}
+                    for pid, ids in per_player_draft_ids.items():
+                        names = [card_names_map.get(tid) for tid in ids]
+                        names = [n for n in names if isinstance(n, str) and n.strip()]
+                        if names:
+                            cards_drafted[pid] = names
+                    if cards_drafted:
+                        cards_drafted_map = cards_drafted  # attach in Move below
+                        # Override description to map drafts to each player explicitly
+                        try:
+                            id_to_name = {mapped_id: pname for pname, mapped_id in name_to_id.items()}
+                            parts: List[str] = []
+                            for pid, names in cards_drafted_map.items():
+                                # Prefer player_name from args; fall back to id->name map; else generic
+                                pname = per_player_names.get(pid) or id_to_name.get(pid, f"Player_{pid}")
+                                if len(names) == 1:
+                                    parts.append(f"{pname} drafts {names[0]}")
+                                else:
+                                    parts.append(f"{pname} drafts {len(names)} cards: {', '.join(names)}")
+                            if parts:
+                                full_description = " | ".join(parts)
+                                action_type = 'draft' if action_type in ('other', 'draw', 'draft_card') else action_type
+                                card_played = None
+                                cards_drawn = None
+                        except Exception:
+                            pass
+                # Handle normal draw mapping (single player)
+                if action_type == 'draw' and normal_draw_ids and card_names_map:
+                    mapped = [card_names_map.get(tid) for tid in normal_draw_ids]
+                    cards_drawn = [name for name in mapped if isinstance(name, str) and name.strip()]
+                    if cards_drawn:
+                        # Keep card_played None for draw actions and override description
+                        card_played = None
+                        if len(cards_drawn) == 1:
+                            full_description = f"{player_name} draws {cards_drawn[0]}"
+                        else:
+                            full_description = f"{player_name} draws {len(cards_drawn)} cards: {', '.join(cards_drawn)}"
                 elif action_type == 'play_card' and card_played and card_names_map:
                     # Map played card ID to name
                     if card_played in card_names_map:
@@ -849,6 +898,7 @@ class Parser:
                 tile_placed=tile_placed,
                 tile_location=tile_location,
                 cards_drawn=cards_drawn,
+                cards_drafted=cards_drafted_map,
                 reason=reason
             )
             
@@ -987,16 +1037,22 @@ class Parser:
                     # Analyze different types of actions
                     if item_type == 'tokenMoved':
                         # Card draw/movement
-                        if 'list' in args and args.get('place_from') == 'deck_main':
-                            action_type = 'draw'
-                            # Extract the card that was drawn
-                            card_list = args.get('list', [])
-                            if card_list and len(card_list) > 0:
-                                card_id = card_list[0]
-                                # We have the card ID, but we need the name
-                                # This would require token_types mapping which we can add later
-                                card_played = card_id  # For now, store the ID
-                                logger.debug(f"Move {move_number}: Detected card draw - {card_id}")
+                        if 'list' in args:
+                            place_id = args.get('place_id', '')
+                            if isinstance(place_id, str) and place_id.startswith('draft_'):
+                                # Draft round draws go to draft areas
+                                if action_type == 'other':
+                                    action_type = 'draft'
+                                logger.debug(f"Move {move_number}: Detected draft draw to {place_id}")
+                            else:
+                                if action_type == 'other':
+                                    action_type = 'draw'
+                                # Extract the first card id (for trace); names resolved later
+                                card_list = args.get('list', [])
+                                if card_list and len(card_list) > 0:
+                                    card_id = card_list[0]
+                                    card_played = card_id  # temporary store ID
+                                    logger.debug(f"Move {move_number}: Detected card draw - {card_id}")
                         
                         elif args.get('place_from') == 'hand' or 'hand' in args.get('place_from', ''):
                             # Card played from hand
@@ -1033,24 +1089,27 @@ class Parser:
                                                 logger.debug(f"Move {move_number}: Found reason '{reason}'")
                                         except Exception:
                                             pass
-                                # If operation indicates a draw, classify as draw
+                                # If operation indicates a draw/draft, classify accordingly
                                 if (op_type == 'draw' or op.get('typeexpr') == 'draw') and action_type == 'other':
                                     action_type = 'draw'
                                     logger.debug(f"Move {move_number}: Detected draw action from gameStateChange operations")
+                                elif (op_type == 'draft' or op.get('typeexpr') == 'draft') and action_type == 'other':
+                                    action_type = 'draft'
+                                    logger.debug(f"Move {move_number}: Detected draft action from gameStateChange operations")
                     
                     elif item_type == 'message':
                         # Look for specific message patterns
                         log_msg = data_item.get('log', '')
-                        if 'draws' in log_msg and 'cards' in log_msg:
+                        if action_type == 'other' and 'draws' in log_msg and 'cards' in log_msg:
                             action_type = 'draw'
                             logger.debug(f"Move {move_number}: Detected draw action from message")
-                        elif 'plays card' in log_msg:
+                        elif action_type == 'other' and 'plays card' in log_msg:
                             action_type = 'play_card'
                             logger.debug(f"Move {move_number}: Detected play card from message")
-                        elif 'standard project' in log_msg.lower():
+                        elif action_type == 'other' and 'standard project' in log_msg.lower():
                             action_type = 'standard_project'
                             logger.debug(f"Move {move_number}: Detected standard project")
-                        elif 'passes' in log_msg.lower():
+                        elif action_type == 'other' and 'passes' in log_msg.lower():
                             action_type = 'pass'
                             logger.debug(f"Move {move_number}: Detected pass")
                     
@@ -1091,7 +1150,7 @@ class Parser:
         elif 'New generation' in description:
             return 'new_generation'
         elif 'draft' in description:
-            return 'draft_card'
+            return 'draft'
         elif 'Buy Card' in description:
             return 'buy_card'
         elif 'draws' in description and 'cards' in description:
@@ -2154,9 +2213,105 @@ class Parser:
         logger.info(f"Calculated max generation: {max_generation}")
         return max_generation
 
+    def _extract_starting_hands_from_gamelogs(self, gamelogs: Dict[str, Any], token_types: Dict[str, Any]) -> Optional[Dict[str, StartingHand]]:
+        """Extract starting hands for both players from gamelogs newPrivateState data"""
+        logger.info("Extracting starting hands from gamelogs")
+        
+        try:
+            starting_hands = {}
+            data_entries = gamelogs.get('data', {}).get('data', [])
+            
+            for entry in data_entries:
+                if not isinstance(entry, dict):
+                    continue
+                
+                entry_data = entry.get('data', [])
+                if not isinstance(entry_data, list):
+                    continue
+                
+                for data_item in entry_data:
+                    if not isinstance(data_item, dict):
+                        continue
+                    
+                    # Look for newPrivateState type entries
+                    if data_item.get('type') == 'newPrivateState':
+                        # Extract player ID from channel
+                        channel = entry.get('channel', '')
+                        player_match = re.search(r'/player/p(\d+)', channel)
+                        if not player_match:
+                            continue
+                        
+                        player_id = player_match.group(1)
+                        
+                        # Navigate to player operations
+                        args = data_item.get('args', {})
+                        inner_args = args.get('args', {})
+                        player_operations = inner_args.get('player_operations', {})
+                        
+                        if player_id not in player_operations:
+                            continue
+                        
+                        player_ops = player_operations[player_id]
+                        operations = player_ops.get('operations', {})
+                        
+                        # Look for setuppick operation
+                        for op_id, operation in operations.items():
+                            if not isinstance(operation, dict):
+                                continue
+                            
+                            if operation.get('type') == 'setuppick' or operation.get('typeexpr') == 'setuppick':
+                                op_args = operation.get('args', {})
+                                target_list = op_args.get('target', [])
+                                
+                                if not isinstance(target_list, list):
+                                    continue
+                                
+                                # Categorize cards by type
+                                corporations = []
+                                preludes = []
+                                project_cards = []
+                                
+                                for token_id in target_list:
+                                    if not isinstance(token_id, str):
+                                        continue
+                                    
+                                    # Get card name from token_types
+                                    token_data = token_types.get(token_id, {})
+                                    card_name = token_data.get('name', token_id)
+                                    
+                                    # Categorize by token ID prefix
+                                    if token_id.startswith('card_corp_'):
+                                        corporations.append(card_name)
+                                    elif token_id.startswith('card_prelude_'):
+                                        preludes.append(card_name)
+                                    elif token_id.startswith('card_main_'):
+                                        project_cards.append(card_name)
+                                    # Skip other types like card_stanproj_, card_colo_
+                                
+                                # Create starting hand for this player
+                                starting_hand = StartingHand(
+                                    corporations=corporations,
+                                    preludes=preludes,
+                                    project_cards=project_cards
+                                )
+                                
+                                starting_hands[player_id] = starting_hand
+                                logger.info(f"Extracted starting hand for player {player_id}: {len(corporations)} corps, {len(preludes)} preludes, {len(project_cards)} projects")
+            
+            if starting_hands:
+                logger.info(f"Successfully extracted starting hands from gamelogs for {len(starting_hands)} players")
+                return starting_hands
+            else:
+                logger.warning("No starting hands found in gamelogs")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error extracting starting hands from gamelogs: {e}")
+            return None
+
     def _extract_starting_hands(self, soup: BeautifulSoup, player_perspective: str) -> Optional[Dict[str, StartingHand]]:
-        """Extracts the starting hand for the player of perspective from the hand area."""
-        logger.info("Extracting starting hands")
+        """Extracts the starting hand for the player of perspective from the hand area (fallback method)."""
+        logger.info("Extracting starting hands from HTML (fallback)")
         try:
             hand_area = soup.find('div', id='hand_area')
             if not hand_area:
@@ -2193,11 +2348,11 @@ class Parser:
             )
             
             starting_hands = {player_perspective: player_hand}
-            logger.info(f"Extracted starting hands: {starting_hands}")
+            logger.info(f"Extracted starting hands from HTML: {starting_hands}")
             return starting_hands
 
         except Exception as e:
-            logger.error(f"Error extracting starting hands: {e}")
+            logger.error(f"Error extracting starting hands from HTML: {e}")
             return None
 
     def _extract_metadata(self, soup: BeautifulSoup, html_content: str, moves: List[Move]) -> Dict[str, Any]:
