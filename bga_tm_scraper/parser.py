@@ -80,7 +80,9 @@ class Move:
     card_options: Optional[Dict[str, List[str]]] = None
     cards_kept: Optional[Dict[str, List[str]]] = None
     reason: Optional[str] = None
-    
+    corp_options: Optional[Dict[str, List[str]]] = None
+    prelude_options: Optional[Dict[str, List[str]]] = None
+
     # Game state after this move
     game_state: Optional[GameState] = None
 
@@ -616,6 +618,33 @@ class Parser:
         starting_hands = self._extract_starting_hands_from_gamelogs(gamelogs, token_types)
         if not starting_hands:
             starting_hands = self._extract_starting_hands(soup, player_perspective)
+
+        # Extract corporation options from initial hand area (if visible at start)
+        try:
+            corp_opts = self._extract_corp_options_from_hand_area(soup)
+            if corp_opts and moves_with_states:
+                # Attach corp options to the first move, keyed by player_perspective (player id)
+                if isinstance(player_perspective, str) and player_perspective.strip():
+                    if moves_with_states[0].corp_options is None:
+                        moves_with_states[0].corp_options = {player_perspective: corp_opts}
+                    else:
+                        moves_with_states[0].corp_options[player_perspective] = corp_opts
+                    logger.info(f"Detected starting corporation options: {corp_opts}")
+        except Exception as e:
+            logger.debug(f"Failed to attach corporation options to replay log: {e}")
+
+        # Extract prelude options from initial hand area (if visible at start)
+        try:
+            prelude_opts = self._extract_prelude_options_from_hand_area(soup)
+            if prelude_opts and moves_with_states:
+                if isinstance(player_perspective, str) and player_perspective.strip():
+                    if moves_with_states[0].prelude_options is None:
+                        moves_with_states[0].prelude_options = {player_perspective: prelude_opts}
+                    else:
+                        moves_with_states[0].prelude_options[player_perspective] = prelude_opts
+                    logger.info(f"Detected starting prelude options: {prelude_opts}")
+        except Exception as e:
+            logger.debug(f"Failed to attach prelude options to replay log: {e}")
 
         # Build final player objects from collected data
         players_info = self._build_final_players(player_id_map, corporations, moves_with_states, game_metadata, starting_hands)
@@ -2705,6 +2734,80 @@ class Parser:
 
         except Exception as e:
             logger.error(f"Error extracting starting hands from HTML: {e}")
+            return None
+
+    def _extract_corp_options_from_hand_area(self, soup: BeautifulSoup) -> Optional[List[str]]:
+        """Finds corporation choice options visible at game start in the hand_area panel.
+        Looks for a div with class 'hand_area' that contains two 'div.corp' entries with
+        'div.card_decor > div.card_title' providing the corporation names.
+        Returns a list of up to two corporation names if found, otherwise None.
+        """
+        try:
+            # Primary: by class as per issue description
+            hand_area = soup.find('div', class_='hand_area')
+            # Fallback: some layouts may use id
+            if hand_area is None:
+                hand_area = soup.find('div', id='hand_area')
+            if hand_area is None:
+                return None
+
+            # Find corporation card containers under hand_area
+            corp_divs = hand_area.find_all('div', class_='corp')
+            corp_names: List[str] = []
+            for corp in corp_divs:
+                decor = corp.find('div', class_='card_decor')
+                if not decor:
+                    # Sometimes title might be directly under corp
+                    decor = corp
+                title_div = decor.find('div', class_='card_title') if decor else None
+                title = title_div.get_text(strip=True) if title_div else None
+                if title:
+                    if title not in corp_names:
+                        corp_names.append(title)
+                if len(corp_names) >= 2:
+                    break
+
+            if len(corp_names) >= 2:
+                return corp_names[:2]
+            return None
+        except Exception as e:
+            logger.debug(f"Failed to extract corp options from hand area: {e}")
+            return None
+
+    def _extract_prelude_options_from_hand_area(self, soup: BeautifulSoup) -> Optional[List[str]]:
+        """Finds prelude choice options visible at game start in the hand_area panel.
+        Looks for a div with class 'hand_area' that contains four 'div.prelude' entries with
+        'div.card_decor > div.card_title' providing the prelude names.
+        Returns a list of up to four prelude names if found, otherwise None.
+        """
+        try:
+            # Primary: by class
+            hand_area = soup.find('div', class_='hand_area')
+            # Fallback: id variant
+            if hand_area is None:
+                hand_area = soup.find('div', id='hand_area')
+            if hand_area is None:
+                return None
+
+            prelude_divs = hand_area.find_all('div', class_='prelude')
+            prelude_names: List[str] = []
+            for prelude in prelude_divs:
+                decor = prelude.find('div', class_='card_decor')
+                if not decor:
+                    decor = prelude
+                title_div = decor.find('div', class_='card_title') if decor else None
+                title = title_div.get_text(strip=True) if title_div else None
+                if title and title not in prelude_names:
+                    prelude_names.append(title)
+                if len(prelude_names) >= 4:
+                    break
+
+            if prelude_names:
+                # Expecting 4 per issue description, but return whatever we find up to 4
+                return prelude_names[:4]
+            return None
+        except Exception as e:
+            logger.debug(f"Failed to extract prelude options from hand area: {e}")
             return None
 
     def _extract_metadata(self, soup: BeautifulSoup, html_content: str, moves: List[Move]) -> Dict[str, Any]:
