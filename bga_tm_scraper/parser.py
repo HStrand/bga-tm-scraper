@@ -3888,7 +3888,13 @@ class Parser:
         # Convert dataclasses to dictionaries for JSON serialization
         def convert_to_dict(obj):
             if hasattr(obj, '__dict__'):
-                return {k: convert_to_dict(v) for k, v in obj.__dict__.items()}
+                result = {}
+                for k, v in obj.__dict__.items():
+                    # Omit corp_options and prelude_options if they are None (null) since we know these are only relevant turn 1.
+                    if k in ("corp_options", "prelude_options") and v is None:
+                        continue
+                    result[k] = convert_to_dict(v)
+                return result
             elif isinstance(obj, list):
                 return [convert_to_dict(item) for item in obj]
             elif isinstance(obj, dict):
