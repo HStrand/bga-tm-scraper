@@ -10,6 +10,7 @@ import re
 import logging
 import time
 import os
+from urllib.parse import urlparse
 from typing import Optional, Dict, Any
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -45,6 +46,7 @@ class BGASession:
         self.chromedriver_path = chromedriver_path
         self.chrome_path = chrome_path
         self.headless = headless
+        self.effective_base_origin = self.BASE_URL
         
         # Session-based components
         self.session = requests.Session()
@@ -133,7 +135,7 @@ class BGASession:
                     'request_token': self.request_token
                 }
                 
-                login_resp = self.session.post(f'{self.BASE_URL}{self.LOGIN_URL}', data=login_data, timeout=15)
+                login_resp = self.session.post(f'{self.effective_base_origin}{self.LOGIN_URL}', data=login_data, timeout=15)
                 login_resp.raise_for_status()
 
                 # Verify login by checking for authentication indicators
@@ -178,6 +180,15 @@ class BGASession:
                 # Use a page that is less likely to be rate-limited
                 resp = self.session.get(f'{self.BASE_URL}/gamelist', timeout=15)
                 resp.raise_for_status()
+
+                # Determine effective origin (handles locale subdomains like en.boardgamearena.com)
+                try:
+                    parsed = urlparse(resp.url)
+                    if parsed.scheme and parsed.hostname:
+                        self.effective_base_origin = f"{parsed.scheme}://{parsed.hostname}"
+                        logger.debug(f"Effective base origin set to: {self.effective_base_origin}")
+                except Exception as e:
+                    logger.debug(f"Could not determine effective base origin from {resp.url}: {e}")
                 
                 # Extract request token from JavaScript
                 token = self._extract_request_token(resp.content)
@@ -234,7 +245,7 @@ class BGASession:
         """Verify that session-based authentication was successful"""
         try:
             # Test authentication by accessing a protected page
-            test_resp = self.session.get(f'{self.BASE_URL}/account')
+            test_resp = self.session.get(f'{self.effective_base_origin}/account')
             test_resp.raise_for_status()
             
             # Check for login indicators in response
@@ -249,7 +260,7 @@ class BGASession:
                 return True
             
             # Additional check: try to access player stats
-            stats_resp = self.session.get(f'{self.BASE_URL}/gamestats', params={'player': "689196352"})
+            stats_resp = self.session.get(f'{self.effective_base_origin}/gamestats', params={'player': "689196352"})
             if stats_resp.status_code == 200 and 'must be logged' not in stats_resp.text.lower():
                 return True
             
@@ -335,52 +346,100 @@ class BGASession:
             return False
     
     def _transfer_cookies_to_browser(self) -> bool:
-        """Transfer authenticated session cookies to Selenium browser"""
+        """Transfer authenticated session cookies to Selenium browser with correct domains/attributes"""
         try:
-            logger.info("Transferring session cookies to browser...")
-            
-            # First navigate to BGA domain so we can set cookies
-            self.driver.get(self.BASE_URL)
-            time.sleep(2)
-            
+            logger.info("Transferring session cookies to browser (domain-aware)...")
+
+            if not self.driver:
+                logger.warning("WebDriver is not initialized")
+                return False
+
+            # Determine scheme/host from effective base origin
+            try:
+                parsed_origin = urlparse(self.effective_base_origin)
+                origin_scheme = parsed_origin.scheme or "https"
+                origin_host = parsed_origin.hostname or "boardgamearena.com"
+            except Exception:
+                origin_scheme = "https"
+                origin_host = "boardgamearena.com"
+
             # Get cookies from requests session
-            session_cookies = self.session.cookies
-            
+            session_cookies = list(self.session.cookies) if self.session and self.session.cookies else []
             if not session_cookies:
                 logger.warning("No cookies found in session")
                 return False
-            
-            # Transfer each cookie to browser
+
+            # Group cookies by domain (normalize leading dot)
+            cookies_by_domain = {}
+            for c in session_cookies:
+                domain = (c.domain or origin_host).lstrip(".")
+                cookies_by_domain.setdefault(domain, []).append(c)
+
             cookies_transferred = 0
-            for cookie in session_cookies:
+
+            # Visit each domain host before adding its cookies (required by Selenium/Chrome)
+            for domain_host, cookies in cookies_by_domain.items():
                 try:
-                    cookie_dict = {
-                        'name': cookie.name,
-                        'value': cookie.value,
-                        'domain': cookie.domain if cookie.domain else '.boardgamearena.com',
-                        'path': cookie.path if cookie.path else '/',
-                    }
-                    
-                    # Add optional cookie attributes if they exist
-                    if cookie.secure:
-                        cookie_dict['secure'] = True
-                    
-                    self.driver.add_cookie(cookie_dict)
-                    cookies_transferred += 1
-                    logger.debug(f"Transferred cookie: {cookie.name}")
-                    
+                    target_url = f"{origin_scheme}://{domain_host}"
+                    logger.debug(f"Preparing to set cookies for host: {domain_host}")
+                    self.driver.get(target_url)
+                    time.sleep(1)
                 except Exception as e:
-                    logger.debug(f"Failed to transfer cookie {cookie.name}: {e}")
+                    logger.debug(f"Failed to navigate to {domain_host} for cookie injection: {e}")
                     continue
-            
-            logger.info(f"✅ Transferred {cookies_transferred} cookies to browser")
-            
-            # Refresh page to apply cookies
-            self.driver.refresh()
-            time.sleep(2)
-            
+
+                for cookie in cookies:
+                    try:
+                        # Build Selenium cookie dict safely
+                        is_host_cookie = cookie.name.startswith("__Host-") or not cookie.domain
+                        cookie_dict = {
+                            "name": cookie.name,
+                            "value": cookie.value,
+                            "path": cookie.path if cookie.path else "/",
+                        }
+
+                        # __Host- cookies MUST NOT set domain, MUST be Secure, path="/"
+                        if is_host_cookie:
+                            cookie_dict["path"] = "/"
+                            cookie_dict["secure"] = True
+                        else:
+                            # Provide a proper host (without leading dot)
+                            cookie_dict["domain"] = (cookie.domain or domain_host).lstrip(".")
+                            if cookie.secure:
+                                cookie_dict["secure"] = True
+
+                        # Expiry if available (requests stores as int epoch or None)
+                        if getattr(cookie, "expires", None):
+                            try:
+                                cookie_dict["expiry"] = int(cookie.expires)
+                            except Exception:
+                                pass
+
+                        # Note: Some browsers ignore httpOnly/sameSite when injecting via DevTools; ignore if unsupported
+                        self.driver.add_cookie(cookie_dict)
+                        cookies_transferred += 1
+                        logger.debug(f"Transferred cookie: {cookie.name} for domain {cookie_dict.get('domain', domain_host)}")
+                    except Exception as e:
+                        logger.debug(f"Failed to transfer cookie {cookie.name} for {domain_host}: {e}")
+                        continue
+
+                # Refresh to apply this domain's cookies
+                try:
+                    self.driver.refresh()
+                    time.sleep(1)
+                except Exception:
+                    pass
+
+            # Navigate back to effective base origin
+            try:
+                self.driver.get(self.effective_base_origin)
+                time.sleep(1)
+            except Exception:
+                pass
+
+            logger.info(f"✅ Transferred {cookies_transferred} cookies to browser across {len(cookies_by_domain)} domain(s)")
             return cookies_transferred > 0
-            
+
         except Exception as e:
             logger.error(f"Error transferring cookies to browser: {e}")
             return False
@@ -390,8 +449,8 @@ class BGASession:
         try:
             logger.info("Verifying browser authentication...")
             
-            # Navigate to a page that requires authentication
-            self.driver.get(f'{self.BASE_URL}/account')
+            # Navigate to a page that requires authentication (use effective origin)
+            self.driver.get(f'{self.effective_base_origin}/account')
             time.sleep(3)
             
             # Check page source for authentication indicators
@@ -410,7 +469,7 @@ class BGASession:
                 return True
             
             # Additional test: try to access game stats
-            self.driver.get(f'{self.BASE_URL}/gamestats?player=689196352')
+            self.driver.get(f'{self.effective_base_origin}/gamestats?player=689196352')
             time.sleep(2)
             
             page_source = self.driver.page_source.lower()

@@ -741,7 +741,7 @@ class Parser:
     def _extract_game_date(self, soup: BeautifulSoup, game_metadata: GameMetadata) -> str:
         """Extract game date from GameMetadata or HTML"""
         # If GameMetadata has played_at timestamp, use it
-        if game_metadata and game_metadata.played_at:
+        if game_metadata and game_metadata.played_at and game_metadata.played_at != "0001-01-01T00:00:00":
             try:
                 # Parse the ISO timestamp and convert to date
                 played_at_dt = datetime.fromisoformat(game_metadata.played_at.replace('Z', '+00:00'))

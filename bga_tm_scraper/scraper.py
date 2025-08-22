@@ -2352,8 +2352,15 @@ class TMScraper:
                 print(f"Retrying replay page: {url}")
                 self.driver.get(url)
                 
-                # Wait for page to load
-                time.sleep(self.speed_settings.get('page_load_delay', 2))
+                # Wait for page to load or replay content to render
+                if '/archive/replay/' in url:
+                    try:
+                        replay_id = self._extract_replay_id(url)
+                        self._wait_for_replay_content_to_load(replay_id or 'unknown')
+                    except Exception:
+                        time.sleep(self.speed_settings.get('page_load_delay', 2))
+                else:
+                    time.sleep(self.speed_settings.get('page_load_delay', 2))
                 
                 # Check if authentication is now successful
                 page_source = self.driver.page_source
