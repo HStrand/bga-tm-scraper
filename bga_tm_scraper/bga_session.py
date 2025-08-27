@@ -121,7 +121,10 @@ class BGASession:
                 self.session.headers.update({
                     'X-Request-Token': self.request_token,
                     'X-Requested-With': 'XMLHttpRequest',
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Referer': f'{self.effective_base_origin}{self.LOGIN_URL}',
+                    'Origin': self.effective_base_origin,
+                    'Accept-Language': 'en-US,en;q=0.9'
                 })
                 
                 # Perform login
@@ -210,8 +213,8 @@ class BGASession:
         """Extract request token from HTML content"""
         try:
             # Use regex for faster extraction without full parsing
-            # Pattern looks for: requestToken: '...'
-            token_pattern = re.compile(rb"requestToken:\s*'([^']+)'")
+            # Pattern looks for: requestToken: '...' or "..."
+            token_pattern = re.compile(rb"requestToken:\s*['\"]([^'\"]+)['\"]")
             match = token_pattern.search(html_content)
             
             if match:
@@ -228,7 +231,7 @@ class BGASession:
                     script_content = script_tag.string
                     if 'requestToken: ' in script_content:
                         # More robust extraction from script content
-                        token_match = re.search(r"requestToken:\s*'([^']+)'", script_content)
+                        token_match = re.search(r"requestToken:\s*['\"]([^'\"]+)['\"]", script_content)
                         if token_match:
                             token = token_match.group(1)
                             logger.debug(f"Extracted token with BeautifulSoup: {token[:10]}...")
@@ -244,28 +247,44 @@ class BGASession:
     def _verify_session_authentication(self) -> bool:
         """Verify that session-based authentication was successful"""
         try:
-            # Test authentication by accessing a protected page
-            test_resp = self.session.get(f'{self.effective_base_origin}/account')
+            # Access a protected page and inspect final URL/content
+            test_resp = self.session.get(f'{self.effective_base_origin}/account', allow_redirects=True, timeout=15)
             test_resp.raise_for_status()
-            
-            # Check for login indicators in response
-            page_content = test_resp.text.lower()
-            
-            # If we see login forms, we're not authenticated
-            if 'login' in page_content and 'password' in page_content:
+            final_url = test_resp.url
+            page_content = test_resp.text
+            lower = page_content.lower()
+
+            # Redirected to login page indicates unauthenticated
+            if final_url.endswith('/account/account/login.html'):
                 return False
-            
-            # If we see account/profile indicators, we're authenticated
-            if any(indicator in page_content for indicator in ['logout', 'my account', 'profile']):
+
+            # Presence of login form or action to login page indicates unauthenticated
+            if ('form_id="loginform"' in lower) or ('/account/account/login.html' in lower and '<form' in lower):
+                return False
+
+            # Logout link path strongly indicates authenticated
+            if '/account/account/logout.html' in lower:
                 return True
-            
-            # Additional check: try to access player stats
-            stats_resp = self.session.get(f'{self.effective_base_origin}/gamestats', params={'player': "689196352"})
-            if stats_resp.status_code == 200 and 'must be logged' not in stats_resp.text.lower():
+
+            # Additional check: try to access player stats without being redirected to login
+            stats_resp = self.session.get(
+                f'{self.effective_base_origin}/gamestats',
+                params={'player': "689196352"},
+                allow_redirects=True,
+                timeout=15
+            )
+            stats_url = stats_resp.url.lower()
+            stats_page = stats_resp.text.lower()
+            if (
+                stats_resp.status_code == 200
+                and not stats_url.endswith('/account/account/login.html')
+                and 'form_id="loginform"' not in stats_page
+                and '/account/account/login.html' not in stats_page
+            ):
                 return True
-            
+
             return False
-            
+
         except Exception as e:
             logger.error(f"Error verifying session authentication: {e}")
             return False
@@ -452,18 +471,23 @@ class BGASession:
             # Navigate to a page that requires authentication (use effective origin)
             self.driver.get(f'{self.effective_base_origin}/account')
             time.sleep(3)
+
+            current_url = self.driver.current_url
+            page_source = self.driver.page_source
+            lower = page_source.lower()
             
-            # Check page source for authentication indicators
-            page_source = self.driver.page_source.lower()
-            
-            # If we see login forms, authentication failed
-            if 'must be logged' in page_source or ('login' in page_source and 'password' in page_source):
-                logger.warning("Browser shows login required - authentication failed")
+            # Redirected to login page indicates unauthenticated
+            if current_url.endswith('/account/account/login.html'):
+                logger.warning("Browser shows login page - authentication failed")
+                return False
+
+            # Presence of login form or action to login page indicates unauthenticated
+            if ('form_id="loginform"' in lower) or ('/account/account/login.html' in lower and '<form' in lower):
+                logger.warning("Browser shows login form - authentication failed")
                 return False
             
-            # Look for authenticated user indicators
-            authenticated_indicators = ['logout', 'my account', 'player_name', 'profile']
-            if any(indicator in page_source for indicator in authenticated_indicators):
+            # Logout link path or player_name presence indicates authenticated
+            if '/account/account/logout.html' in lower or 'player_name' in lower:
                 logger.info("✅ Browser authentication verified")
                 self.is_browser_logged_in = True
                 return True
@@ -472,8 +496,12 @@ class BGASession:
             self.driver.get(f'{self.effective_base_origin}/gamestats?player=689196352')
             time.sleep(2)
             
+            current_url = self.driver.current_url
             page_source = self.driver.page_source.lower()
-            if 'must be logged' not in page_source and 'fatal error' not in page_source:
+            if (not current_url.endswith('/account/account/login.html')
+                and 'form_id="loginform"' not in page_source
+                and '/account/account/login.html' not in page_source
+                and 'fatal error' not in page_source):
                 logger.info("✅ Browser authentication verified via game stats")
                 self.is_browser_logged_in = True
                 return True
