@@ -705,11 +705,11 @@ class Parser:
                     if move.card_played:
                         cards_played.append(move.card_played)
                     if move.action_type == 'claim_milestone':
-                        milestone_match = re.search(r'claims milestone (\w+)', move.description)
+                        milestone_match = re.search(r'claims milestone (.+?) ', move.description)
                         if milestone_match:
                             milestones_claimed.append(milestone_match.group(1))
                     if move.action_type == 'fund_award':
-                        award_match = re.search(r'funds (\w+) award', move.description)
+                        award_match = re.search(r'funds (.+?) award', move.description)
                         if award_match:
                             awards_funded.append(award_match.group(1))
             
@@ -3673,7 +3673,7 @@ class Parser:
             
             # Update milestone and award tracking
             if move.action_type == 'claim_milestone':
-                milestone_match = re.search(r'claims milestone (\w+)', move.description)
+                milestone_match = re.search(r'claims milestone (.+?)(?: \||$)', move.description)
                 if milestone_match:
                     milestone_name = milestone_match.group(1)
                     current_milestones[milestone_name] = {
@@ -3684,7 +3684,7 @@ class Parser:
                     }
             
             if move.action_type == 'fund_award':
-                award_match = re.search(r'funds (\w+) award', move.description)
+                award_match = re.search(r'funds (.+?) award', move.description)
                 if award_match:
                     award_name = award_match.group(1)
                     current_awards[award_name] = {

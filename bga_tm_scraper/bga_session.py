@@ -181,7 +181,7 @@ class BGASession:
                 logger.debug(f"Fetching initial page to extract request token (attempt {attempt + 1}/{max_retries})...")
                 
                 # Use a page that is less likely to be rate-limited
-                resp = self.session.get(f'{self.BASE_URL}/gamelist', timeout=15)
+                resp = self.session.get(f'{self.BASE_URL}/welcome', timeout=5)
                 resp.raise_for_status()
 
                 # Determine effective origin (handles locale subdomains like en.boardgamearena.com)
@@ -271,7 +271,7 @@ class BGASession:
                 f'{self.effective_base_origin}/gamestats',
                 params={'player': "689196352"},
                 allow_redirects=True,
-                timeout=15
+                timeout=5
             )
             stats_url = stats_resp.url.lower()
             stats_page = stats_resp.text.lower()

@@ -139,7 +139,7 @@ class TMScraper:
 
         if self.chrome_path:
             # If a custom Chrome path is provided, set it
-            options.binary_location = self.chrome_path
+            chrome_options.binary_location = self.chrome_path
 
         # Set user agent to avoid detection
         chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
@@ -180,6 +180,270 @@ class TMScraper:
             print("⚠️  Could not verify login, but continuing anyway...")
             return True
     
+    def _normalize_url_to_effective_origin(self, url: str) -> str:
+        """
+        Replace the scheme/host of a URL with the authenticated effective_base_origin (if any).
+        Ensures we hit the same host we authenticated against (e.g., en.boardgamearena.com).
+        """
+        try:
+            if self.session and getattr(self.session, 'effective_base_origin', None):
+                from urllib.parse import urlparse, urlunparse
+                target = urlparse(url)
+                base = urlparse(self.session.effective_base_origin)
+                if base.scheme and base.netloc and (target.netloc != base.netloc):
+                    return urlunparse((base.scheme, base.netloc, target.path, target.params, target.query, target.fragment))
+        except Exception:
+            pass
+        return url
+
+    def _find_replay_content_in_frames(self, max_ms: int = 2500) -> bool:
+        """
+        Scan the top document and all iframes quickly for replay content indicators.
+        If found, stores the detected frame's HTML in self._last_replay_source_html.
+        Returns True if any context (top or frame) shows replay logs or g_gamelogs.
+        """
+        try:
+            import time as _t
+            start = _t.time()
+
+            def _time_left() -> bool:
+                return (_t.time() - start) * 1000.0 < max_ms
+
+            def _check_current_context() -> bool:
+                try:
+                    result = self.driver.execute_script("""
+                        try {
+                            if (typeof g_gamelogs !== 'undefined' && g_gamelogs && g_gamelogs.length > 0) {
+                                return 1;
+                            }
+                            if (document.querySelector('#replaylogs, #replaylogs_container, .replaylogs, .replay_logs')) {
+                                return 1;
+                            }
+                            if (document.body && (document.body.innerHTML.includes('replaylogs_move') || document.body.innerHTML.includes('g_gamelogs'))) {
+                                return 1;
+                            }
+                            return 0;
+                        } catch (e) {
+                            return 0;
+                        }
+                    """)
+                    return bool(result)
+                except Exception:
+                    return False
+
+            # Reset last captured source
+            try:
+                setattr(self, "_last_replay_source_html", None)
+            except Exception:
+                pass
+
+            # Check top-level first
+            if _check_current_context():
+                try:
+                    setattr(self, "_last_replay_source_html", self.driver.page_source)
+                except Exception:
+                    pass
+                return True
+
+            # Enumerate iframes and check each quickly
+            try:
+                frames = self.driver.find_elements(By.TAG_NAME, "iframe")
+            except Exception:
+                frames = []
+
+            for frame in frames:
+                if not _time_left():
+                    break
+                try:
+                    self.driver.switch_to.frame(frame)
+                    if _check_current_context():
+                        try:
+                            setattr(self, "_last_replay_source_html", self.driver.page_source)
+                        except Exception:
+                            pass
+                        self.driver.switch_to.default_content()
+                        return True
+                except Exception:
+                    # ignore and continue
+                    try:
+                        self.driver.switch_to.default_content()
+                    except Exception:
+                        pass
+                    continue
+                finally:
+                    try:
+                        self.driver.switch_to.default_content()
+                    except Exception:
+                        pass
+
+            # Ensure we are back to default content
+            try:
+                self.driver.switch_to.default_content()
+            except Exception:
+                pass
+            return False
+        except Exception:
+            try:
+                self.driver.switch_to.default_content()
+            except Exception:
+                pass
+            return False
+
+    def _replay_debug_init(self):
+        """Initialize replay debug event buffer."""
+        try:
+            self._replay_debug_events = []
+        except Exception:
+            pass
+
+    def _replay_debug_log(self, msg: str):
+        """Append a small debug message for replay diagnostics."""
+        try:
+            if not hasattr(self, "_replay_debug_events"):
+                self._replay_debug_events = []
+            self._replay_debug_events.append(str(msg))
+        except Exception:
+            pass
+
+    def _debug_ensure_dir(self, dir_path: str):
+        """Ensure a directory exists."""
+        try:
+            os.makedirs(dir_path, exist_ok=True)
+        except Exception:
+            pass
+
+    def _collect_iframe_srcs_quick(self, base_html: Optional[str] = None) -> List[str]:
+        """Collect iframe srcs from DOM (JS) or fallback parse HTML."""
+        srcs: List[str] = []
+        try:
+            srcs = self.driver.execute_script("""
+                try {
+                    return Array.from(document.querySelectorAll('iframe'))
+                        .map(f => f.getAttribute('src'))
+                        .filter(s => !!s);
+                } catch (e) { return []; }
+            """) or []
+        except Exception:
+            srcs = []
+        if not srcs and base_html:
+            try:
+                soup_ifr = BeautifulSoup(base_html, 'html.parser')
+                srcs = [ifr.get('src') for ifr in soup_ifr.find_all('iframe') if ifr.get('src')]
+            except Exception:
+                pass
+        return srcs
+
+    def _dump_replay_debug_artifacts(self, table_id: str, nav_url: str, meta: Dict[str, str], page_source: str):
+        """
+        Write debug artifacts to ./debug for replay diagnostics:
+        - meta txt (urls, readyState, cookies, iframe list, events)
+        - top html snapshot
+        - up to 3 iframe html snapshots
+        - performance entries json
+        """
+        try:
+            import json
+            debug_dir = os.path.abspath(os.path.join(os.getcwd(), "debug"))
+            self._debug_ensure_dir(debug_dir)
+
+            # Meta file
+            meta_path = os.path.join(debug_dir, f"replay_debug_meta_{table_id}.txt")
+            try:
+                with open(meta_path, "w", encoding="utf-8") as f:
+                    f.write(f"nav_url: {nav_url}\n")
+                    for k, v in meta.items():
+                        try:
+                            f.write(f"{k}: {v}\n")
+                        except Exception:
+                            pass
+                    # Replay debug events
+                    f.write("\n-- replay_debug_events --\n")
+                    events = getattr(self, "_replay_debug_events", [])
+                    for e in (events or []):
+                        try:
+                            f.write(f"{e}\n")
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+            # Top HTML snapshot
+            top_path = os.path.join(debug_dir, f"replay_debug_top_{table_id}.html")
+            try:
+                with open(top_path, "w", encoding="utf-8") as f:
+                    f.write(page_source or "")
+            except Exception:
+                pass
+
+            # Iframe HTML snapshots (up to first 3)
+            try:
+                frames = self.driver.find_elements(By.TAG_NAME, "iframe")
+            except Exception:
+                frames = []
+            iframe_paths = []
+            idx = 0
+            for frame in frames[:3]:
+                try:
+                    self.driver.switch_to.frame(frame)
+                    iframe_html = self.driver.page_source
+                except Exception:
+                    iframe_html = ""
+                finally:
+                    try:
+                        self.driver.switch_to.default_content()
+                    except Exception:
+                        pass
+                try:
+                    iframe_path = os.path.join(debug_dir, f"replay_debug_iframe_{idx}_{table_id}.html")
+                    with open(iframe_path, "w", encoding="utf-8") as f:
+                        f.write(iframe_html or "")
+                    try:
+                        iframe_paths.append(iframe_path)
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+                idx += 1
+
+            # performance entries
+            perf_entries = []
+            try:
+                perf_entries = self.driver.execute_script("""
+                    try { return (performance.getEntries() || []).map(e => e.name).slice(0, 200); }
+                    catch (e) { return []; }
+                """) or []
+            except Exception:
+                pass
+            try:
+                perf_path = os.path.join(debug_dir, f"replay_debug_perf_{table_id}.json")
+                with open(perf_path, "w", encoding="utf-8") as f:
+                    json.dump(perf_entries, f, ensure_ascii=False, indent=2)
+                # Record last debug artifacts for GUI/diagnostics and print absolute paths
+                try:
+                    abs_meta = os.path.abspath(meta_path)
+                    abs_top = os.path.abspath(top_path)
+                    abs_perf = os.path.abspath(perf_path)
+                    abs_iframes = [os.path.abspath(p) for p in (iframe_paths or [])]
+                    self._last_debug_artifacts = {
+                        "table_id": table_id,
+                        "nav_url": nav_url,
+                        "meta": abs_meta,
+                        "top": abs_top,
+                        "iframes": abs_iframes,
+                        "perf": abs_perf
+                    }
+                    try:
+                        print(f"🔍 Debug artifacts saved: meta={abs_meta}, top={abs_top}, perf={abs_perf}, iframes_count={len(abs_iframes)}")
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+            except Exception:
+                pass
+        except Exception:
+            # Swallow debug write errors
+            pass
+
     def scrape_table_only(self, table_id: str, player_perspective: str, save_raw: bool = True, raw_data_dir: str = None) -> Optional[Dict]:
         """
         Scrape only the table page for a game, extract player info and check Arena mode
@@ -613,7 +877,8 @@ class TMScraper:
         try:
             # Navigate to the gamereview page
             print(f"Navigating to gamereview page: {gamereview_url}")
-            self.driver.get(gamereview_url)
+            normalized_url = self._normalize_url_to_effective_origin(gamereview_url)
+            self.driver.get(normalized_url)
             
             # Wait for JavaScript content to load instead of just using a fixed delay
             if not self._wait_for_gamereview_content_to_load(table_id):
@@ -853,8 +1118,8 @@ class TMScraper:
             bool: True if content loaded successfully, False if timeout or error
         """
         try:
-            # Get timeout from speed settings
-            timeout = self.speed_settings.get('element_wait_timeout', 10)
+            # Get timeout from speed settings (hard-capped at 3s for replay pages)
+            timeout = min(self.speed_settings.get('element_wait_timeout', 10), 3)
             
             print(f"⏱️  Waiting for table content to load (timeout: {timeout}s)")
             logger.info(f"Waiting for table content to load for table {table_id}")
@@ -1030,14 +1295,21 @@ class TMScraper:
             bool: True if content loaded successfully, False if timeout or error
         """
         try:
-            # Get timeout from speed settings
-            timeout = self.speed_settings.get('element_wait_timeout', 10)
+            # Get timeout from speed settings (hard-capped at 3s for replay pages)
+            timeout = min(self.speed_settings.get('element_wait_timeout', 10), 3)
             
             print(f"⏱️  Waiting for player history content to load (timeout: {timeout}s)")
             logger.info(f"Waiting for player history content to load for player {player_id}")
             
             # Strategy 1: Wait for specific content indicators to appear
             wait = WebDriverWait(self.driver, timeout)
+            # Quick frame-aware scan before longer strategies
+            try:
+                if self._find_replay_content_in_frames(max_ms=int(timeout * 1000) - 200):
+                    logger.info("Replay content detected in frame or top context")
+                    return True
+            except Exception:
+                pass
             
             # Try multiple strategies to detect when content is loaded
             content_loaded = False
@@ -1155,14 +1427,23 @@ class TMScraper:
             bool: True if content loaded successfully, False if timeout or error
         """
         try:
-            # Get timeout from speed settings
-            timeout = self.speed_settings.get('element_wait_timeout', 10)
+            # Get timeout from speed settings (hard cap at 3s for replay pages)
+            timeout = min(self.speed_settings.get('element_wait_timeout', 10), 3)
             
             print(f"⏱️  Waiting for JavaScript content to load (timeout: {timeout}s)")
             logger.info(f"Waiting for gamereview content to load for table {table_id}")
             
             # Strategy 1: Wait for specific content indicators to appear
             wait = WebDriverWait(self.driver, timeout)
+
+            # Quick frame-aware scan before longer strategies (fits within ~3s cap)
+            try:
+                max_ms = max(500, int(timeout * 1000) - 200)
+                if self._find_replay_content_in_frames(max_ms=max_ms):
+                    logger.info("Replay content detected in frame or top context (fast scan)")
+                    return True
+            except Exception:
+                pass
             
             # Try multiple strategies to detect when content is loaded
             content_loaded = False
@@ -1284,14 +1565,23 @@ class TMScraper:
             bool: True if content loaded successfully, False if timeout or error
         """
         try:
-            # Get timeout from speed settings
-            timeout = self.speed_settings.get('element_wait_timeout', 10)
+            # Get timeout from speed settings (hard cap at 3s for replay pages)
+            timeout = min(self.speed_settings.get('element_wait_timeout', 10), 3)
             
             print(f"⏱️  Waiting for replay content to load (timeout: {timeout}s)")
             logger.info(f"Waiting for replay content to load for replay {replay_id}")
             
             # Strategy 1: Wait for specific content indicators to appear
             wait = WebDriverWait(self.driver, timeout)
+
+            # Quick frame-aware scan before longer strategies (fits within ~3s cap)
+            try:
+                max_ms = max(500, int(timeout * 1000) - 200)
+                if self._find_replay_content_in_frames(max_ms=max_ms):
+                    logger.info("Replay content detected in frame or top context (fast scan)")
+                    return True
+            except Exception:
+                pass
             
             # Try multiple strategies to detect when content is loaded
             content_loaded = False
@@ -1304,10 +1594,20 @@ class TMScraper:
                     try:
                         # Execute JavaScript to check if g_gamelogs exists and has content
                         result = driver.execute_script("""
-                            if (typeof g_gamelogs !== 'undefined' && g_gamelogs && g_gamelogs.length > 0) {
-                                return g_gamelogs.length;
+                            try {
+                                if (typeof g_gamelogs !== 'undefined' && g_gamelogs && g_gamelogs.length > 0) {
+                                    return g_gamelogs.length;
+                                }
+                                if (document.querySelector('#replaylogs, #replaylogs_container, .replaylogs, .replay_logs')) {
+                                    return 1;
+                                }
+                                if (document.body && (document.body.innerHTML.includes('replaylogs_move') || document.body.innerHTML.includes('g_gamelogs'))) {
+                                    return 1;
+                                }
+                                return 0;
+                            } catch (e) {
+                                return 0;
                             }
-                            return 0;
                         """)
                         
                         if result and result > 0:
@@ -1393,7 +1693,7 @@ class TMScraper:
             # Strategy 5: Progressive delay with content validation (fallback)
             if not content_loaded:
                 logger.info("Strategy 5: Using progressive delays with content validation...")
-                delays = [1.0, 2.0, 3.0, 5.0]  # Progressive delays for replay pages
+                delays = [1.0, 2.0]  # Short delays for replay pages (max ~3s)
                 
                 for delay in delays:
                     print(f"⏱️  Waiting {delay}s for content to load...")
@@ -1565,15 +1865,66 @@ class TMScraper:
         try:
             # Navigate to the replay URL
             print(f"Navigating to: {url}")
-            self.driver.get(url)
+            nav_url = self._normalize_url_to_effective_origin(url)
+            self.driver.get(nav_url)
             
-            # Wait for replay content to load using smart detection instead of fixed delay
+            # Init debug (lightweight, no extra wait)
+            self._replay_debug_init()
+            try:
+                self._replay_debug_log(f"navigated_to={nav_url}")
+                rs = self.driver.execute_script("return document.readyState") or ""
+                self._replay_debug_log(f"readyState={rs}")
+                cur = self.driver.current_url
+                self._replay_debug_log(f"current_url={cur}")
+                ck = []
+                try:
+                    ck = [c.get('name') for c in self.driver.get_cookies()] or []
+                except Exception:
+                    ck = []
+                self._replay_debug_log(f"cookie_count={len(ck)}; names_sample={ck[:5]}")
+                ifr = self._collect_iframe_srcs_quick()
+                self._replay_debug_log(f"iframe_srcs_count={len(ifr)}; first={ifr[0] if ifr else ''}")
+            except Exception:
+                pass
+            # Optional forced snapshot of page after navigation (env-controlled)
+            try:
+                if os.environ.get("BGA_TM_DEBUG_ALWAYS"):
+                    meta = {
+                        "current_url": self.driver.current_url,
+                        "readyState": self.driver.execute_script("return document.readyState") or "",
+                        "forced_dump": "1"
+                    }
+                    self._dump_replay_debug_artifacts(replay_id, nav_url, meta, self.driver.page_source or "")
+            except Exception:
+                pass
+
+            # Immediate auth check to avoid waiting when redirected to login
+            current_url = self.driver.current_url
+            page_check = self.driver.page_source.lower()
+            if (current_url.endswith('/account/account/login.html')
+                or 'form_id="loginform"' in page_check
+                or '/account/account/login.html' in page_check):
+                if not self._handle_authentication_error_with_retry(url):
+                    logger.error(f"Authentication failed permanently for {url}")
+                    print(f"❌ Authentication failed permanently for replay {replay_id}")
+                    try:
+                        meta = {
+                            "current_url": self.driver.current_url,
+                            "readyState": self.driver.execute_script("return document.readyState") or "",
+                            "auth_status": "login_detected_reauth_failed"
+                        }
+                        self._dump_replay_debug_artifacts(replay_id, nav_url, meta, self.driver.page_source or "")
+                    except Exception:
+                        pass
+                    return None
+
+            # Wait for replay content to load using smart detection (capped at ~3s)
             if not self._wait_for_replay_content_to_load(replay_id):
                 print("❌ Replay content failed to load properly")
                 # Continue anyway - sometimes content is there but not detected
             
             # Check if we got an error page
-            page_source = self.driver.page_source
+            page_source = getattr(self, "_last_replay_source_html", None) or self.driver.page_source
             
             # Check for replay limit reached
             if self._check_replay_limit_reached(page_source):
@@ -1594,6 +1945,15 @@ class TMScraper:
                 if not self._handle_authentication_error_with_retry(url):
                     logger.error(f"Authentication failed permanently for {url}")
                     print(f"❌ Authentication failed permanently for replay {replay_id}")
+                    try:
+                        meta = {
+                            "current_url": self.driver.current_url,
+                            "readyState": self.driver.execute_script("return document.readyState") or "",
+                            "auth_status": "auth_error_reauth_failed"
+                        }
+                        self._dump_replay_debug_artifacts(replay_id, nav_url, meta, self.driver.page_source or "")
+                    except Exception:
+                        pass
                     return None
                 
                 # After successful re-authentication, get the fresh page source
@@ -1603,6 +1963,76 @@ class TMScraper:
                 print("❌ Fatal error on page - replay might not be accessible")
                 return None
             
+            # Try fetching iframe src directly if present and logs not evident
+            if ('replaylogs_move' not in page_source.lower()) and ('g_gamelogs' not in page_source.lower()):
+                try:
+                    iframe_srcs = []
+                    try:
+                        # Collect iframe src attributes via JS for speed
+                        iframe_srcs = self.driver.execute_script("""
+                            try {
+                                return Array.from(document.querySelectorAll('iframe'))
+                                    .map(f => f.getAttribute('src'))
+                                    .filter(s => s && s.includes('/archive/replay/'));
+                            } catch (e) { return []; }
+                        """) or []
+                    except Exception:
+                        iframe_srcs = []
+                    # Fallback: parse current HTML for iframe src if JS failed
+                    if not iframe_srcs:
+                        try:
+                            soup_ifr = BeautifulSoup(page_source, 'html.parser')
+                            iframe_srcs = [ifr.get('src') for ifr in soup_ifr.find_all('iframe') if ifr.get('src') and '/archive/replay/' in ifr.get('src')]
+                        except Exception:
+                            iframe_srcs = []
+                    # Fetch the first replay iframe src via authenticated requests
+                    if iframe_srcs:
+                        if not self.requests_session:
+                            self.initialize_session()
+                        if self.requests_session:
+                            from urllib.parse import urljoin
+                            iframe_url = urljoin(nav_url, iframe_srcs[0])
+                            resp_ifr = self.requests_session.get(iframe_url, timeout=10)
+                            if resp_ifr.status_code == 200:
+                                low = resp_ifr.text.lower()
+                                if not self._check_replay_limit_reached(resp_ifr.text) and not self._is_authentication_error(resp_ifr.text):
+                                    if ('replaylogs_move' in low) or ('g_gamelogs' in low):
+                                        logger.info("Using iframe direct fetch for replay content")
+                                        page_source = resp_ifr.text
+                except Exception as e:
+                    logger.debug(f"Iframe direct fetch failed: {e}")
+
+            # Fallback: if replay logs not evident, try a quick direct HTTP fetch
+            if ('replaylogs_move' not in page_source.lower()) and ('g_gamelogs' not in page_source.lower()):
+                try:
+                    if not self.requests_session:
+                        self.initialize_session()
+                    if self.requests_session:
+                        resp = self.requests_session.get(nav_url, timeout=15)
+                        if resp.status_code == 200:
+                            resp_text_lower = resp.text.lower()
+                            if not self._check_replay_limit_reached(resp.text) and not self._is_authentication_error(resp.text):
+                                if ('replaylogs_move' in resp_text_lower) or ('g_gamelogs' in resp_text_lower):
+                                    logger.info("Using direct HTTP fetch fallback for replay content")
+                                    page_source = resp.text
+                except Exception as e:
+                    logger.debug(f"Direct fetch fallback failed: {e}")
+
+            # If replay signals not found, dump debug artifacts (fast, no extra waiting)
+            try:
+                low_for_dump = page_source.lower() if page_source else ""
+                if ('replaylogs_move' not in low_for_dump) and ('g_gamelogs' not in low_for_dump):
+                    meta = {
+                        "current_url": self.driver.current_url,
+                        "readyState": self.driver.execute_script("return document.readyState") or "",
+                        "auth_status": ("login_detected" if (('form_id=\"loginform\"' in low_for_dump) or ('/account/account/login.html' in low_for_dump)) else "ok"),
+                        "iframe_count": str(len(self._collect_iframe_srcs_quick(low_for_dump))),
+                        "has_last_frame_source": str(bool(getattr(self, "_last_replay_source_html", None))),
+                    }
+                    self._dump_replay_debug_artifacts(replay_id, nav_url, meta, page_source)
+            except Exception:
+                pass
+
             # Save raw HTML if requested and raw_data_dir is provided
             if save_raw and raw_data_dir:
                 # Use provided player_perspective or extract from URL as fallback
@@ -2328,9 +2758,13 @@ class TMScraper:
     def _is_authentication_error(self, page_source: str) -> bool:
         """Check if the page source indicates an authentication error"""
         page_content = page_source.lower()
-        return 'must be logged' in page_content or 'fatalerror' in page_content
+        return (
+            'must be logged' in page_content
+            or 'fatalerror' in page_content
+            or 'form_id="loginform"' in page_content
+        )
 
-    def _handle_authentication_error_with_retry(self, url: str, max_retries: int = 3, retry_delay: int = 5) -> bool:
+    def _handle_authentication_error_with_retry(self, url: str, max_retries: int = 3, retry_delay: int = 2) -> bool:
         """
         Handle authentication errors with a retry mechanism
         
@@ -2348,9 +2782,10 @@ class TMScraper:
             
             # Perform authentication refresh
             if self.refresh_authentication():
-                # Retry the original URL
+                # Retry the original URL (normalized to effective origin)
                 print(f"Retrying replay page: {url}")
-                self.driver.get(url)
+                nav_url = self._normalize_url_to_effective_origin(url)
+                self.driver.get(nav_url)
                 
                 # Wait for page to load or replay content to render
                 if '/archive/replay/' in url:

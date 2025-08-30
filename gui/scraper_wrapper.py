@@ -343,6 +343,13 @@ class InMemoryScraper:
                 raw_data_dir=None
             )
             
+            # Log debug artifacts if replay content was not detected
+            try:
+                if (not replay_result) or (not replay_result.get('game_logs_found')) or (not replay_result.get('html_content')):
+                    self._log_debug_artifacts(table_id)
+            except Exception:
+                pass
+            
             if not replay_result:
                 logger.warning(f"Failed to scrape replay for {table_id}")
                 return None
@@ -404,6 +411,24 @@ class InMemoryScraper:
                 logger.info("Browser closed")
         except Exception as e:
             logger.error(f"Error closing browser: {e}")
+    
+    def _log_debug_artifacts(self, table_id: str):
+        """Log debug artifact paths to the GUI Activity Log if available"""
+        try:
+            if hasattr(self.scraper, "_last_debug_artifacts") and self.scraper._last_debug_artifacts:
+                artifacts = self.scraper._last_debug_artifacts
+                if self.progress_callback:
+                    self.progress_callback(f"🔍 Debug artifacts saved for game {table_id}:")
+                    if artifacts.get("meta"):
+                        self.progress_callback(f"  Meta: {artifacts['meta']}")
+                    if artifacts.get("top"):
+                        self.progress_callback(f"  Top HTML: {artifacts['top']}")
+                    if artifacts.get("perf"):
+                        self.progress_callback(f"  Performance: {artifacts['perf']}")
+                    if artifacts.get("iframes") and len(artifacts["iframes"]) > 0:
+                        self.progress_callback(f"  Iframes: {len(artifacts['iframes'])} files")
+        except Exception:
+            pass
     
     def refresh_authentication(self) -> bool:
         """
