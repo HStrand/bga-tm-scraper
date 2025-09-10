@@ -116,6 +116,9 @@ class InMemoryScraper:
                 self.scraper.speed_settings = self.scraper_config['CURRENT_SPEED']
                 self.scraper.speed_profile = self.scraper_config['SPEED_PROFILE']
             
+            # Set debug artifacts flag from config (disabled by default)
+            self.scraper.debug_artifacts_enabled = bool(self.scraper_config.get('SAVE_DEBUG_ARTIFACTS', False))
+            
             # Initialize parser
             self.parser = Parser()
             

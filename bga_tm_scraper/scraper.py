@@ -48,6 +48,9 @@ class TMScraper:
         self.email = email
         self.password = password
         
+        # Debug artifacts control - disabled by default for end users
+        self.debug_artifacts_enabled = bool(os.environ.get("BGA_TM_DEBUG", ""))
+        
         # Try to load credentials from config if not provided
         if not self.email or not self.password:
             try:
@@ -80,6 +83,12 @@ class TMScraper:
             }
             self.speed_profile = "DEFAULT"
             logger.warning("Could not load speed settings from config, using defaults")
+    
+    def _debug_enabled(self) -> bool:
+        """Check if debug artifacts should be enabled"""
+        return (self.debug_artifacts_enabled or 
+                bool(os.environ.get("BGA_TM_DEBUG", "")) or 
+                bool(os.environ.get("BGA_TM_DEBUG_ALWAYS", "")))
     
     def start_browser_and_login(self) -> bool:
         """
@@ -341,6 +350,10 @@ class TMScraper:
         - up to 3 iframe html snapshots
         - performance entries json
         """
+        # Skip debug artifact creation unless explicitly enabled
+        if not (self._debug_enabled() or os.environ.get("BGA_TM_DEBUG_ALWAYS")):
+            return
+        
         try:
             import json
             debug_dir = os.path.abspath(os.path.join(os.getcwd(), "debug"))
@@ -973,6 +986,10 @@ class TMScraper:
             html_content: HTML content of the gamereview page
             gamereview_url: URL of the gamereview page
         """
+        # Skip debug artifact creation unless explicitly enabled
+        if not self._debug_enabled():
+            return
+        
         try:
             import json
             
@@ -2166,7 +2183,7 @@ class TMScraper:
                 if not see_more_element:
                     print("No 'See more' button found - all games may be loaded")
                     # Save current page source for debugging
-                    if click_count == 0:
+                    if click_count == 0 and self._debug_enabled():
                         print("Saving page source for debugging...")
                         with open('debug_page_source.html', 'w', encoding='utf-8') as f:
                             f.write(self.driver.page_source)
