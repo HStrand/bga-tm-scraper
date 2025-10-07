@@ -28,7 +28,7 @@ class BGASession:
     with Selenium WebDriver automation, eliminating manual login requirements
     """
     
-    BASE_URL = 'https://boardgamearena.com'
+    BASE_URL = 'https://en.boardgamearena.com'
     LOGIN_URL = '/account'
     
     def __init__(self, email: str, password: str, chromedriver_path: str, chrome_path: str=None, headless: bool = False):
