@@ -2773,13 +2773,37 @@ class TMScraper:
         return False
 
     def _is_authentication_error(self, page_source: str) -> bool:
-        """Check if the page source indicates an authentication error"""
+        """
+        Check if the page source indicates an authentication error
+        
+        Returns True only for actual authentication failures, not for other errors like missing replays
+        """
         page_content = page_source.lower()
-        return (
-            'must be logged' in page_content
-            or 'fatalerror' in page_content
-            or 'form_id="loginform"' in page_content
-        )
+        
+        # Explicit authentication error indicators
+        explicit_auth_errors = [
+            'must be logged',
+            'must be logged in',
+            'please log in',
+            'you must log in',
+            'login required',
+            'form_id="loginform"'
+        ]
+        
+        for error_text in explicit_auth_errors:
+            if error_text in page_content:
+                return True
+        
+        # Check for fatal error only if it's authentication-related
+        if 'fatalerror' in page_content or 'fatal error' in page_content:
+            # Only treat as auth error if it mentions login/authentication
+            auth_keywords = ['must be logged', 'log in', 'login', 'authenticate', 'session expired']
+            if any(keyword in page_content for keyword in auth_keywords):
+                return True
+            # If it's a different kind of fatal error (like "Unable to find game archive"), not an auth error
+            return False
+        
+        return False
 
     def _handle_authentication_error_with_retry(self, url: str, max_retries: int = 3, retry_delay: int = 2) -> bool:
         """

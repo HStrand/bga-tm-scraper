@@ -29,7 +29,7 @@ class BGASession:
     """
     
     BASE_URL = 'https://boardgamearena.com'
-    LOGIN_URL = '/account/account/login.html'
+    LOGIN_URL = '/account'
     
     def __init__(self, email: str, password: str, chromedriver_path: str, chrome_path: str=None, headless: bool = False):
         """
@@ -62,107 +62,327 @@ class BGASession:
     
     def login(self) -> bool:
         """
-        Perform complete authentication: session login + browser cookie transfer
+        Perform complete authentication using browser automation
         
         Returns:
-            bool: True if both session and browser authentication successful
+            bool: True if browser authentication successful
         """
         logger.info("Starting authentication process...")
         
-        # Step 1: Authenticate with session-based approach
-        if not self._login_session():
-            logger.error("Session-based login failed")
-            return False
-        
-        # Step 2: Start browser if not already started
+        # Step 1: Start browser if not already started
         if not self.driver:
             if not self._start_browser():
                 logger.error("Failed to start browser")
                 return False
         
-        # Step 3: Transfer session cookies to browser
-        if not self._transfer_cookies_to_browser():
-            logger.error("Failed to transfer cookies to browser")
+        # Step 2: Authenticate using browser automation
+        if not self._login_session():
+            logger.error("Browser-based login failed")
             return False
         
-        # Step 4: Verify browser authentication
-        if not self._verify_browser_authentication():
-            logger.error("Browser authentication verification failed")
-            return False
-        
+        # Authentication is complete - browser is now logged in
         self.is_fully_authenticated = True
         logger.info("✅ Authentication completed successfully!")
         return True
     
     def _login_session(self, max_retries: int = 3, retry_delay: int = 2) -> bool:
         """
-        Perform session-based login using requests with retry logic
+        Perform browser-based login using Selenium interactions
+        Now handles BGA's two-step authentication process using browser automation
         
         Args:
-            max_retries: Maximum number of retries for token extraction and login
+            max_retries: Maximum number of retries for login
             retry_delay: Delay between retries in seconds
             
         Returns:
-            bool: True if session login successful
+            bool: True if browser login successful
         """
+        if not self.driver:
+            logger.error("Browser not started - cannot perform login")
+            return False
+        
         for attempt in range(max_retries):
             try:
-                logger.info(f"Performing session-based login (attempt {attempt + 1}/{max_retries})...")
+                logger.info(f"Performing browser-based login (attempt {attempt + 1}/{max_retries})...")
                 
-                # First, get a page to extract request token with retries
-                self.request_token = self._extract_request_token_with_retry(max_retries=max_retries, retry_delay=retry_delay)
-                if not self.request_token:
-                    logger.error("Failed to extract request token after multiple retries")
-                    return False
+                # Navigate to login page
+                login_url = f'{self.BASE_URL}{self.LOGIN_URL}'
+                logger.info(f"Navigating to login page: {login_url}")
+                self.driver.get(login_url)
+                time.sleep(2)  # Wait for page to load
                 
-                logger.debug(f"Extracted request token: {self.request_token[:10]}...")
+                # Update effective base origin after navigation
+                try:
+                    current_url = self.driver.current_url
+                    from urllib.parse import urlparse
+                    parsed = urlparse(current_url)
+                    if parsed.scheme and parsed.hostname:
+                        self.effective_base_origin = f"{parsed.scheme}://{parsed.hostname}"
+                        logger.debug(f"Effective base origin set to: {self.effective_base_origin}")
+                except Exception as e:
+                    logger.debug(f"Could not update effective base origin: {e}")
                 
-                # Set headers for authenticated requests
-                self.session.headers.update({
-                    'X-Request-Token': self.request_token,
-                    'X-Requested-With': 'XMLHttpRequest',
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Referer': f'{self.effective_base_origin}{self.LOGIN_URL}',
-                    'Origin': self.effective_base_origin,
-                    'Accept-Language': 'en-US,en;q=0.9'
-                })
+                # Dismiss browser warning banner if present (it blocks clicks)
+                try:
+                    ignore_button = WebDriverWait(self.driver, 2).until(
+                        EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Ignore')]"))
+                    )
+                    ignore_button.click()
+                    time.sleep(0.5)
+                    logger.info("Dismissed browser warning banner")
+                except:
+                    # Banner not present or already dismissed
+                    logger.debug("No browser warning banner to dismiss")
                 
-                # Perform login
-                logger.info("Submitting login credentials...")
-                login_data = {
-                    'email': self.email,
-                    'password': self.password,
-                    'rememberme': 'off',
-                    'redirect': 'join',
-                    'form_id': 'loginform',
-                    'request_token': self.request_token
-                }
+                # STEP 1: Enter email and click Next
+                logger.info("Step 1: Entering email/username...")
                 
-                login_resp = self.session.post(f'{self.effective_base_origin}{self.LOGIN_URL}', data=login_data, timeout=15)
-                login_resp.raise_for_status()
-
+                try:
+                    # Find email input field - use highly specific selectors to avoid search bar
+                    email_input = None
+                    email_selectors = [
+                        # Combine multiple attributes to uniquely identify login field
+                        (By.CSS_SELECTOR, "input[name='email'][placeholder='Email or username']"),
+                        (By.CSS_SELECTOR, "input[name='email'][autocomplete='email']"),
+                        (By.XPATH, "//input[@name='email' and @placeholder='Email or username']"),
+                        (By.XPATH, "//input[@name='email' and @autocomplete='email']"),
+                        (By.XPATH, "//input[@autocomplete='email' and contains(@placeholder, 'mail')]"),
+                        # Less specific fallbacks
+                        (By.CSS_SELECTOR, "input[placeholder='Email or username']"),
+                        (By.CSS_SELECTOR, "input[autocomplete='email']"),
+                        (By.NAME, "email")
+                    ]
+                    
+                    for by, selector in email_selectors:
+                        try:
+                            # Wait for element to be clickable (not just present)
+                            email_input = WebDriverWait(self.driver, 5).until(
+                                EC.element_to_be_clickable((by, selector))
+                            )
+                            # Double-check it's not readonly
+                            if not email_input.get_attribute('readonly'):
+                                logger.debug(f"Found editable email input with selector: {by}={selector}")
+                                break
+                            else:
+                                email_input = None
+                        except:
+                            continue
+                    
+                    if not email_input:
+                        raise Exception("Could not find editable email input field")
+                    
+                    # Scroll element into view
+                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", email_input)
+                    time.sleep(0.3)
+                    
+                    # Click to focus the field
+                    try:
+                        email_input.click()
+                    except Exception as e:
+                        # If click fails, try JavaScript click
+                        logger.debug(f"Regular click failed, trying JavaScript click: {e}")
+                        self.driver.execute_script("arguments[0].click();", email_input)
+                    
+                    time.sleep(0.3)
+                    
+                    # Clear and type the email
+                    email_input.clear()
+                    email_input.send_keys(self.email)
+                    logger.info(f"Entered email: {self.email}")
+                    
+                    # Small delay to let the value register
+                    time.sleep(0.5)
+                    
+                    # Verify the value was entered
+                    entered_value = email_input.get_attribute('value')
+                    if not entered_value or len(entered_value) < 3:
+                        raise Exception(f"Email field value not set correctly. Got: '{entered_value}'")
+                    logger.debug(f"Verified email field contains: {entered_value}")
+                    
+                    # Find and click Next button (BGA uses <a> tags styled as buttons)
+                    next_button = None
+                    next_button_selectors = [
+                        (By.LINK_TEXT, "Next"),
+                        (By.XPATH, "//a[contains(text(), 'Next')]"),
+                        (By.CSS_SELECTOR, "a.bga-button"),
+                        (By.XPATH, "//button[contains(text(), 'Next')]"),
+                        (By.CSS_SELECTOR, "button[type='submit']"),
+                        (By.ID, "submit_button"),
+                        (By.XPATH, "//button[contains(@class, 'submit')]"),
+                        (By.XPATH, "//input[@type='submit']")
+                    ]
+                    
+                    for by, selector in next_button_selectors:
+                        try:
+                            next_button = self.driver.find_element(by, selector)
+                            logger.debug(f"Found next button with selector: {by}={selector}")
+                            break
+                        except:
+                            continue
+                    
+                    if not next_button:
+                        raise Exception("Could not find Next button")
+                    
+                    # Click Next button (with JavaScript fallback if blocked by overlay)
+                    try:
+                        next_button.click()
+                        logger.info("Clicked Next button")
+                    except Exception as e:
+                        # If click fails due to overlay, try JavaScript click
+                        logger.debug(f"Regular click on Next button failed, trying JavaScript: {e}")
+                        self.driver.execute_script("arguments[0].click();", next_button)
+                        logger.info("Clicked Next button (JavaScript)")
+                    
+                    time.sleep(2)  # Wait for password field to appear
+                    
+                except Exception as e:
+                    logger.error(f"Error in Step 1 (email entry): {e}")
+                    if attempt < max_retries - 1:
+                        time.sleep(retry_delay)
+                        continue
+                    else:
+                        return False
+                
+                # STEP 2: Enter password and click Login
+                logger.info("Step 2: Entering password...")
+                
+                try:
+                    # Find password input field - excluding readonly elements
+                    password_input = None
+                    password_selectors = [
+                        (By.ID, "password_input"),
+                        (By.NAME, "password"),
+                        (By.CSS_SELECTOR, "input[type='password']:not([readonly])"),
+                        (By.XPATH, "//input[@type='password' and not(@readonly)]"),
+                        (By.XPATH, "//input[@tabindex='0' and @type='password']")
+                    ]
+                    
+                    for by, selector in password_selectors:
+                        try:
+                            # Wait for element to be clickable (not just present)
+                            password_input = WebDriverWait(self.driver, 5).until(
+                                EC.element_to_be_clickable((by, selector))
+                            )
+                            # Double-check it's not readonly
+                            if not password_input.get_attribute('readonly'):
+                                logger.debug(f"Found editable password input with selector: {by}={selector}")
+                                break
+                            else:
+                                password_input = None
+                        except:
+                            continue
+                    
+                    if not password_input:
+                        raise Exception("Could not find editable password input field")
+                    
+                    # Scroll element into view
+                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", password_input)
+                    time.sleep(0.3)
+                    
+                    # Click to focus the field
+                    try:
+                        password_input.click()
+                    except Exception as e:
+                        # If click fails, try JavaScript click
+                        logger.debug(f"Regular click failed, trying JavaScript click: {e}")
+                        self.driver.execute_script("arguments[0].click();", password_input)
+                    
+                    time.sleep(0.3)
+                    
+                    # Clear and type the password
+                    password_input.clear()
+                    password_input.send_keys(self.password)
+                    logger.info("Entered password")
+                    
+                    # Small delay to let the value register
+                    time.sleep(0.5)
+                    
+                    # Verify the value was entered
+                    entered_value = password_input.get_attribute('value')
+                    if not entered_value or len(entered_value) < 3:
+                        raise Exception(f"Password field value not set correctly. Got length: {len(entered_value) if entered_value else 0}")
+                    logger.debug("Verified password field contains value")
+                    
+                    # Find and click Login button (BGA uses <a> tags styled as buttons)
+                    login_button = None
+                    login_button_selectors = [
+                        (By.LINK_TEXT, "Login"),
+                        (By.XPATH, "//a[contains(text(), 'Login')]"),
+                        (By.CSS_SELECTOR, "a.bga-button"),
+                        (By.XPATH, "//button[contains(text(), 'Login')]"),
+                        (By.CSS_SELECTOR, "button[type='submit']"),
+                        (By.ID, "login_button"),
+                        (By.XPATH, "//button[contains(@class, 'submit')]"),
+                        (By.XPATH, "//input[@type='submit']")
+                    ]
+                    
+                    for by, selector in login_button_selectors:
+                        try:
+                            login_button = self.driver.find_element(by, selector)
+                            logger.debug(f"Found login button with selector: {by}={selector}")
+                            break
+                        except:
+                            continue
+                    
+                    if not login_button:
+                        raise Exception("Could not find Login button")
+                    
+                    # Click Login button (with JavaScript fallback if blocked by overlay)
+                    try:
+                        login_button.click()
+                        logger.info("Clicked Login button")
+                    except Exception as e:
+                        # If click fails due to overlay, try JavaScript click
+                        logger.debug(f"Regular click on Login button failed, trying JavaScript: {e}")
+                        self.driver.execute_script("arguments[0].click();", login_button)
+                        logger.info("Clicked Login button (JavaScript)")
+                    
+                    time.sleep(3)  # Wait for login to complete
+                    
+                except Exception as e:
+                    logger.error(f"Error in Step 2 (password entry): {e}")
+                    if attempt < max_retries - 1:
+                        time.sleep(retry_delay)
+                        continue
+                    else:
+                        return False
+                
                 # Verify login by checking for authentication indicators
-                if self._verify_session_authentication():
+                if self._verify_browser_authentication():
                     self.is_session_logged_in = True
-                    logger.info("✅ Session-based login successful")
+                    self.is_browser_logged_in = True
+                    logger.info("✅ Browser-based login successful")
+                    
+                    # Also copy cookies to requests session for API calls
+                    try:
+                        self.session = requests.Session()
+                        cookies = self.driver.get_cookies()
+                        for cookie in cookies:
+                            self.session.cookies.set(
+                                cookie['name'],
+                                cookie['value'],
+                                domain=cookie.get('domain', '.boardgamearena.com'),
+                                path=cookie.get('path', '/')
+                            )
+                        logger.debug(f"Copied {len(cookies)} cookies to requests session")
+                    except Exception as e:
+                        logger.warning(f"Could not copy cookies to requests session: {e}")
+                    
                     return True
                 else:
-                    logger.warning(f"Session login verification failed on attempt {attempt + 1}")
+                    logger.warning(f"Browser login verification failed on attempt {attempt + 1}")
                     if attempt < max_retries - 1:
                         time.sleep(retry_delay * (attempt + 1))  # Exponential backoff
                 
-            except requests.exceptions.RequestException as e:
-                logger.error(f"Session login failed on attempt {attempt + 1}: {e}")
+            except Exception as e:
+                logger.error(f"Browser login failed on attempt {attempt + 1}: {e}")
                 if attempt < max_retries - 1:
                     time.sleep(retry_delay * (attempt + 1))
                 else:
-                    logger.error("Max retries reached for session login")
+                    logger.error("Max retries reached for browser login")
                     return False
-            except Exception as e:
-                logger.error(f"An unexpected error occurred during session login: {e}")
-                return False
         
-        logger.error("Session login failed after all retries")
+        logger.error("Browser login failed after all retries")
         return False
     
     def _extract_request_token_with_retry(self, max_retries: int = 3, retry_delay: int = 2) -> Optional[str]:
