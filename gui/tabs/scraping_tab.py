@@ -45,6 +45,9 @@ class ScrapingTab:
         self.current_assignment_id = None
         self.existing_progress = None
         
+        # Auto-start flag used when auto-requesting the next assignment
+        self._auto_start_next_on_assignment = False
+
         # Create the UI
         self.create_widgets()
         
@@ -346,6 +349,13 @@ class ScrapingTab:
             else:
                 self.log_message("✅ New assignment received and ready to start")
             
+            # If the auto-start flag was set (requested after previous assignment finished), start scraping
+            if self._auto_start_next_on_assignment:
+                # Reset the flag and start scraping
+                self._auto_start_next_on_assignment = False
+                # Start scraping in the GUI thread
+                self.frame.after(100, self.start_scraping)
+
         except Exception as e:
             self._show_api_error(f"Failed to process assignment: {str(e)}")
     
@@ -404,12 +414,16 @@ class ScrapingTab:
     
     def _show_api_error(self, message):
         """Show API error and re-enable button"""
+        # Clear any pending auto-start flag on error
+        self._auto_start_next_on_assignment = False
         messagebox.showerror("API Error", f"Failed to get assignment:\n{message}")
         self.get_assignment_btn.config(state="normal", text="🎯 Get Next Assignment")
         self.log_message(f"❌ API error: {message}")
     
     def _show_no_assignments(self):
         """Show no assignments available message"""
+        # Clear any pending auto-start flag when no assignments are available
+        self._auto_start_next_on_assignment = False
         messagebox.showinfo("No Assignments", "No assignments are currently available. Please try again later.")
         self.get_assignment_btn.config(state="normal", text="🎯 Get Next Assignment")
         self.log_message("ℹ️ No assignments available")
@@ -1169,7 +1183,22 @@ class ScrapingTab:
             summary += f"Success rate: {success_rate:.1f}%\n"
             summary += f"Time elapsed: {elapsed_str}"
             
-            messagebox.showinfo(title, summary)
+            # If scraping completed normally (not stopped by user or paused by daily limit)
+            # and the user enables auto-request in settings, request and start next assignment.
+            try:
+                auto_next = self.config_manager.get_value("scraping_settings", "auto_request_next", False)
+            except Exception:
+                auto_next = False
+
+            if auto_next and not self.should_stop and assignment_status == "completed":
+                self.log_message(summary)
+                self.log_message("🔁 Auto-request next assignment enabled — requesting next assignment...")
+                self._auto_start_next_on_assignment = True
+                # Request next assignment in background
+                self.get_assignment()
+            else:
+                # Don't show dialog if auto-requesting next assignment, since the messagebox is blocking
+                messagebox.showinfo(title, summary)
     
     def _update_timer(self):
         """Update the elapsed time display"""
