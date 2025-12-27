@@ -259,6 +259,42 @@ class Parser:
             logger.error(f"Error extracting map from table HTML: {e}")
             return None
     
+    def _extract_map_from_replay(self, replay_html: str) -> Optional[str]:
+        """Extract the actual map from replay HTML Game options section.
+        
+        This is used when the map selection was 'Random' to find the actual map used.
+        The replay HTML contains a Game options section with the resolved map name.
+        """
+        try:
+            soup = BeautifulSoup(replay_html, 'html.parser')
+            
+            # Primary method: Look for the specific footer option value element
+            map_element = soup.find('div', id='footer_option_value_107')
+            if map_element:
+                map_name = map_element.get_text().strip()
+                logger.info(f"Extracted actual map from replay: {map_name}")
+                return map_name
+            
+            # Fallback: Search for row-label "Map" and get sibling row-value
+            row_labels = soup.find_all('div', class_='row-label')
+            for label in row_labels:
+                if label.get_text().strip() == 'Map':
+                    # Find the sibling row-value
+                    parent = label.find_parent('div', class_='row-data')
+                    if parent:
+                        value_div = parent.find('div', class_='row-value')
+                        if value_div:
+                            map_name = value_div.get_text().strip()
+                            logger.info(f"Extracted actual map from replay (fallback): {map_name}")
+                            return map_name
+            
+            logger.debug("Map element not found in replay HTML Game options")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error extracting map from replay HTML: {e}")
+            return None
+    
     def _extract_corporate_era_from_table(self, table_html: str) -> Optional[bool]:
         """Extract the Corporate Era setting from table page HTML"""
         try:
@@ -569,6 +605,15 @@ class Parser:
         logger.info(f"Starting unified parsing for game {table_id}")
         
         soup = BeautifulSoup(replay_html, 'html.parser')
+        
+        # If map is "Random", extract the actual map from the replay HTML
+        if game_metadata.map and game_metadata.map.lower() == 'random':
+            actual_map = self._extract_map_from_replay(replay_html)
+            if actual_map:
+                logger.info(f"Resolved Random map to actual map: {actual_map}")
+                game_metadata.map = actual_map
+            else:
+                logger.warning("Could not resolve Random map from replay HTML, keeping 'Random'")
         
         # Extract gamelogs once for memory efficiency
         gamelogs = self._extract_g_gamelogs(replay_html)
