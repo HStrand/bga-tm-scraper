@@ -6,15 +6,14 @@ This script processes all parsed game files to identify which cards have the hig
 draft priority by tracking at which pick position (1st, 2nd, 3rd, 4th) cards are
 drafted when they appear in draft options.
 
-In draft mode, card_options shows the cards REMAINING after a pick (passed to opponent).
-The number of remaining cards indicates the pick position:
-- 3 cards remaining = 1st pick (started with 4, picked 1, passing 3)
-- 2 cards remaining = 2nd pick (started with 3, picked 1, passing 2)
-- 1 card remaining = 3rd pick (started with 2, picked 1, passing 1)
-  - The remaining card is also registered as the 4th pick for that player
-- 0 cards remaining = 4th pick (last card, nothing to pass)
+Draft processing approach:
+1. Find "pass" move with action_type="pass" - shows initial 4-card packs for each player
+2. Track subsequent "draft" moves - determine which pack each card came from
+3. Pick position = number of cards already picked from that pack + 1
+4. After 3 picks from a pack, register the remaining card as 4th pick
+5. Stop at "buy_card" move - indicates draft round is complete
 
-Cards picked earlier (higher priority) have more cards remaining to pass.
+Cards picked earlier (1st, 2nd pick) have higher priority than late picks (3rd, 4th).
 """
 
 import json
@@ -38,66 +37,98 @@ def process_game_for_draft_data(file_path):
         if not game_data.get('draft_on'):
             return []
 
+        # Skip games with colonies expansion
+        if game_data.get('colonies_on'):
+            return []
+
+        # Skip games that aren't 2-player
+        players = game_data.get('players', {})
+        if len(players) != 2:
+            return []
+
         moves = game_data.get('moves', [])
         if not moves:
             return []
 
         draft_picks = []
+        i = 0
 
-        for move in moves:
-            if move.get('action_type') != 'draft':
-                continue
+        while i < len(moves):
+            move = moves[i]
 
-            player_id = move.get('player_id')
-            card_drafted = move.get('card_drafted')
-            card_options = move.get('card_options')
+            # Look for draft start: "pass" move where ALL players have exactly 4 cards
+            if move.get('action_type') == 'pass' and move.get('card_options'):
+                card_options = move.get('card_options', {})
 
-            # Skip if no card was drafted
-            if not card_drafted:
-                continue
+                # Check if this is a draft start (all players have 4 cards)
+                if not all(len(cards) == 4 for cards in card_options.values()):
+                    i += 1
+                    continue
 
-            # Get the cards remaining after this pick (being passed to opponent)
-            remaining_cards = card_options.get(player_id, []) if card_options else []
-            num_remaining = len(remaining_cards)
+                # Store initial packs for each player (pack identified by its card set)
+                initial_packs = {}
+                for player_id, cards in card_options.items():
+                    pack_id = frozenset(cards)  # Unique identifier for this pack
+                    initial_packs[pack_id] = {
+                        'cards': set(cards),
+                        'picks': []  # Track which cards were picked and when
+                    }
 
-            # Determine pick position based on cards remaining after the pick
-            # 3 cards remaining = 1st pick (started with 4, picked 1, passing 3)
-            # 2 cards remaining = 2nd pick (started with 3, picked 1, passing 2)
-            # 1 card remaining = 3rd pick (started with 2, picked 1, passing 1)
-            # 0 cards remaining = 4th pick (started with 1, picked 1, nothing to pass)
-            if num_remaining == 3:
-                pick_position = 1
-            elif num_remaining == 2:
-                pick_position = 2
-            elif num_remaining == 1:
-                pick_position = 3
-            elif num_remaining == 0:
-                pick_position = 4
-            else:
-                # Skip invalid cases
-                continue
+                # Process subsequent draft moves until we hit buy_card
+                i += 1
+                while i < len(moves):
+                    draft_move = moves[i]
 
-            # Record the drafted card
-            draft_pick = {
-                'card': card_drafted,
-                'pick_position': pick_position,
-                'replay_id': game_data.get('replay_id', 'unknown'),
-                'game_date': game_data.get('game_date', 'unknown'),
-                'player_id': player_id
-            }
-            draft_picks.append(draft_pick)
+                    # Stop if we hit buy_card (end of draft)
+                    if draft_move.get('action_type') == 'buy_card':
+                        break
 
-            # If this was a 3rd pick (1 card remaining), also register the remaining card as 4th pick
-            if num_remaining == 1 and remaining_cards:
-                last_card = remaining_cards[0]
-                fourth_pick = {
-                    'card': last_card,
-                    'pick_position': 4,
-                    'replay_id': game_data.get('replay_id', 'unknown'),
-                    'game_date': game_data.get('game_date', 'unknown'),
-                    'player_id': player_id
-                }
-                draft_picks.append(fourth_pick)
+                    # Process draft moves
+                    if draft_move.get('action_type') == 'draft':
+                        card_drafted = draft_move.get('card_drafted')
+                        player_id = draft_move.get('player_id')
+
+                        if card_drafted:
+                            # Find which pack this card came from
+                            for pack_id, pack_data in initial_packs.items():
+                                if card_drafted in pack_data['cards']:
+                                    # Determine pick position (1-indexed)
+                                    pick_position = len(pack_data['picks']) + 1
+
+                                    # Record the pick
+                                    pack_data['picks'].append(card_drafted)
+
+                                    draft_pick = {
+                                        'card': card_drafted,
+                                        'pick_position': pick_position,
+                                        'replay_id': game_data.get('replay_id', 'unknown'),
+                                        'game_date': game_data.get('game_date', 'unknown'),
+                                        'player_id': player_id
+                                    }
+                                    draft_picks.append(draft_pick)
+                                    break
+
+                    i += 1
+
+                # After draft ends, register 4th pick for remaining cards in each pack
+                for pack_id, pack_data in initial_packs.items():
+                    picked_cards = set(pack_data['picks'])
+                    remaining_cards = pack_data['cards'] - picked_cards
+
+                    # Should be exactly 1 card remaining as the 4th pick
+                    if len(remaining_cards) == 1:
+                        last_card = list(remaining_cards)[0]
+                        # We don't know which player gets this, so use None
+                        fourth_pick = {
+                            'card': last_card,
+                            'pick_position': 4,
+                            'replay_id': game_data.get('replay_id', 'unknown'),
+                            'game_date': game_data.get('game_date', 'unknown'),
+                            'player_id': None  # Unknown which player
+                        }
+                        draft_picks.append(fourth_pick)
+
+            i += 1
 
         return draft_picks
 
