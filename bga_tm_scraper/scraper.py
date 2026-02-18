@@ -2126,17 +2126,19 @@ class TMScraper:
     def scrape_player_game_history(self, player_id: str, max_clicks: int = 1000,
                                  click_delay: Optional[float] = None,
                                  progress_callback: Optional[callable] = None,
-                                 stop_event: Optional[threading.Event] = None) -> List[Dict]:
+                                 stop_event: Optional[threading.Event] = None,
+                                 known_game_ids: Optional[set] = None) -> List[Dict]:
         """
         Scrape all table IDs and datetimes from a player's game history by auto-clicking "See more"
-        
+
         Args:
             player_id: BGA player ID
             max_clicks: Maximum number of "See more" clicks to prevent infinite loops
             click_delay: Delay between clicks in seconds (uses speed profile if None)
             progress_callback: Optional callback for progress updates
             stop_event: Optional threading event to signal stopping
-            
+            known_game_ids: Optional set of already-indexed table IDs for early stopping
+
         Returns:
             list: List of dictionaries containing table_id, raw_datetime, parsed_datetime, and date_type
         """
@@ -2166,7 +2168,9 @@ class TMScraper:
             
             click_count = 0
             games_loaded = 0
-            
+            seen_table_ids = set()
+            early_stopped = False
+
             print("Starting to load all games by clicking 'See more'...")
             
             while click_count < max_clicks:
@@ -2215,7 +2219,25 @@ class TMScraper:
                     print(progress_message)
                     if progress_callback:
                         progress_callback(progress_message)
-                    
+
+                    # Early stop: check if newly loaded games are already indexed
+                    if known_game_ids:
+                        current_ids = self.driver.execute_script("""
+                            var ids = [];
+                            var rows = document.querySelectorAll('tr');
+                            rows.forEach(function(row) {
+                                var match = row.innerHTML.match(/#(\\d{8,})/);
+                                if (match) ids.push(match[1]);
+                            });
+                            return ids;
+                        """)
+                        new_ids = [tid for tid in current_ids if tid not in seen_table_ids]
+                        seen_table_ids.update(current_ids)
+                        if any(tid in known_game_ids for tid in new_ids):
+                            print(f"✅ Found already-indexed game in latest batch - early stopping (loaded {games_loaded} games)")
+                            early_stopped = True
+                            break
+
                 except Exception as e:
                     logger.warning(f"Error clicking 'See more' button: {e}")
                     print(f"⚠️  Error clicking 'See more': {e}")

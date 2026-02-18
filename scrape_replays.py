@@ -112,6 +112,7 @@ def main():
         api_key=config.API_KEY,
         base_url=getattr(
             config, "API_BASE_URL", "https://bga-tm-scraper-functions.azurewebsites.net/api"
+            # config, "API_BASE_URL", "http://localhost:7184/api"
         ),
         version=GUI_BUILD_VERSION,
     )

@@ -52,7 +52,7 @@ def fetch_players() -> List[Dict]:
         raise RuntimeError("Failed to login to BGA")
     
     params = {'game': 1924}
-    num_players = 1000 # Only top 1000
+    num_players = 100 # Only top 1000
     players = []
     
     print(f"Fetching up to {num_players} players from leaderboard...")
@@ -213,9 +213,10 @@ def index_games_for_player(
         indexed_games = api_client.get_indexed_games_by_player(player_id)
         print(f"  Found {len(indexed_games)} already indexed games")
         
-        # Scrape player's game history
+        # Scrape player's game history (with early stop if we hit already-indexed games)
         print(f"  Scraping game history...")
-        games_data = scraper.scrape_player_game_history(player_id, max_clicks=1000)
+        known_game_ids = set(indexed_games) if indexed_games else None
+        games_data = scraper.scrape_player_game_history(player_id, max_clicks=1000, known_game_ids=known_game_ids)
         
         if not games_data:
             print(f"  ⚠️ No games found for player {player_id}")
@@ -340,7 +341,7 @@ def main():
         print("="*80)
         
         players_by_elo = sorted(players, key=lambda x: x['elo'], reverse=True)
-        top_100 = players_by_elo[:50]
+        top_100 = players_by_elo[:100]
         # target_name = "StrandedKnight"
         # top_100 = [p for p in players_by_elo if p.get("name") == target_name]
         
