@@ -3,6 +3,7 @@ Index Top Players Script
 Fetches updated player list from BGA, updates via API, and indexes games for top 100 players by Elo
 """
 
+import argparse
 import json
 import time
 import logging
@@ -317,58 +318,91 @@ def index_games_for_player(
 
 def main():
     """Main execution function"""
+    arg_parser = argparse.ArgumentParser(description="Index top BGA Terraforming Mars players")
+    arg_parser.add_argument("--player-id", type=str, default=None,
+                            help="Index a single player by ID (skips leaderboard fetch)")
+    args = arg_parser.parse_args()
+
     print("\n" + "="*80)
     print("BGA TM Scraper - Index Top 100 Players")
     print("="*80)
     print(f"Version: {BUILD_VERSION}")
     print(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    
+
     start_time = datetime.now()
-    
+
     try:
-        # Step 1: Fetch players
-        players = fetch_players()
-        
         # Initialize API client
         api_client = APIClient(api_key=config.API_KEY, version=BUILD_VERSION)
-        
+
+        if args.player_id:
+            # Single-player mode: skip leaderboard fetch and player update
+            print(f"\nSingle-player mode: indexing player {args.player_id}")
+
+            scraper, parser = initialize_scraper()
+
+            try:
+                successful, failed = index_games_for_player(
+                    scraper, parser, api_client, args.player_id, "Unknown"
+                )
+            finally:
+                scraper.close_browser()
+
+            elapsed_time = datetime.now() - start_time
+            print("\n" + "="*80)
+            print("FINAL SUMMARY")
+            print("="*80)
+            print(f"Games indexed: {successful}")
+            print(f"Games failed: {failed}")
+            if successful + failed > 0:
+                success_rate = (successful / (successful + failed)) * 100
+                print(f"Success rate: {success_rate:.1f}%")
+            print(f"Time elapsed: {str(elapsed_time).split('.')[0]}")
+            print(f"Completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            print("="*80)
+            return
+
+        # Full mode: fetch leaderboard and index top 100
+        # Step 1: Fetch players
+        players = fetch_players()
+
         # Step 2: Update players via API
         update_players_via_api(api_client, players)
-        
+
         # Step 3: Sort by Elo and get top 100
         print("\n" + "="*80)
         print("STEP 3: Indexing games for top 100 players by Elo")
         print("="*80)
-        
+
         players_by_elo = sorted(players, key=lambda x: x['elo'], reverse=True)
         top_100 = players_by_elo[:100]
         # target_name = "StrandedKnight"
         # top_100 = [p for p in players_by_elo if p.get("name") == target_name]
-        
+
         print(f"\nTop 100 players by Elo:")
         for i, player in enumerate(top_100, 1):
             print(f"  {i}. {player['name']} (Elo: {player['elo']}, ID: {player['playerId']})")
-        
+
         # Initialize scraper
         scraper, parser = initialize_scraper()
-        
+
         # Track overall stats
         total_successful = 0
         total_failed = 0
         players_processed = 0
         players_failed = 0
-        
+
         # Index games for each player
         print("\n" + "="*80)
         print("Processing players...")
         print("="*80)
-        
+
         for i, player in enumerate(top_100, 1):
             player_id = str(player['playerId'])
             player_name = player['name']
-            
+
             print(f"\n[{i}/100] Processing {player_name} (Elo: {player['elo']})")
-            
+
             try:
                 successful, failed = index_games_for_player(
                     scraper, parser, api_client, player_id, player_name
@@ -380,13 +414,13 @@ def main():
                 logger.error(f"Failed to process player {player_name}: {e}")
                 print(f"  ❌ Failed to process player: {e}")
                 players_failed += 1
-        
+
         # Close browser
         scraper.close_browser()
-        
+
         # Final summary
         elapsed_time = datetime.now() - start_time
-        
+
         print("\n" + "="*80)
         print("FINAL SUMMARY")
         print("="*80)
@@ -400,7 +434,7 @@ def main():
         print(f"Time elapsed: {str(elapsed_time).split('.')[0]}")
         print(f"Completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print("="*80)
-        
+
     except Exception as e:
         logger.error(f"Fatal error in main: {e}", exc_info=True)
         print(f"\n❌ Fatal error: {e}")

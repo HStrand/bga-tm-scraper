@@ -105,6 +105,7 @@ python main.py status
    ```
 
 ### Important Notes
+- **Social Login Users (Google, Facebook, etc.)**: If you log in to BGA using a social login provider, you won't have a BGA-specific password. To create one, go to the BGA login page and click "Forgot password" to set a separate password for your account. This will not affect your ability to continue logging in with your social login provider.
 - **ChromeDriver is installed automatically** - no manual setup required!
 - **BGA Daily Replay Limit**: BoardGameArena limits replay access per day
 - **API Key**: Optional for cloud features and assignments
@@ -559,6 +560,7 @@ python analysis/analyze_corporation_stats.py
 
 #### **Authentication Issues**
 - **Invalid Credentials**: Verify BGA email/password in config
+- **Social Login (Google, Facebook, etc.)**: If you log in to BGA using a social login provider, you won't have a BGA-specific password. To create one, go to the BGA login page and click "Forgot password" to set a separate password for your account that you can use with this tool. This will not affect your ability to continue logging in with your social login provider.
 - **Session Expired**: Scraper handles re-authentication automatically
 - **Two-Factor Auth**: Not currently supported
 
