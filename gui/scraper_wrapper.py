@@ -272,6 +272,11 @@ class InMemoryScraper:
                     self.config_manager.set_replay_limit_hit_at(datetime.now().isoformat())
                 return {'daily_limit_reached': True}
 
+            # Check for permanently deleted/lost replay
+            if replay_data and (replay_data.get('replay_deleted') or replay_data.get('error') == 'replay_deleted'):
+                logger.warning(f"Replay permanently deleted for game {table_id}")
+                return {'replay_deleted': True, 'table_id': table_id, 'player_perspective': player_perspective}
+
             if not result.get('success'):
                 logger.warning(f"Failed to scrape table and replay for {table_id}")
                 return None
@@ -370,6 +375,11 @@ class InMemoryScraper:
                 if not self.config_manager.get_replay_limit_hit_at():
                     self.config_manager.set_replay_limit_hit_at(datetime.now().isoformat())
                 return {'daily_limit_reached': True}
+
+            # Check for permanently deleted/lost replay
+            if replay_result.get('replay_deleted') or replay_result.get('error') == 'replay_deleted':
+                logger.warning(f"Replay permanently deleted for game {table_id}")
+                return {'replay_deleted': True, 'table_id': table_id, 'player_perspective': player_perspective}
 
             # On successful scrape, clear the limit timestamp
             self.config_manager.set_replay_limit_hit_at(None)

@@ -208,6 +208,18 @@ def main():
                 print("Daily replay limit reached - stopping.")
                 break
 
+            if replay_result and (replay_result.get("replay_deleted") or replay_result.get("error") == "replay_deleted"):
+                logger.warning(f"Replay permanently deleted for table {table_id}")
+                print(f"  Replay lost for game {table_id} - reporting to API")
+                try:
+                    api.report_game_deleted(table_id, player_perspective)
+                except Exception as e:
+                    logger.error(f"Failed to report deleted game {table_id}: {e}")
+                processed += 1
+                if per_game_delay and per_game_delay > 0:
+                    time.sleep(per_game_delay)
+                continue
+
             if not replay_result:
                 logger.warning(f"Failed to scrape replay for table {table_id}")
                 failures += 1

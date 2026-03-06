@@ -1957,6 +1957,16 @@ class TMScraper:
                     'limit_reached': True
                 }
             
+            # Check for permanently deleted/lost replay
+            if self._is_deleted_replay(page_source):
+                logger.warning(f"Replay permanently deleted/lost: {url}")
+                print("  Replay has been permanently lost (empty archive)")
+                return {
+                    'replay_id': replay_id, 'url': url,
+                    'scraped_at': datetime.now().isoformat(),
+                    'error': 'replay_deleted', 'replay_deleted': True
+                }
+
             # Check for authentication errors with retry logic
             if self._is_authentication_error(page_source):
                 if not self._handle_authentication_error_with_retry(url):
@@ -1972,10 +1982,10 @@ class TMScraper:
                     except Exception:
                         pass
                     return None
-                
+
                 # After successful re-authentication, get the fresh page source
                 page_source = self.driver.page_source
-            
+
             if 'fatal error' in page_source.lower() and 'must be logged' not in page_source.lower():
                 print("❌ Fatal error on page - replay might not be accessible")
                 return None
@@ -2617,6 +2627,16 @@ class TMScraper:
                     'direct_fetch': True
                 }
             
+            # Check for permanently deleted/lost replay
+            if self._is_deleted_replay(page_source):
+                logger.warning(f"Replay permanently deleted/lost: {replay_url}")
+                print("  Replay has been permanently lost (empty archive)")
+                return {
+                    'replay_id': table_id, 'url': replay_url,
+                    'scraped_at': datetime.now().isoformat(),
+                    'error': 'replay_deleted', 'replay_deleted': True, 'direct_fetch': True
+                }
+
             # Save raw HTML if requested
             if save_raw:
                 os.makedirs(raw_data_dir, exist_ok=True)
@@ -2875,6 +2895,14 @@ class TMScraper:
         
         return False
     
+    def _is_deleted_replay(self, page_source: str) -> bool:
+        """Check if the replay has been permanently lost/deleted."""
+        page_lower = page_source.lower()
+        return any(ind in page_lower for ind in [
+            'replay for this game has been lost',
+            'empty archive file',
+        ])
+
     def _check_replay_limit_reached(self, page_source: str) -> bool:
         """
         Check if the replay limit has been reached based on page content

@@ -200,6 +200,16 @@ class APIClient:
             logger.error(f"Error storing game log: {e}")
             return False
     
+    def report_game_deleted(self, table_id: str, player_perspective: str, reason: str = "replay_lost") -> bool:
+        """Report a game whose replay has been permanently lost/deleted."""
+        data = {"tableId": table_id, "playerPerspective": player_perspective, "reason": reason}
+        response = self._make_request("ReportDeletedGame", method="POST", data=data)
+        if response is not None:
+            logger.info(f"Reported game {table_id} as deleted")
+            return True
+        logger.warning(f"Failed to report game {table_id} as deleted (API may not support this yet)")
+        return False
+
     def update_players(self, players_data: List[Dict[str, Any]]) -> bool:
         """
         POST players data to the API

@@ -1004,7 +1004,18 @@ class ScrapingTab:
                             self.frame.after(0, lambda: self.log_message("🚫 Daily replay limit reached - stopping scraping"))
                             self.frame.after(0, lambda: self._handle_daily_limit_reached())
                             break  # Stop processing more games
-                        
+
+                        # Check for permanently deleted/lost replay
+                        if parsed_game_data and parsed_game_data.get('replay_deleted'):
+                            tid = parsed_game_data.get('table_id', table_id)
+                            pp = parsed_game_data.get('player_perspective', game_player_perspective)
+                            self.frame.after(0, lambda t=tid: self.log_message(f"Replay lost for game {t} - reporting"))
+                            try:
+                                api_client.report_game_deleted(tid, pp)
+                            except Exception:
+                                pass
+                            continue
+
                         if parsed_game_data:
                             # Get BGA email for scrapedBy parameter
                             bga_email = self.config_manager.get_value("bga_credentials", "email", "")
