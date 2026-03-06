@@ -1,0 +1,215 @@
+Card,GameCount,AvgEloChange,AvgCalibratedEloChange
+Earth Catapult,5639,2.39,2.34
+AI Central,5532,2.06,1.98
+Advanced Alloys,5528,1.69,1.65
+Restricted Area,5728,1.61,1.56
+Research Outpost,5794,1.53,1.46
+Mining Rights,5709,1.18,1.12
+Giant Ice Asteroid,5271,1.17,1.08
+Space Elevator,5299,1.1,1.07
+Development Center,5369,1.11,1.04
+Electro Catapult,5283,1.03,0.96
+Media Group,5530,1.0,0.94
+Olympus Conference,5578,0.99,0.94
+Space Hotels,4793,0.95,0.93
+Nuclear Zone,5427,1.02,0.92
+Kelp Farming,4981,1.07,0.88
+Mars University,5620,0.91,0.84
+Mining Area,5556,0.91,0.84
+Asteroid Mining Consortium,5043,0.86,0.84
+Cartel,4221,0.86,0.8
+Acquired Company,5675,0.87,0.78
+Mass Converter,5241,0.85,0.76
+Earth Office,5597,0.79,0.74
+Natural Preserve,5592,0.79,0.74
+Psychrophiles,5363,0.87,0.73
+Nitrogen-Rich Asteroid,5159,0.85,0.73
+Optimal Aerobraking,5414,0.81,0.72
+Anti-Gravity Technology,4998,0.78,0.7
+Titanium Mine,5721,0.72,0.7
+Industrial Microbes,5046,0.67,0.66
+Deimos Down,5388,0.78,0.66
+Quantum Extractor,5004,0.72,0.65
+Great Escarpment Consortium,3886,0.61,0.62
+Mohole Area,4819,0.75,0.61
+Hackers,2874,0.63,0.6
+Mine,5655,0.64,0.59
+Energy Tapping,4405,0.77,0.59
+Research,5579,0.65,0.59
+Inventors' Guild,5391,0.64,0.56
+Io Mining Industries,4890,0.56,0.55
+Miranda Resort,4033,0.51,0.5
+Corporate Stronghold,2465,0.43,0.46
+Robotic Workforce,5104,0.53,0.45
+Bribed Committee,4226,0.53,0.42
+Sponsors,5556,0.44,0.41
+Fuel Factory,4837,0.44,0.41
+Solar Wind Power,5491,0.4,0.36
+Business Network,5099,0.41,0.36
+Strip Mine,4736,0.37,0.34
+Business Contacts,5204,0.4,0.33
+Interstellar Colony Ship,2163,0.34,0.32
+Invention Contest,5377,0.39,0.31
+Building Industries,4926,0.38,0.3
+Arctic Algae,5459,0.35,0.27
+Sabotage,4866,0.39,0.25
+Designed Microorganisms,4656,0.29,0.24
+Large Convoy,5100,0.33,0.24
+Ice Asteroid,5377,0.35,0.24
+Terraforming Ganymede,3982,0.23,0.24
+Mineral Deposit,5067,0.33,0.23
+Research Coordination,4821,0.3,0.23
+Protected Valley,4373,0.39,0.21
+Big Asteroid,5133,0.29,0.19
+Hired Raiders,5091,0.34,0.19
+Giant Space Mirror,3682,0.24,0.19
+Deep Well Heating,3946,0.12,0.18
+Virus,4346,0.42,0.17
+Zeppelins,509,-0.44,0.16
+Convoy From Europa,5038,0.19,0.16
+Satellites,2505,0.07,0.15
+Commercial District,3469,0.18,0.15
+Asteroid Mining,4932,0.15,0.15
+Medical Lab,4877,0.17,0.15
+Investment Loan,4341,0.32,0.14
+Technology Demonstration,5306,0.19,0.12
+Aquifer Pumping,1041,0.09,0.11
+Symbiotic Fungus,418,-0.22,0.11
+Cupola City,4850,0.12,0.09
+Worms,357,-0.2,0.09
+Archaebacteria,4637,0.16,0.08
+Steelworks,1318,0.21,0.08
+Lava Flows,4722,0.2,0.07
+Artificial Photosynthesis,4457,0.1,0.05
+Lagrange Observatory,4891,0.09,0.05
+Geothermal Power,4620,0.07,0.05
+Tectonic Stress Power,2028,-0.09,0.04
+Industrial Center,4269,0.13,0.04
+Immigration Shuttles,2914,-0.19,0.04
+Viral Enhancers,5538,0.11,0.03
+Nitrophilic Moss,4040,0.25,0.03
+Imported Hydrogen,5150,0.16,0.03
+Imported GHG,3739,-0.01,0.0
+Peroxide Power,3756,0.13,-0.0
+Trans-Neptune Probe,4421,0.03,-0.02
+Trees,3444,0.21,-0.02
+Methane From Titan,3982,0.03,-0.02
+Power Plant,4916,0.03,-0.02
+Martian Survey,3997,-0.07,-0.03
+House Printing,3937,-0.07,-0.03
+Heat Trappers,3678,0.24,-0.03
+Domed Crater,4624,0.0,-0.04
+Ecological Zone,5013,0.12,-0.04
+Vesta Shipyard,5048,-0.05,-0.04
+Indentured Workers,4384,0.21,-0.04
+Regolith Eaters,1239,-0.27,-0.04
+Birds,3392,0.18,-0.05
+GHG Factories,3754,0.04,-0.06
+Subterranean Reservoir,4218,0.01,-0.07
+Power Infrastructure,486,-0.43,-0.07
+Import of Advanced GHG,3899,-0.07,-0.08
+Standard Technology,4484,0.0,-0.08
+Algae,4412,0.12,-0.09
+Ice cap Melting,359,0.14,-0.1
+Beam From a Thorium Asteroid,3176,-0.13,-0.1
+Mangrove,2361,0.31,-0.1
+Insects,4864,0.09,-0.1
+Flooding,4198,0.1,-0.11
+Breathing Filters,931,-0.36,-0.11
+Martian Rails,584,-0.77,-0.12
+Comet,5115,0.0,-0.13
+Open City,1201,0.01,-0.13
+Ironworks,779,-0.05,-0.14
+Gene Repair,3536,-0.14,-0.14
+Local Heat Trapping,1238,0.01,-0.14
+Space Mirrors,945,-0.43,-0.15
+Media Archives,2049,-0.11,-0.16
+Capital,1617,-0.45,-0.16
+Ganymede Colony,3988,-0.18,-0.16
+Callisto Penal Mines,3286,-0.33,-0.17
+Plantation,4024,-0.03,-0.17
+Imported Nitrogen,4034,-0.01,-0.18
+Greenhouses,3770,0.0,-0.19
+Fusion Power,2505,-0.25,-0.19
+Search For Life,3827,-0.1,-0.19
+Towing a Comet,5107,-0.08,-0.2
+Herbivores,2951,0.11,-0.21
+Food Factory,695,-0.58,-0.21
+Grass,3437,-0.01,-0.22
+Moss,3588,-0.01,-0.22
+Power Supply Consortium,2311,-0.21,-0.23
+Space Station,4360,-0.27,-0.26
+Lightning Harvest,1600,-0.42,-0.26
+Advanced Ecosystems,3964,-0.07,-0.27
+Farming,2030,-0.1,-0.27
+Lichen,3647,-0.11,-0.27
+Decomposers,4297,-0.07,-0.28
+Adaptation Technology,2184,-0.39,-0.28
+Noctis City,4856,-0.26,-0.29
+Fueled Generators,3593,-0.12,-0.3
+Security Fleet,296,-0.98,-0.3
+Asteroid,5183,-0.19,-0.3
+Carbonate Processing,2733,-0.2,-0.3
+Lake Marineris,1509,0.1,-0.3
+Solar Power,2305,-0.59,-0.31
+Bushes,4305,-0.08,-0.31
+Shuttles,2432,-0.27,-0.32
+Special Design,614,-0.16,-0.32
+Extreme-Cold Fungus,1652,-0.51,-0.33
+Small Animals,3008,0.06,-0.33
+Noctis Farming,3446,-0.12,-0.33
+Release of Inert Gases,1355,-0.73,-0.33
+Lava Tube Settlement,3216,-0.47,-0.34
+Fish,3014,-0.12,-0.34
+Rad-Suits,611,-0.8,-0.37
+CEO's Favourite Project,577,-0.47,-0.37
+Nitrite Reducing Bacteria,1296,-0.57,-0.38
+Pets,3605,-0.49,-0.39
+Biomass Combustors,1269,-0.05,-0.4
+Soil Factory,416,-0.99,-0.4
+Lunar Beam,3126,-0.3,-0.41
+Colonizer Training Camp,3927,-0.48,-0.43
+GHG Producing Bacteria,1594,-0.17,-0.44
+Windmills,641,-0.66,-0.45
+Tardigrades,1449,-0.4,-0.45
+Physics Complex,1081,-0.62,-0.46
+Dust Seals,973,-0.65,-0.47
+Rad-Chem Factory,2154,-0.65,-0.5
+Tundra Farming,913,-0.78,-0.5
+Water Import From Europa,3450,-0.59,-0.51
+Predators,1722,-0.19,-0.51
+Water Splitting Plant,545,-0.53,-0.52
+Nuclear Power,2640,-0.42,-0.52
+Cloud Seeding,1045,-0.62,-0.53
+Ore Processor,1014,-0.46,-0.53
+Black Polar Dust,1839,-0.4,-0.53
+Protected Habitats,5421,-0.48,-0.53
+Magnetic Field Generators,362,-1.05,-0.54
+Wave Power,1144,-0.65,-0.54
+SF Memorial,2918,-0.65,-0.55
+Eos Chasma National Park,1654,-0.44,-0.55
+Heather,3326,-0.36,-0.56
+Adapted Lichen,2772,-0.58,-0.58
+Soletta,2717,-0.5,-0.59
+Rover Construction,3603,-0.72,-0.61
+Insulation,236,-1.19,-0.63
+Urbanized Area,1591,-0.94,-0.63
+Phobos Space Haven,3086,-0.87,-0.64
+Great Dam,1492,-0.76,-0.66
+Land Claim,454,-0.85,-0.66
+Underground City,2467,-0.93,-0.67
+Micro-Mills,901,-0.9,-0.69
+Toll Station,720,-1.22,-0.69
+Ants,733,-0.74,-0.72
+Livestock,1295,-0.72,-0.73
+Aerobraked Ammonia Asteroid,885,-0.91,-0.73
+Tropical Resort,377,-1.26,-0.77
+Permafrost extraction,808,-0.48,-0.79
+Immigrant City,4368,-0.89,-0.82
+Energy Saving,292,-1.4,-0.84
+Mining Expedition,1598,-0.98,-0.85
+Underground Detonations,162,-1.4,-0.92
+Magnetic Field Dome,277,-1.66,-1.06
+Power Grid,374,-1.48,-1.1
+Equatorial Magnetizer,230,-1.5,-1.15
+Artificial Lake,317,-1.22,-1.3

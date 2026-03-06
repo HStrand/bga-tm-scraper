@@ -192,7 +192,8 @@ def index_games_for_player(
     parser: Parser,
     api_client: APIClient,
     player_id: str,
-    player_name: str
+    player_name: str,
+    early_stop: bool = True
 ) -> Tuple[int, int]:
     """
     Index games for a single player
@@ -216,7 +217,7 @@ def index_games_for_player(
         
         # Scrape player's game history (with early stop if we hit already-indexed games)
         print(f"  Scraping game history...")
-        known_game_ids = set(indexed_games) if indexed_games else None
+        known_game_ids = set(indexed_games) if indexed_games and early_stop else None
         games_data = scraper.scrape_player_game_history(player_id, max_clicks=1000, known_game_ids=known_game_ids)
         
         if not games_data:
@@ -343,7 +344,8 @@ def main():
 
             try:
                 successful, failed = index_games_for_player(
-                    scraper, parser, api_client, args.player_id, "Unknown"
+                    scraper, parser, api_client, args.player_id, "Unknown",
+                    early_stop=False
                 )
             finally:
                 scraper.close_browser()
