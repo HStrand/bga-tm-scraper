@@ -309,12 +309,14 @@ class ConfigManager:
             progress = {
                 "completed_games": [],
                 "failed_games": [],
+                "skipped_games": [],
                 "last_processed_index": -1,
                 "counters": {
                     "total_items": 0,
                     "completed_items": 0,
                     "successful_items": 0,
-                    "failed_items": 0
+                    "failed_items": 0,
+                    "skipped_items": 0
                 },
                 "timestamps": {
                     "started_at": datetime.now().isoformat(),
@@ -342,12 +344,48 @@ class ConfigManager:
                 progress["counters"]["successful_items"] -= 1
         
         # Update counters
-        progress["counters"]["completed_items"] = len(progress["completed_games"]) + len(progress["failed_games"])
+        progress["counters"]["completed_items"] = len(progress["completed_games"]) + len(progress["failed_games"]) + len(progress.get("skipped_games", []))
         progress["timestamps"]["last_updated"] = datetime.now().isoformat()
         
         # Save updated progress
         self.save_assignment_progress(assignment_id, progress)
-    
+
+    def update_game_skipped(self, assignment_id: str, table_id: str):
+        """Update progress for a skipped (e.g. deleted replay) game"""
+        from datetime import datetime
+
+        progress = self.load_assignment_progress(assignment_id)
+        if not progress:
+            progress = {
+                "completed_games": [],
+                "failed_games": [],
+                "skipped_games": [],
+                "last_processed_index": -1,
+                "counters": {
+                    "total_items": 0,
+                    "completed_items": 0,
+                    "successful_items": 0,
+                    "failed_items": 0,
+                    "skipped_items": 0
+                },
+                "timestamps": {
+                    "started_at": datetime.now().isoformat(),
+                    "last_updated": datetime.now().isoformat()
+                }
+            }
+
+        table_id_str = str(table_id)
+        skipped = progress.setdefault("skipped_games", [])
+        if table_id_str not in skipped:
+            skipped.append(table_id_str)
+            progress["counters"].setdefault("skipped_items", 0)
+            progress["counters"]["skipped_items"] += 1
+
+        progress["counters"]["completed_items"] = len(progress["completed_games"]) + len(progress["failed_games"]) + len(skipped)
+        progress["timestamps"]["last_updated"] = datetime.now().isoformat()
+
+        self.save_assignment_progress(assignment_id, progress)
+
     def clear_assignment_progress(self, assignment_id: str):
         """Clear progress data for an assignment"""
         if "assignment_progress" in self.config_data:

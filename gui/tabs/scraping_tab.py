@@ -39,6 +39,7 @@ class ScrapingTab:
         self.completed_items = 0
         self.successful_items = 0
         self.failed_items = 0
+        self.skipped_items = 0
         self.start_time = None
         
         # Progress persistence
@@ -203,6 +204,9 @@ class ScrapingTab:
         self.success_label = ttk.Label(stats_frame, text="✅ Success: 0", foreground="green")
         self.success_label.pack(side="left")
         
+        self.skipped_label = ttk.Label(stats_frame, text="⏭️ Skipped: 0", foreground="gray")
+        self.skipped_label.pack(side="left", padx=(20, 0))
+
         self.failure_label = ttk.Label(stats_frame, text="❌ Failed: 0", foreground="red")
         self.failure_label.pack(side="left", padx=(20, 0))
         
@@ -644,6 +648,7 @@ class ScrapingTab:
             self.completed_items = 0
             self.successful_items = 0
             self.failed_items = 0
+            self.skipped_items = 0
         
         # Initialize progress tracking
         self._initialize_progress_tracking()
@@ -1014,6 +1019,12 @@ class ScrapingTab:
                                 api_client.report_game_deleted(tid, pp)
                             except Exception:
                                 pass
+                            self.skipped_items += 1
+                            self.completed_items += 1
+                            if self.current_assignment_id:
+                                self.config_manager.update_game_skipped(self.current_assignment_id, table_id)
+                                self.existing_progress = self.config_manager.load_assignment_progress(self.current_assignment_id)
+                            self.frame.after(0, self.update_progress)
                             continue
 
                         if parsed_game_data:
@@ -1130,6 +1141,7 @@ class ScrapingTab:
         message += "Progress saved:\n"
         message += f"• Processed: {self.completed_items} games\n"
         message += f"• Successful: {self.successful_items} games\n"
+        message += f"• Skipped (lost replays): {self.skipped_items} games\n"
         message += f"• Time elapsed: {elapsed_str}\n\n"
         message += "You can resume this assignment in ~24 hours when your scraping limit has been reset."
         
@@ -1176,6 +1188,7 @@ class ScrapingTab:
             
             summary += f"Total processed: {self.completed_items}\n"
             summary += f"Successful: {self.successful_items}\n"
+            summary += f"Skipped (lost replays): {self.skipped_items}\n"
             summary += f"Failed: {self.failed_items}\n"
             summary += f"Success rate: {success_rate:.1f}%\n"
             summary += f"Time elapsed: {elapsed_str}"
@@ -1207,6 +1220,7 @@ class ScrapingTab:
         
         # Update counters
         self.success_label.config(text=f"✅ Success: {self.successful_items}")
+        self.skipped_label.config(text=f"⏭️ Skipped: {self.skipped_items}")
         self.failure_label.config(text=f"❌ Failed: {self.failed_items}")
         
         # Schedule next update if scraping
@@ -1249,12 +1263,13 @@ class ScrapingTab:
             self.completed_items = counters.get("completed_items", 0)
             self.successful_items = counters.get("successful_items", 0)
             self.failed_items = counters.get("failed_items", 0)
-            
+            self.skipped_items = counters.get("skipped_items", 0)
+
             # Update total items if available
             if counters.get("total_items", 0) > 0:
                 self.total_items = counters["total_items"]
-            
-            self.log_message(f"📊 Restored progress: {self.successful_items} successful, {self.failed_items} failed")
+
+            self.log_message(f"📊 Restored progress: {self.successful_items} successful, {self.skipped_items} skipped, {self.failed_items} failed")
     
     def _initialize_progress_tracking(self):
         """Initialize progress tracking for the current assignment"""
@@ -1272,7 +1287,8 @@ class ScrapingTab:
                     "total_items": self.total_items,
                     "completed_items": 0,
                     "successful_items": 0,
-                    "failed_items": 0
+                    "failed_items": 0,
+                    "skipped_items": 0
                 },
                 "timestamps": {
                     "started_at": datetime.now().isoformat(),
@@ -1300,8 +1316,9 @@ class ScrapingTab:
         table_id_str = str(table_id)
         completed_games = self.existing_progress.get("completed_games", [])
         failed_games = self.existing_progress.get("failed_games", [])
-        
-        return table_id_str in completed_games or table_id_str in failed_games
+        skipped_games = self.existing_progress.get("skipped_games", [])
+
+        return table_id_str in completed_games or table_id_str in failed_games or table_id_str in skipped_games
     
     def _get_games_to_process(self, all_games):
         """Filter games to only include those not already processed"""
