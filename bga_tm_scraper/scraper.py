@@ -2204,55 +2204,75 @@ class TMScraper:
                         print("Page source saved to debug_page_source.html")
                     break
                 
-                # Try to click the found element
-                try:
-                    # Scroll to element to make sure it's visible
-                    self.driver.execute_script("arguments[0].scrollIntoView(true);", see_more_element)
-                    time.sleep(1)
-                    
-                    see_more_element.click()
-                    
-                    click_count += 1
-                    print(f"Clicked 'See more' #{click_count}, waiting for content to load...")
-                    time.sleep(click_delay)
-                    
-                    # Check for "No more results" message
-                    no_more_results = self.driver.find_elements(By.XPATH, 
-                        "//*[contains(text(), 'No more results')]")
-                    
-                    if no_more_results:
-                        print("✅ 'No more results' detected - all games loaded!")
-                        break
-                    
-                    games_loaded += 10
-                    progress_message = f"{games_loaded} games from game history discovered"
-                    print(progress_message)
-                    if progress_callback:
-                        progress_callback(progress_message)
-
-                    # Early stop: check if newly loaded games are already indexed
-                    if known_game_ids:
-                        current_ids = self.driver.execute_script("""
-                            var ids = [];
-                            var rows = document.querySelectorAll('tr');
-                            rows.forEach(function(row) {
-                                var match = row.innerHTML.match(/#(\\d{8,})/);
-                                if (match) ids.push(match[1]);
-                            });
-                            return ids;
+                # Try to click the found element (with retry and overlay dismissal)
+                click_succeeded = False
+                for attempt in range(3):
+                    try:
+                        # Dismiss any splash overlay that might block clicks
+                        self.driver.execute_script("""
+                            var splashes = document.querySelectorAll('.splash_background');
+                            splashes.forEach(function(el) { el.style.display = 'none'; });
                         """)
-                        new_ids = [tid for tid in current_ids if tid not in seen_table_ids]
-                        seen_table_ids.update(current_ids)
-                        if any(tid in known_game_ids for tid in new_ids):
-                            print(f"✅ Found already-indexed game in latest batch - early stopping (loaded {games_loaded} games)")
-                            early_stopped = True
-                            break
 
-                except Exception as e:
-                    logger.warning(f"Error clicking 'See more' button: {e}")
-                    print(f"⚠️  Error clicking 'See more': {e}")
-                    print(f"Element tag: {see_more_element.tag_name}, text: '{see_more_element.text}'")
+                        # Scroll to element to make sure it's visible
+                        self.driver.execute_script("arguments[0].scrollIntoView(true);", see_more_element)
+                        time.sleep(1)
+
+                        try:
+                            see_more_element.click()
+                        except Exception as click_err:
+                            logger.debug(f"Regular click failed, trying JavaScript click: {click_err}")
+                            self.driver.execute_script("arguments[0].click();", see_more_element)
+
+                        click_succeeded = True
+                        break
+
+                    except Exception as e:
+                        logger.warning(f"Click attempt {attempt + 1}/3 failed: {e}")
+                        if attempt < 2:
+                            time.sleep(2)
+                        else:
+                            print(f"⚠️  Error clicking 'See more' after 3 attempts: {e}")
+                            print(f"Element tag: {see_more_element.tag_name}, text: '{see_more_element.text}'")
+
+                if not click_succeeded:
                     break
+
+                click_count += 1
+                print(f"Clicked 'See more' #{click_count}, waiting for content to load...")
+                time.sleep(click_delay)
+
+                # Check for "No more results" message
+                no_more_results = self.driver.find_elements(By.XPATH,
+                    "//*[contains(text(), 'No more results')]")
+
+                if no_more_results:
+                    print("✅ 'No more results' detected - all games loaded!")
+                    break
+
+                games_loaded += 10
+                progress_message = f"{games_loaded} games from game history discovered"
+                print(progress_message)
+                if progress_callback:
+                    progress_callback(progress_message)
+
+                # Early stop: check if newly loaded games are already indexed
+                if known_game_ids:
+                    current_ids = self.driver.execute_script("""
+                        var ids = [];
+                        var rows = document.querySelectorAll('tr');
+                        rows.forEach(function(row) {
+                            var match = row.innerHTML.match(/#(\\d{8,})/);
+                            if (match) ids.push(match[1]);
+                        });
+                        return ids;
+                    """)
+                    new_ids = [tid for tid in current_ids if tid not in seen_table_ids]
+                    seen_table_ids.update(current_ids)
+                    if any(tid in known_game_ids for tid in new_ids):
+                        print(f"✅ Found already-indexed game in latest batch - early stopping (loaded {games_loaded} games)")
+                        early_stopped = True
+                        break
             
             if click_count >= max_clicks:
                 print(f"⚠️  Reached maximum click limit ({max_clicks}). Some games might not be loaded.")
