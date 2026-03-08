@@ -2901,6 +2901,7 @@ class TMScraper:
         return any(ind in page_lower for ind in [
             'replay for this game has been lost',
             'empty archive file',
+            'unable to find game archive',
         ])
 
     def _check_replay_limit_reached(self, page_source: str) -> bool:
