@@ -51,6 +51,7 @@ data/registry/
 
 # Analysis output data
 analysis/data/
+analysis/db_dump/
 
 # Chrome debug profile
 chrome-debug-profile/
