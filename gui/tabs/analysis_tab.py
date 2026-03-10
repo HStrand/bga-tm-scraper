@@ -57,9 +57,54 @@ class AutocompleteCombobox(ttk.Combobox):
         # No need for up/down, we'll jump to the popup
         # list at the position of the autocompletion
 
+class MultiSelectCombobox(ttk.Frame):
+    def __init__(self, parent, values=None):
+        super().__init__(parent)
+        self.values = values or []
+        self.variables = {}
+        
+        # Create combobox
+        self.combobox = ttk.Entry(self, width=27)
+        self.combobox.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        # Create dropdown button
+        self.button = ttk.Button(self, text="▼", width=3, command=self.show_dropdown)
+        self.button.pack(side=tk.LEFT)
+        
+        # Create dropdown window
+        self.dropdown = tk.Toplevel(self)
+        self.dropdown.withdraw()
+        self.dropdown.overrideredirect(True)
+        
+        # Create checkboxes in dropdown
+        for value in self.values:
+            var = tk.BooleanVar()
+            self.variables[value] = var
+            cb = ttk.Checkbutton(self.dropdown, text=value, variable=var, 
+                               command=self.update_text)
+            cb.pack(anchor=tk.W, padx=2)
+            
+
+    def show_dropdown(self):
+        if self.dropdown.winfo_ismapped():
+            self.dropdown.withdraw()
+        else:
+            x = self.winfo_rootx()
+            y = self.winfo_rooty() + self.winfo_height()
+            self.dropdown.geometry(f"+{x}+{y}")
+            self.dropdown.deiconify()
+            
+    def update_text(self):
+        selected = [value for value, var in self.variables.items() if var.get()]
+        self.combobox.delete(0, tk.END)
+        self.combobox.insert(0, ", ".join(selected))
+        
+    def get(self):
+        return [value for value, var in self.variables.items() if var.get()]
+
 class AnalysisTab:
 
-    corporations = ["Valley Trust",
+    corporations = sorted(["Valley Trust",
                     "Mining Guild",
                     "Point Luna",
                     "Robinson Industries",
@@ -75,9 +120,9 @@ class AnalysisTab:
                     "Teractor",
                     "ThorGate",
                     "United Nations Mars Initiative",
-                    "Vitor"]
+                    "Vitor"])
 
-
+    maps = ["Tharsis", "Hellas", "Elysium"]
 
     def __init__(self, parent, config_manager):
         self.parent = parent
@@ -131,6 +176,7 @@ class AnalysisTab:
         browse_button = ttk.Button(path_frame, text="Browse", command=self.browse_file)
         browse_button.pack(side=tk.RIGHT)
 
+    # In the create_filters method, add the new filter:
     def create_filters(self):
         filter_frame = ttk.LabelFrame(self.content, text="Filters", padding=10)
         filter_frame.pack(fill=tk.X, padx=5, pady=5)
@@ -143,13 +189,13 @@ class AnalysisTab:
             "Player max. Elo": self.create_filter_field(filter_frame, "Player max. Elo"),
             "Opponent min. Elo": self.create_filter_field(filter_frame, "Opponent min. Elo"),
             "Opponent max. Elo": self.create_filter_field(filter_frame, "Opponent max. Elo"),
-            "Corporation": self.create_filter_field(filter_frame, "Corporation", values=self.corporations),
-            "Opponent Corporation": self.create_filter_field(filter_frame, "Opponent Corporation", values=self.corporations)
-            #"Starting Hand Option": self.create_filter_field(filter_frame, "Starting Hand Option"),
-            #"Card Played": self.create_filter_field(filter_frame, "Card Played")
+            "Corporation": self.create_filter_field(filter_frame, "Corporation", values=self.corporations, is_multi_select=True),
+            "Opponent Corporation": self.create_filter_field(filter_frame, "Opponent Corporation", values=self.corporations, is_multi_select=True),
+            "Map": self.create_filter_field(filter_frame, "Map", values=self.maps, is_multi_select=True)
         }
 
-    def create_filter_field(self, parent, label, values=[]):
+    # In the AnalysisTab class, modify the create_filter_field method:
+    def create_filter_field(self, parent, label, values=[], is_multi_select=False):
         frame = ttk.Frame(parent)
         frame.pack(fill=tk.X, pady=2)
 
@@ -158,10 +204,12 @@ class AnalysisTab:
         checkbox = ttk.Checkbutton(frame, text=label, variable=var_enabled)
         checkbox.grid(row=0, column=0, sticky=tk.W)
 
-        # Entry or Combobox for the filter value
-        if values:
+        # Entry, Combobox, or MultiSelectCombobox for the filter value
+        if is_multi_select:
+            var_value = MultiSelectCombobox(frame, values=values)
+        elif values:
             var_value = AutocompleteCombobox(frame, width=27)
-            var_value["values"] = values  # To be populated later
+            var_value["values"] = values
             var_value.set_completion_list(values)
         else:
             var_value = ttk.Entry(frame, width=30)
@@ -297,8 +345,8 @@ class AnalysisTab:
                                 if player_elo < min_elo:
                                     print("Hero Elo too low")
                                     continue
-                                else:
-                                    print("Hero Elo OK")
+                                #else:
+                                    #print("Hero Elo OK")
 
                             # Hero max. Elo filter
                             if self.filters["Player max. Elo"]["enabled"].get():
@@ -311,8 +359,8 @@ class AnalysisTab:
                                 if player_elo > max_elo:
                                     print("Hero Elo too high")
                                     continue
-                                else:
-                                    print("Hero Elo OK")
+                                #else:
+                                    #print("Hero Elo OK")
 
                             # Opponent min. Elo filter
                             if self.filters["Opponent min. Elo"]["enabled"].get():
@@ -325,15 +373,15 @@ class AnalysisTab:
                                         elo_data = players.get(player).get("elo_data")
                                         if elo_data: # Opponent can have no Elo
                                             opponent_elo = elo_data.get("game_rank")
-                                            print(f"Opponent Elo: {opponent_elo}, Min Elo: {min_elo}")
+                                            #print(f"Opponent Elo: {opponent_elo}, Min Elo: {min_elo}")
 
                                 if opponent_elo < min_elo:
                                     print("Opponent Elo too low")
                                     continue
-                                else:
-                                    print("Opponent Elo OK")
+                                #else:
+                                    #print("Opponent Elo OK")
 
-                            #Opponent max. Elo filter
+                            # Opponent max. Elo filter
                             if self.filters["Opponent max. Elo"]["enabled"].get():
                                 max_elo = int(self.filters["Opponent max. Elo"]["value"].get())
                                 player_perspective = str(data.get("player_perspective"))
@@ -344,42 +392,78 @@ class AnalysisTab:
                                         elo_data = players.get(player).get("elo_data")
                                         if elo_data:  # Opponent can have no Elo
                                             opponent_elo = elo_data.get("game_rank")
-                                            print(f"Opponent Elo: {opponent_elo}, Max Elo: {max_elo}")
+                                            #print(f"Opponent Elo: {opponent_elo}, Max Elo: {max_elo}")
 
                                 if opponent_elo > max_elo:
                                     print("Opponent Elo too high")
                                     continue
-                                else:
-                                    print("Opponent Elo OK")
+                                #else:
+                                    #print("Opponent Elo OK")
 
 
                             # Corporation filter
                             if self.filters["Corporation"]["enabled"].get():
-                                corporation = self.filters["Corporation"]["value"].get()
+                                corporations = self.filters["Corporation"]["value"].get()
                                 player_perspective = data.get("player_perspective")
-                                if corporation != data.get("players").get(player_perspective).get("corporation"):
+                                if data.get("players").get(player_perspective).get("corporation") not in corporations:
+                                    print("Corporation does not match filter")
                                     continue
 
                             # Opponent corporation filter
                             if self.filters["Opponent Corporation"]["enabled"].get():
+                                corporations = self.filters["Opponent Corporation"]["value"].get()
                                 player_perspective = data.get("player_perspective")
                                 players = data.get("players")
                                 opponent_corporation = ""
                                 for player in players:
                                     if player != player_perspective:
                                         opponent_corporation = players.get(player).get("corporation")
-                                if opponent_corporation != self.filters["Opponent Corporation"]["value"].get():
+                                if opponent_corporation not in corporations:
+                                    print("Opponent corporation does not match filter")
                                     continue
+
+                            # Map filter
+                            if self.filters["Map"]["enabled"].get():
+                                maps = self.filters["Map"]["value"].get()
+                                #print("Maps: "+str(maps))
+                                description = data.get("moves")[0].get("description")
+                                map = ""
+                                for string in description.split(" | "):
+                                    if string.startswith("Map:"):
+                                        map = string[5:]
+                                        if map == "Thesaris": # i have no idea why this happens in some replays
+                                            map = "Tharsis"
+                                        #print("Map: "+map)
+                                if map == "":
+                                    print("No map found, trying fallback method")
+                                    # fallback plan since replays are weird about maps
+                                    # i.e., some maps don't contain a 'Map: ' description at all
+                                    # and for Vastitas it's empty
+                                    if "on Tharsis Hex" in str(data):
+                                        map = "Tharsis"
+                                    # elif "on  Hex" in str(data):
+                                    #     map = "Vastitas Borealis"
+                                    elif "on Hellas Hex" in str(data):
+                                        map = "Hellas"
+                                    elif "on Elysium Hex" in str(data):
+                                        map = "Elysium"
+                                print("Map: "+map)
+                                if map not in maps:
+                                    print("Map does not match filter")
+                                    continue
+                                else:
+                                    print("Map matches filter")
+
 
                             # If all filters pass, analyze the game
                             total_games += 1
                             matching_replay_ids.append(data.get("replay_id"))
                             print(f"Game passed all filters: {file_name}")
 
-                            # Get card keeps
+                            # Get card keeps and set
                             keeps = []
                             if data.get("moves") and len(data.get("moves")) > 1: # Game can end without moves
-                                description = str(data.get("moves")[1]) # Get description of 2nd move
+                                description = str(data.get("moves")[1].get("description")) # Get description of 2nd move
                                 for string in description.split(" | "):
                                     if string.startswith("You buy"):
                                         keeps.append(string[8:])
@@ -391,14 +475,14 @@ class AnalysisTab:
                             # Check if Hero won
                             player_perspective = str(data.get("player_perspective"))
                             if data.get("players", []).get(player_perspective).get("player_name") == data.get("winner"):
-                                print("Hero won!")
+                                #print("Hero won!")
                                 wins += 1
                                 for keep in keeps:
                                     if keep not in card_wins:
                                         card_wins[keep] = 0
                                     card_wins[keep] += 1
-                            else:
-                                print("Hero lost!")
+                            #else:
+                            #    print("Hero lost!")
 
                             elo_data = data.get("players").get(player_perspective).get("elo_data")
                             if elo_data:
