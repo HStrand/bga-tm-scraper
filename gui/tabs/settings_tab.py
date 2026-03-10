@@ -63,6 +63,8 @@ class SettingsTab:
         self.request_delay_var = tk.DoubleVar()
         self.max_retries_var = tk.IntVar()
         self.speed_profile_var = tk.StringVar()
+        # Auto-request next assignment when current one finishes
+        self.auto_request_next_var = tk.BooleanVar()
         
         # Email Settings
         self.email_enabled_var = tk.BooleanVar()
@@ -296,6 +298,17 @@ class SettingsTab:
                                   values=["FAST", "NORMAL", "SLOW"], state="readonly", width=15)
         speed_combo.pack(side="right")
     
+        # Auto-request next assignment checkbox
+        auto_frame = ttk.Frame(section_frame)
+        auto_frame.pack(fill="x", pady=(8, 2))
+
+        auto_cb = ttk.Checkbutton(
+            auto_frame,
+            text="Automatically request and start next assignment when current one finishes",
+            variable=self.auto_request_next_var
+        )
+        auto_cb.pack(anchor="w")
+
     def create_buttons_section(self, parent):
         """Create action buttons section"""
         # Create a horizontal button layout for bottom panel
@@ -441,6 +454,8 @@ class SettingsTab:
         self.request_delay_var.set(scraping_settings.get("request_delay", 1.0))
         self.max_retries_var.set(scraping_settings.get("max_retries", 3))
         self.speed_profile_var.set(scraping_settings.get("speed_profile", "FAST"))
+        # Auto-request next assignment setting
+        self.auto_request_next_var.set(scraping_settings.get("auto_request_next", False))
     
     def save_settings(self):
         """Save current settings to config manager"""
@@ -470,7 +485,8 @@ class SettingsTab:
             self.config_manager.update_section("scraping_settings", {
                 "request_delay": self.request_delay_var.get(),
                 "max_retries": self.max_retries_var.get(),
-                "speed_profile": self.speed_profile_var.get()
+                "speed_profile": self.speed_profile_var.get(),
+                "auto_request_next": self.auto_request_next_var.get()
             })
             
             # Email Settings
