@@ -697,6 +697,23 @@ class Parser:
             # Get player IDs for tracking
             player_ids = list(player_id_map.keys())
             
+            # Augment tracker_dict with player-specific entries from _TRACKER_PREFIX_MAP
+            # when HTML-based extraction returns few results
+            if len(tracker_dict) < 10:
+                for entry in gamelogs.get('data', {}).get('data', []):
+                    if not isinstance(entry, dict):
+                        continue
+                    for item in entry.get('data', []):
+                        if not isinstance(item, dict):
+                            continue
+                        item_args = item.get('args') or {}
+                        cn = item_args.get('counter_name', '') if isinstance(item_args, dict) else ''
+                        if isinstance(cn, str) and cn not in tracker_dict:
+                            base = re.sub(r'_[0-9a-fA-F]{6}$', '', cn)
+                            display = self._TRACKER_PREFIX_MAP.get(base)
+                            if display:
+                                tracker_dict[cn] = display
+
             # Track resources and production through all moves
             tracking_progression = self._track_resources_and_production(gamelogs, player_ids, tracker_dict)
             
