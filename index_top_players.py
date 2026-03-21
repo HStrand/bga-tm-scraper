@@ -29,7 +29,7 @@ BASE_URL = 'https://boardgamearena.com'
 RANKING_URL = '/gamepanel/gamepanel/getRanking.html'
 
 
-def fetch_players() -> List[Dict]:
+def fetch_players(num_players: int = 100) -> List[Dict]:
     """
     Fetch all Terraforming Mars players from BGA leaderboard
     
@@ -53,7 +53,7 @@ def fetch_players() -> List[Dict]:
         raise RuntimeError("Failed to login to BGA")
     
     params = {'game': 1924}
-    num_players = 100 # Only top 1000
+    # num_players passed as parameter
     players = []
     
     print(f"Fetching up to {num_players} players from leaderboard...")
@@ -322,10 +322,12 @@ def main():
     arg_parser = argparse.ArgumentParser(description="Index top BGA Terraforming Mars players")
     arg_parser.add_argument("--player-id", type=str, default=None,
                             help="Index a single player by ID (skips leaderboard fetch)")
+    arg_parser.add_argument("-n", type=int, default=100,
+                            help="Number of top players to index (default: 100)")
     args = arg_parser.parse_args()
 
     print("\n" + "="*80)
-    print("BGA TM Scraper - Index Top 100 Players")
+    print(f"BGA TM Scraper - Index Top {args.n} Players")
     print("="*80)
     print(f"Version: {BUILD_VERSION}")
     print(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -366,22 +368,22 @@ def main():
 
         # Full mode: fetch leaderboard and index top 100
         # Step 1: Fetch players
-        players = fetch_players()
+        players = fetch_players(num_players=args.n)
 
         # Step 2: Update players via API
         update_players_via_api(api_client, players)
 
         # Step 3: Sort by Elo and get top 100
         print("\n" + "="*80)
-        print("STEP 3: Indexing games for top 100 players by Elo")
+        print(f"STEP 3: Indexing games for top {args.n} players by Elo")
         print("="*80)
 
         players_by_elo = sorted(players, key=lambda x: x['elo'], reverse=True)
-        top_100 = players_by_elo[:100]
+        top_100 = players_by_elo[:args.n]
         # target_name = "StrandedKnight"
         # top_100 = [p for p in players_by_elo if p.get("name") == target_name]
 
-        print(f"\nTop 100 players by Elo:")
+        print(f"\nTop {args.n} players by Elo:")
         for i, player in enumerate(top_100, 1):
             print(f"  {i}. {player['name']} (Elo: {player['elo']}, ID: {player['playerId']})")
 
@@ -403,7 +405,7 @@ def main():
             player_id = str(player['playerId'])
             player_name = player['name']
 
-            print(f"\n[{i}/100] Processing {player_name} (Elo: {player['elo']})")
+            print(f"\n[{i}/{len(top_100)}] Processing {player_name} (Elo: {player['elo']})")
 
             try:
                 successful, failed = index_games_for_player(
@@ -426,8 +428,8 @@ def main():
         print("\n" + "="*80)
         print("FINAL SUMMARY")
         print("="*80)
-        print(f"Players processed: {players_processed}/100")
-        print(f"Players failed: {players_failed}/100")
+        print(f"Players processed: {players_processed}/{len(top_100)}")
+        print(f"Players failed: {players_failed}/{len(top_100)}")
         print(f"Total games indexed: {total_successful}")
         print(f"Total games failed: {total_failed}")
         if total_successful + total_failed > 0:
