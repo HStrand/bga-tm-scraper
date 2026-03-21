@@ -3323,14 +3323,10 @@ class Parser:
             
             # Process each move
             for move_index in range(1, max_move_id + 1):
-                # Find the move entry
-                move_entry = None
-                for entry in data_entries:
-                    if entry.get('move_id') == str(move_index):
-                        move_entry = entry
-                        break
-                
-                if not move_entry:
+                # Find all entries for this move (may span multiple channels)
+                move_entries = [e for e in data_entries if isinstance(e, dict) and e.get('move_id') == str(move_index)]
+
+                if not move_entries:
                     # Even if no move entry, store current state to maintain progression
                     tracking_entry = {
                         'move_number': move_index,
@@ -3338,57 +3334,51 @@ class Parser:
                     }
                     tracking_progression.append(tracking_entry)
                     continue
-                
-                # Process all submoves in this move to find counter updates
-                submoves = move_entry.get('data', [])
-                for submove in submoves:
-                    if not isinstance(submove, dict):
-                        continue
-                    
-                    # Look for counter updates
-                    args = submove.get('args', {})
-                    if 'counter_name' in args and 'counter_value' in args and 'player_id' in args:
-                        counter_name = args['counter_name']
-                        counter_value = args['counter_value']
-                        gamelogs_player_id = str(args['player_id'])
-                        
-                        # Find the display name for this counter
-                        display_name = tracker_dict.get(counter_name)
-                        if display_name:
-                            # Check if this tracker should be excluded (same logic as initialization)
-                            global_tracker_patterns = [
-                                'Temperature', 'Oxygen Level', 'Oceans', 'TR', 'Global Parameters Delta',
-                                'Number of Greenery on Mars', 'Number of owned land', 'Number of Cities',
-                                'Number of Cities on Mars', 'Pass', 'Steel Exchange Rate', 'Titanium Exchange Rate'
-                            ]
-                            
-                            # Skip if this is a global tracker that should be excluded
-                            is_global = False
-                            for pattern in global_tracker_patterns:
-                                if pattern in display_name:
-                                    is_global = True
-                                    break
-                            
-                            if is_global:
-                                logger.debug(f"Move {move_index}: Skipping global tracker {display_name}")
-                                continue
-                            
-                            # Convert gamelogs player ID to actual player ID
-                            actual_player_id = int(gamelogs_player_id)
-                            
-                            if actual_player_id in player_data:
-                                # Convert value to int and update the persistent state
+
+                # Process all submoves across all entries for this move
+                for move_entry in move_entries:
+                    submoves = move_entry.get('data', [])
+                    for submove in submoves:
+                        if not isinstance(submove, dict):
+                            continue
+
+                        # Look for counter updates (both counter and counterAsync)
+                        args = submove.get('args', {})
+                        if not isinstance(args, dict):
+                            continue
+                        if 'counter_name' in args and 'counter_value' in args:
+                            counter_name = args['counter_name']
+                            counter_value = args['counter_value']
+                            gamelogs_player_id = str(args.get('player_id', ''))
+
+                            # Find the display name for this counter
+                            display_name = tracker_dict.get(counter_name)
+                            if display_name:
+                                # Check if this tracker should be excluded
+                                global_tracker_patterns = [
+                                    'Temperature', 'Oxygen Level', 'Oceans', 'TR', 'Global Parameters Delta',
+                                    'Number of Greenery on Mars', 'Number of owned land', 'Number of Cities',
+                                    'Number of Cities on Mars', 'Pass', 'Steel Exchange Rate', 'Titanium Exchange Rate'
+                                ]
+
+                                is_global = any(pattern in display_name for pattern in global_tracker_patterns)
+                                if is_global:
+                                    continue
+
+                                # Convert gamelogs player ID to actual player ID
                                 try:
-                                    validated_value = int(counter_value)
+                                    actual_player_id = int(gamelogs_player_id)
                                 except (ValueError, TypeError):
-                                    validated_value = 0
-                                
-                                # Only update if this tracker exists in player_data (was initialized)
-                                if display_name in player_data[actual_player_id]:
-                                    player_data[actual_player_id][display_name] = validated_value
-                                    logger.debug(f"Move {move_index}: Player {actual_player_id} {display_name} = {validated_value}")
-                                else:
-                                    logger.debug(f"Move {move_index}: Skipping uninitialized tracker {display_name}")
+                                    continue
+
+                                if actual_player_id in player_data:
+                                    try:
+                                        validated_value = int(counter_value)
+                                    except (ValueError, TypeError):
+                                        validated_value = 0
+
+                                    if display_name in player_data[actual_player_id]:
+                                        player_data[actual_player_id][display_name] = validated_value
                 
                 # Store snapshot of current state (includes all previous values + any updates from this move)
                 tracking_entry = {
