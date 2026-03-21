@@ -608,14 +608,14 @@ class Parser:
         
         soup = BeautifulSoup(replay_html, 'html.parser')
         
-        # If map is "Random", extract the actual map from the replay HTML
-        if game_metadata.map and game_metadata.map.lower() == 'random':
+        # If map is missing or "Random", extract the actual map from the replay HTML
+        if not game_metadata.map or game_metadata.map.lower() == 'random':
             actual_map = self._extract_map_from_replay(replay_html)
             if actual_map:
-                logger.info(f"Resolved Random map to actual map: {actual_map}")
+                logger.info(f"Resolved map from replay HTML: {actual_map}")
                 game_metadata.map = actual_map
-            else:
-                logger.warning("Could not resolve Random map from replay HTML, keeping 'Random'")
+            elif not game_metadata.map:
+                logger.warning("Could not extract map from replay HTML")
         
         # Extract gamelogs once for memory efficiency
         gamelogs = self._extract_g_gamelogs(replay_html)
@@ -3844,9 +3844,9 @@ class Parser:
                             elif len(names) > 1:
                                 parts.append(f"{pname} {verb} {len(names)} cards: {', '.join(names)}")
                         full_description = " | ".join(parts)
-                        if source is per_player_draft_ids and action_type in ('other', 'draw', 'draft_card'):
+                        if source and source is per_player_draft_ids and action_type in ('other', 'draw', 'draft_card'):
                             action_type = 'draft'
-                        if source is per_player_draw_ids and action_type == 'other':
+                        if source and source is per_player_draw_ids and action_type == 'other':
                             action_type = 'draw'
                 
                 # Map kept cards to names per player
@@ -3914,8 +3914,13 @@ class Parser:
                                     reason_rendered = self._render_bga_log_template(rtr.get('log', ''), rtr.get('args', {}), aug_tracker)
                                     if isinstance(reason_rendered, str) and reason_rendered.strip():
                                         rendered = f"{rendered} ({reason_rendered.strip()})"
-                                if isinstance(rendered, str) and rendered.strip() and rendered.strip() not in desc_parts:
-                                    desc_parts.append(rendered.strip())
+                                if isinstance(rendered, str) and rendered.strip():
+                                    # Strip HTML tags from rendered text
+                                    clean = re.sub(r'<[^>]+>', '', rendered).strip()
+                                    # Normalize whitespace
+                                    clean = re.sub(r'\s+', ' ', clean)
+                                    if clean and clean not in desc_parts:
+                                        desc_parts.append(clean)
                         if desc_parts:
                             full_description = " | ".join(desc_parts)
                     except Exception:
