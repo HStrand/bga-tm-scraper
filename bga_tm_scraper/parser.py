@@ -622,15 +622,15 @@ class Parser:
         
         # Extract player IDs from GameMetadata
         player_id_map = self._get_player_id_map(game_metadata)
-        
+
+        # Build token_types early (needed for VP progression and name mappings)
+        token_types = self._extract_token_types(replay_html)
+
         # Extract VP progression throughout the game
-        vp_progression = self._extract_vp_progression(replay_html, gamelogs)
-        
+        vp_progression = self._extract_vp_progression(replay_html, gamelogs, token_types)
+
         # Create simple name_to_id mapping for move processing
         name_to_id = {name: player_id for player_id, name in player_id_map.items()}
-
-        # Build card name mapping from token_types for move parsing
-        token_types = self._extract_token_types(replay_html)
 
         # Extract corporations from HTML, with gamelogs fallback
         corporations = self._extract_corporations(soup, player_perspective, player_id_map)
@@ -662,7 +662,7 @@ class Parser:
         tile_base_names: Dict[str, str] = {}
         for token_id, token_data in token_types.items():
             if token_id not in card_names_map and isinstance(token_data, dict):
-                if token_id.startswith(('card_stanproj_', 'card_colo_', 'tile_', 'hex_')):
+                if token_id.startswith(('card_stanproj_', 'card_colo_', 'tile_', 'hex_', 'milestone_', 'award_')):
                     name = token_data.get('name') or token_data.get('tooltip_action')
                     if isinstance(name, str) and name.strip():
                         card_names_map[token_id] = name.strip()
@@ -796,13 +796,13 @@ class Parser:
                     if move.card_played:
                         cards_played.append(move.card_played)
                     if move.action_type == 'claim_milestone':
-                        milestone_match = re.search(r'claims milestone (.+?) ', move.description)
+                        milestone_match = re.search(r'claims milestone (.+?)(?:\s*\||$)', move.description)
                         if milestone_match:
-                            milestones_claimed.append(milestone_match.group(1))
+                            milestones_claimed.append(milestone_match.group(1).strip())
                     if move.action_type == 'fund_award':
                         award_match = re.search(r'funds (.+?) award', move.description)
                         if award_match:
-                            awards_funded.append(award_match.group(1))
+                            awards_funded.append(award_match.group(1).strip())
             
             # Get ELO data from GameMetadata
             elo_data = None
@@ -1533,6 +1533,18 @@ class Parser:
                                 if isinstance(token_id_val, str) and token_id_val.startswith(('card_main_', 'card_prelude_', 'card_corp_')):
                                     card_played = token_id_val
                                 logger.debug(f"Move {move_number}: Detected card play via token_id={token_id_val}")
+                            # Card activation
+                            elif 'activates' in log_txt:
+                                action_type = 'activate_card'
+                                logger.debug(f"Move {move_number}: Detected card activation via token_id={token_id_val}")
+                            # Milestone claim
+                            elif 'claims milestone' in log_txt:
+                                action_type = 'claim_milestone'
+                                logger.debug(f"Move {move_number}: Detected milestone claim")
+                            # Award funding
+                            elif 'funds' in log_txt and 'award' in log_txt:
+                                action_type = 'fund_award'
+                                logger.debug(f"Move {move_number}: Detected award funding")
                             # Draft selection
                             elif 'draft' in log_txt or place_to.startswith('draw_'):
                                 if action_type == 'other':
@@ -1560,6 +1572,16 @@ class Parser:
                             action_type = 'sell_cards'
                             reason = 'Sell patents'
                             logger.debug(f"Move {move_number}: Detected sell patents action")
+
+                    elif item_type == 'counter':
+                        # Detect convert heat: pays Heat + increases Temperature
+                        if action_type == 'other':
+                            counter_name = str(args.get('counter_name', ''))
+                            if re.match(r'^tracker_t$', counter_name):
+                                log_txt = (data_item.get('log') or '').lower()
+                                if 'increases' in log_txt:
+                                    action_type = 'convert_heat'
+                                    logger.debug(f"Move {move_number}: Detected convert heat action")
 
                     elif item_type == 'gameStateChange':
                         # Inspect nested operations for draw and reason
@@ -1593,6 +1615,11 @@ class Parser:
                                         if rs:
                                             reason = rs
                                             logger.debug(f"Move {move_number}: Found reason '{reason}'")
+                                # Resolve hex IDs in reason
+                                if isinstance(reason, str):
+                                    hex_match = re.match(r'^hex_(\d+)_(\d+)$', reason)
+                                    if hex_match:
+                                        reason = f"Hex {hex_match.group(1)},{hex_match.group(2)}"
                                 # Classify action from reason text
                                 if action_type == 'other' and isinstance(reason, str):
                                     if reason.startswith('immediate effect of '):
@@ -2373,9 +2400,13 @@ class Parser:
                             if hex_id:
                                 hex_name = hex_names.get(hex_id)
                                 if hex_name:
-                                    # Use hex name as the actual name instead of tile ID
                                     actual_name = hex_name
                                     logger.debug(f"Mapped tile {item_id} to hex name: {hex_name}")
+                                else:
+                                    # Format unnamed hex as coordinates (hex_4_8 -> "Hex 4,8")
+                                    coords_match = re.match(r'hex_(\d+)_(\d+)', hex_id)
+                                    if coords_match:
+                                        actual_name = f"Hex {coords_match.group(1)},{coords_match.group(2)}"
                         
                         updated_items[actual_name] = updated_item_data
                     
@@ -2447,7 +2478,7 @@ class Parser:
         # This method exists to maintain consistency when gamelogs are processed separately
         return {}
 
-    def _extract_vp_progression(self, html_content: str, gamelogs: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _extract_vp_progression(self, html_content: str, gamelogs: Dict[str, Any], token_types: Dict[str, Any] = None) -> List[Dict[str, Any]]:
         """Extract VP progression throughout the game using g_gamelogs data"""
 
         # Extract name mappings from HTML
@@ -2455,10 +2486,27 @@ class Parser:
         milestone_names = self._extract_milestone_names(html_content)
         award_names = self._extract_award_names(html_content)
         hex_names = self._extract_hex_names(html_content)
-        
+
+        # Fallback to token_types for any missing name mappings
+        if token_types:
+            if not card_names:
+                card_names = self._extract_card_names_from_token_types(token_types)
+            for token_id, token_data in token_types.items():
+                if not isinstance(token_data, dict):
+                    continue
+                name = token_data.get('name') or token_data.get('tooltip_action')
+                if not isinstance(name, str) or not name.strip():
+                    continue
+                if token_id.startswith('milestone_') and token_id not in milestone_names:
+                    milestone_names[token_id] = name.strip()
+                elif token_id.startswith('award_') and token_id not in award_names:
+                    award_names[token_id] = name.strip()
+                elif token_id.startswith('hex_') and token_id not in hex_names:
+                    hex_names[token_id] = name.strip()
+
         # Extract tile-to-hex mapping from gamelogs
         tile_to_hex = self._extract_tile_to_hex_mapping(gamelogs)
-        
+
         # Parse scoring data from g_gamelogs with name replacement including hex information
         scoring_entries = self._parse_scoring_data_from_gamelogs_with_hex(
             gamelogs, card_names, milestone_names, award_names, tile_to_hex, hex_names
@@ -3120,6 +3168,10 @@ class Parser:
                     # Also check based on key name for safety
                     if key_name in ('token_name', 'counter_name'):
                         return self._infer_from_tracker_id(val, tracker_dict)
+                    # Format unnamed hex IDs as coordinates
+                    hex_match = re.match(r'^hex_(\d+)_(\d+)$', val)
+                    if hex_match:
+                        return f"Hex {hex_match.group(1)},{hex_match.group(2)}"
                     return val
                 return str(val)
             except Exception:
@@ -3679,15 +3731,16 @@ class Parser:
             # Map tile_placed and tile_location IDs to names
             if tile_placed and card_names_map and tile_placed in card_names_map:
                 tile_placed = card_names_map[tile_placed]
-            if tile_location and card_names_map:
-                hex_name = card_names_map.get(tile_location)
-                if hex_name:
-                    # Include coordinates from hex ID (e.g. hex_5_9 -> "South Pole (5,9)")
-                    coords_match = re.match(r'hex_(\d+)_(\d+)', tile_location)
-                    if coords_match:
-                        tile_location = f"{hex_name} ({coords_match.group(1)},{coords_match.group(2)})"
-                    else:
-                        tile_location = hex_name
+            if tile_location:
+                hex_name = card_names_map.get(tile_location) if card_names_map else None
+                coords_match = re.match(r'hex_(\d+)_(\d+)', tile_location)
+                if hex_name and coords_match:
+                    tile_location = f"{hex_name} ({coords_match.group(1)},{coords_match.group(2)})"
+                elif hex_name:
+                    tile_location = hex_name
+                elif coords_match:
+                    # Unnamed hex — format as coordinates
+                    tile_location = f"Hex {coords_match.group(1)},{coords_match.group(2)}"
 
             # Build per-player options (draft/draw) and drafted selection
             card_options_map: Optional[Dict[str, List[str]]] = None
