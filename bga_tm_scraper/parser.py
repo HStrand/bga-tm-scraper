@@ -51,7 +51,9 @@ class GameState:
     milestones: Dict[str, Dict[str, Any]]  # milestone_name -> details
     awards: Dict[str, Dict[str, Any]]  # award_name -> details
     player_trackers: Dict[str, Dict[str, int]] = None  # player_id -> tracker_name -> value
-    
+    draw_pile: Optional[int] = None
+    discard_pile: Optional[int] = None
+
     def __post_init__(self):
         if self.player_vp is None:
             self.player_vp = {}
@@ -3303,7 +3305,11 @@ class Parser:
                 player_data[int(player_id)] = player_trackers
             
             logger.info(f"Initialized {len(player_tracker_names)} player-specific trackers for each player")
-            
+
+            # Track global pile counters
+            current_draw_pile = None
+            current_discard_pile = None
+
             tracking_progression = []
             
             # Get all moves from gamelogs
@@ -3351,6 +3357,18 @@ class Parser:
                             counter_value = args['counter_value']
                             gamelogs_player_id = str(args.get('player_id', ''))
 
+                            # Track global pile counters
+                            if counter_name == 'counter_deck_main':
+                                try:
+                                    current_draw_pile = int(counter_value)
+                                except (ValueError, TypeError):
+                                    pass
+                            elif counter_name == 'counter_discard_main':
+                                try:
+                                    current_discard_pile = int(counter_value)
+                                except (ValueError, TypeError):
+                                    pass
+
                             # Find the display name for this counter
                             display_name = tracker_dict.get(counter_name)
                             if display_name:
@@ -3383,7 +3401,9 @@ class Parser:
                 # Store snapshot of current state (includes all previous values + any updates from this move)
                 tracking_entry = {
                     'move_number': move_index,
-                    'data': {pid: dict(data) for pid, data in player_data.items()}
+                    'data': {pid: dict(data) for pid, data in player_data.items()},
+                    'draw_pile': current_draw_pile,
+                    'discard_pile': current_discard_pile,
                 }
                 tracking_progression.append(tracking_entry)
             
@@ -3402,16 +3422,23 @@ class Parser:
         tracking_by_move = {}
         for entry in tracking_progression:
             move_number = entry['move_number']
-            tracking_by_move[move_number] = entry['data']
-        
+            tracking_by_move[move_number] = entry
+
         # Update each move's game state
         for move in moves:
             if not move.game_state:
                 continue
-            
-            # Get tracking data for this move
-            move_tracking = tracking_by_move.get(move.move_number, {})
-            
+
+            # Get tracking entry for this move
+            tracking_entry = tracking_by_move.get(move.move_number, {})
+            move_tracking = tracking_entry.get('data', {})
+
+            # Update draw/discard pile counts
+            if tracking_entry.get('draw_pile') is not None:
+                move.game_state.draw_pile = tracking_entry['draw_pile']
+            if tracking_entry.get('discard_pile') is not None:
+                move.game_state.discard_pile = tracking_entry['discard_pile']
+
             if move_tracking:
                 # Store tracking data directly without categorization
                 for player_id, player_tracking in move_tracking.items():
