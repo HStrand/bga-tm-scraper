@@ -1313,6 +1313,8 @@ class Parser:
                 if gamelogs:
                     data_entries_sell = gamelogs.get('data', {}).get('data', [])
                     is_sell_move = False
+                    has_discard_hidden = False
+                    has_m_gain = False
                     sold_card_ids: List[str] = []
                     for entry in data_entries_sell:
                         if entry.get('move_id') != str(move_number):
@@ -1328,6 +1330,8 @@ class Parser:
                                 reason_tr = (data_item.get('args') or {}).get('reason_tr')
                                 if isinstance(reason_tr, str) and 'sell patents' in reason_tr.lower():
                                     is_sell_move = True
+                                elif 'discards' in (data_item.get('log') or '').lower():
+                                    has_discard_hidden = True
                             # Collect tokenMoved to discard_main
                             if data_item.get('type') == 'tokenMoved':
                                 tm_args = data_item.get('args') or {}
@@ -1335,6 +1339,15 @@ class Parser:
                                 token_id = tm_args.get('token_id', '')
                                 if place_id == 'discard_main' and isinstance(token_id, str) and token_id.startswith('card_main_'):
                                     sold_card_ids.append(token_id)
+                            # Check for M€ gain (fallback sell indicator for older format)
+                            if data_item.get('type') == 'counter':
+                                c_args = data_item.get('args') or {}
+                                c_log = data_item.get('log', '')
+                                if 'gains' in c_log and re.match(r'tracker_m_[0-9a-fA-F]{6}$', str(c_args.get('counter_name', ''))):
+                                    has_m_gain = True
+                    # Fallback: tokenMovedHidden discards + M€ gain = sell patents (older format)
+                    if not is_sell_move and sold_card_ids and has_discard_hidden and has_m_gain:
+                        is_sell_move = True
                     if is_sell_move and sold_card_ids:
                         cards_sold_list = []
                         for cid in sold_card_ids:
@@ -1488,7 +1501,9 @@ class Parser:
             tile_placed = None
             tile_location = None
             reason = None
-            
+            has_discard_hidden = False
+            has_m_gain_action = False
+
             for entry in move_entries:
                 entry_data = entry.get('data', [])
                 if not isinstance(entry_data, list):
@@ -1572,6 +1587,9 @@ class Parser:
                             action_type = 'sell_cards'
                             reason = 'Sell patents'
                             logger.debug(f"Move {move_number}: Detected sell patents action")
+                        # Track discards for fallback sell detection (older format)
+                        elif 'discards' in (data_item.get('log') or '').lower():
+                            has_discard_hidden = True
 
                     elif item_type == 'counter':
                         # Detect convert heat: pays Heat + increases Temperature
@@ -1582,6 +1600,10 @@ class Parser:
                                 if 'increases' in log_txt:
                                     action_type = 'convert_heat'
                                     logger.debug(f"Move {move_number}: Detected convert heat action")
+                        # Track M€ gains for fallback sell detection
+                        counter_name = str(args.get('counter_name', ''))
+                        if 'gains' in (data_item.get('log') or '') and re.match(r'tracker_m_[0-9a-fA-F]{6}$', counter_name):
+                            has_m_gain_action = True
 
                     elif item_type == 'gameStateChange':
                         # Inspect nested operations for draw and reason
@@ -1665,8 +1687,14 @@ class Parser:
                             action_type = 'play_card'
                             logger.debug(f"Move {move_number}: Confirmed play card from undo label")
             
+            # Fallback sell detection for older format (no reason_tr)
+            if action_type == 'other' and has_discard_hidden and has_m_gain_action:
+                action_type = 'sell_cards'
+                reason = 'Sell patents'
+                logger.debug(f"Move {move_number}: Detected sell patents via fallback (discard + M€ gain)")
+
             return action_type, card_played, tile_placed, tile_location, reason
-            
+
         except Exception as e:
             logger.error(f"Error extracting action details from gamelogs for move {move_number}: {e}")
             return 'other', None, None, None, None
@@ -3992,6 +4020,8 @@ class Parser:
             cards_sold_list: Optional[List[str]] = None
             try:
                 is_sell_move = False
+                has_discard_hidden = False
+                has_m_gain = False
                 sold_card_ids: List[str] = []
                 for entry in data_entries:
                     if entry.get('move_id') != str(move_number):
@@ -4006,12 +4036,21 @@ class Parser:
                             reason_tr = (data_item.get('args') or {}).get('reason_tr')
                             if isinstance(reason_tr, str) and 'sell patents' in reason_tr.lower():
                                 is_sell_move = True
+                            elif 'discards' in (data_item.get('log') or '').lower():
+                                has_discard_hidden = True
                         if data_item.get('type') == 'tokenMoved':
                             tm_args = data_item.get('args') or {}
                             place_id = str(tm_args.get('place_id', '') or tm_args.get('place_name', '')).lower()
                             token_id = tm_args.get('token_id', '')
                             if place_id == 'discard_main' and isinstance(token_id, str) and token_id.startswith('card_main_'):
                                 sold_card_ids.append(token_id)
+                        if data_item.get('type') == 'counter':
+                            c_args = data_item.get('args') or {}
+                            c_log = data_item.get('log', '')
+                            if 'gains' in c_log and re.match(r'tracker_m_[0-9a-fA-F]{6}$', str(c_args.get('counter_name', ''))):
+                                has_m_gain = True
+                if not is_sell_move and sold_card_ids and has_discard_hidden and has_m_gain:
+                    is_sell_move = True
                 if is_sell_move and sold_card_ids:
                     cards_sold_list = []
                     for cid in sold_card_ids:
