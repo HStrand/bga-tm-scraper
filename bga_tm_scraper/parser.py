@@ -4133,11 +4133,8 @@ class Parser:
             # Detect concession anywhere in the final moves
             if "concedes the game" in desc:
                 conceded = True
-            # Extract winner from the standard end-of-game message
-            m = re.search(r"The end of the game:\s*(.+?)\s+wins!?$", desc)
-            if not m:
-                # Sometimes the winner string may be followed by other text or lack trailing punctuation
-                m = re.search(r"The end of the game:\s*(.+?)\s+wins", desc)
+            # Extract winner from end-of-game message variants
+            m = re.search(r"(?:The )?[Ee]nd of (?:the )?game\s*:\s*(.+?)\s+wins", desc)
             if m:
                 winner = m.group(1).strip()
                 break
