@@ -79,8 +79,10 @@ class Move:
     tile_location: Optional[str] = None
     card_options: Optional[Dict[str, List[str]]] = None
     cards_kept: Optional[Dict[str, List[str]]] = None
+    cards_sold: Optional[List[str]] = None
+    hand: Optional[List[str]] = None
     reason: Optional[str] = None
-    
+
     # Game state after this move
     game_state: Optional[GameState] = None
 
@@ -624,16 +626,60 @@ class Parser:
         # Extract VP progression throughout the game
         vp_progression = self._extract_vp_progression(replay_html, gamelogs)
         
-        # Extract corporations from HTML
-        corporations = self._extract_corporations(soup, player_perspective, player_id_map)
-        
         # Create simple name_to_id mapping for move processing
         name_to_id = {name: player_id for player_id, name in player_id_map.items()}
-        
+
         # Build card name mapping from token_types for move parsing
         token_types = self._extract_token_types(replay_html)
+
+        # Extract corporations from HTML, with gamelogs fallback
+        corporations = self._extract_corporations(soup, player_perspective, player_id_map)
+        if not corporations and gamelogs:
+            try:
+                for entry in gamelogs.get('data', {}).get('data', []):
+                    if not isinstance(entry, dict):
+                        continue
+                    for item in entry.get('data', []):
+                        if not isinstance(item, dict):
+                            continue
+                        log = item.get('log', '')
+                        if 'chooses corporation' not in log:
+                            continue
+                        args = item.get('args', {}) or {}
+                        if not isinstance(args, dict):
+                            continue
+                        player_name = args.get('player_name')
+                        token_id = args.get('token_id', '')
+                        if isinstance(player_name, str) and isinstance(token_id, str) and token_id.startswith('card_corp_'):
+                            corp_name = token_types.get(token_id, {}).get('name') if token_types else None
+                            if corp_name:
+                                corporations[player_name] = corp_name
+                                logger.info(f"Extracted corporation from gamelogs: {player_name} -> {corp_name}")
+            except Exception:
+                pass
         card_names_map = self._extract_card_names_from_token_types(token_types)
-        
+        # Also include standard project, colony, tile, and hex names for description rendering
+        tile_base_names: Dict[str, str] = {}
+        for token_id, token_data in token_types.items():
+            if token_id not in card_names_map and isinstance(token_data, dict):
+                if token_id.startswith(('card_stanproj_', 'card_colo_', 'tile_', 'hex_')):
+                    name = token_data.get('name') or token_data.get('tooltip_action')
+                    if isinstance(name, str) and name.strip():
+                        card_names_map[token_id] = name.strip()
+                        if token_id.startswith('tile_'):
+                            tile_base_names[token_id] = name.strip()
+        # Map tile instance IDs (e.g. tile_2_1) to their base name (tile_2 -> City)
+        # by scanning gamelogs for all tile tokens placed
+        if gamelogs and tile_base_names:
+            for entry in gamelogs.get('data', {}).get('data', []):
+                for item in entry.get('data', []):
+                    if isinstance(item, dict) and item.get('type') == 'tokenMoved':
+                        tid = (item.get('args') or {}).get('token_id', '')
+                        if isinstance(tid, str) and tid.startswith('tile_') and tid not in card_names_map:
+                            tile_base = re.sub(r'_\d+$', '', tid)
+                            if tile_base in tile_base_names:
+                                card_names_map[tid] = tile_base_names[tile_base]
+
         # Extract tracker dictionary dynamically from HTML
         tracker_dict = self._extract_tracker_dictionary_from_html(replay_html)
         
@@ -1261,6 +1307,46 @@ class Parser:
             except Exception:
                 pass
 
+            # Detect cards sold (Sell patents standard project)
+            cards_sold_list: Optional[List[str]] = None
+            try:
+                if gamelogs:
+                    data_entries_sell = gamelogs.get('data', {}).get('data', [])
+                    is_sell_move = False
+                    sold_card_ids: List[str] = []
+                    for entry in data_entries_sell:
+                        if entry.get('move_id') != str(move_number):
+                            continue
+                        entry_data = entry.get('data', [])
+                        if not isinstance(entry_data, list):
+                            continue
+                        for data_item in entry_data:
+                            if not isinstance(data_item, dict):
+                                continue
+                            # Check for tokenMovedHidden with reason "Sell patents"
+                            if data_item.get('type') == 'tokenMovedHidden':
+                                reason_tr = (data_item.get('args') or {}).get('reason_tr')
+                                if isinstance(reason_tr, str) and 'sell patents' in reason_tr.lower():
+                                    is_sell_move = True
+                            # Collect tokenMoved to discard_main
+                            if data_item.get('type') == 'tokenMoved':
+                                tm_args = data_item.get('args') or {}
+                                place_id = str(tm_args.get('place_id', '') or tm_args.get('place_name', '')).lower()
+                                token_id = tm_args.get('token_id', '')
+                                if place_id == 'discard_main' and isinstance(token_id, str) and token_id.startswith('card_main_'):
+                                    sold_card_ids.append(token_id)
+                    if is_sell_move and sold_card_ids:
+                        cards_sold_list = []
+                        for cid in sold_card_ids:
+                            if card_names_map and cid in card_names_map:
+                                cards_sold_list.append(card_names_map[cid])
+                            else:
+                                cards_sold_list.append(cid)
+            except Exception:
+                pass
+
+            hand_list = self._extract_hand_from_gamelogs(move_number, gamelogs, card_names_map)
+
             move = Move(
                 move_number=move_number,
                 timestamp=timestamp,
@@ -1274,9 +1360,11 @@ class Parser:
                 tile_location=tile_location,
                 card_options=card_options_map,
                 cards_kept=cards_kept_map,
+                cards_sold=cards_sold_list,
+                hand=hand_list,
                 reason=reason
             )
-            
+
             return move
             
         except Exception as e:
@@ -1427,15 +1515,31 @@ class Parser:
                                 card_played = card_list[0]
                                 logger.debug(f"Move {move_number}: Detected card play from hand - {card_played}")
 
-                        # 2) Concrete draft selection (no list): e.g., "You draft ${token_name}" to draw_* area
+                        # 2) Concrete token_id moves (no list)
                         elif 'token_id' in args:
                             log_txt = (data_item.get('log') or '').lower()
-                            if 'draft' in log_txt or place_to.startswith('draw_'):
+                            token_id_val = args.get('token_id', '')
+                            # Tile placement: tile token placed on a hex
+                            if isinstance(token_id_val, str) and token_id_val.startswith('tile_') and 'places' in log_txt:
+                                action_type = 'place_tile'
+                                # Derive tile type from token_id (strip instance suffix: tile_2_1 -> tile_2)
+                                tile_base = re.sub(r'_\d+$', '', token_id_val)
+                                tile_placed = tile_base
+                                tile_location = args.get('place_id') or args.get('place_name') or ''
+                                logger.debug(f"Move {move_number}: Detected tile placement {tile_base} on {tile_location}")
+                            # Card play: "plays card" in log (not activations)
+                            elif 'plays card' in log_txt:
+                                action_type = 'play_card'
+                                if isinstance(token_id_val, str) and token_id_val.startswith(('card_main_', 'card_prelude_', 'card_corp_')):
+                                    card_played = token_id_val
+                                logger.debug(f"Move {move_number}: Detected card play via token_id={token_id_val}")
+                            # Draft selection
+                            elif 'draft' in log_txt or place_to.startswith('draw_'):
                                 if action_type == 'other':
                                     action_type = 'draft'
                                 if reason is None:
                                     reason = 'draft'
-                                logger.debug(f"Move {move_number}: Detected draft selection token_id={args.get('token_id')}")
+                                logger.debug(f"Move {move_number}: Detected draft selection token_id={token_id_val}")
 
                         # 3) Draft options: arrivals to draft_* lists
                         elif 'list' in args and place_to.startswith('draft_'):
@@ -1449,6 +1553,14 @@ class Parser:
                                 action_type = 'draw'
                             logger.debug(f"Move {move_number}: Detected draw (list size {len(args.get('list', []))})")
                     
+                    elif item_type == 'tokenMovedHidden':
+                        # Detect sell patents (card discard for M€)
+                        reason_tr = args.get('reason_tr')
+                        if isinstance(reason_tr, str) and 'sell patents' in reason_tr.lower():
+                            action_type = 'sell_cards'
+                            reason = 'Sell patents'
+                            logger.debug(f"Move {move_number}: Detected sell patents action")
+
                     elif item_type == 'gameStateChange':
                         # Inspect nested operations for draw and reason
                         gs_args = data_item.get('args', {})
@@ -1481,6 +1593,14 @@ class Parser:
                                         if rs:
                                             reason = rs
                                             logger.debug(f"Move {move_number}: Found reason '{reason}'")
+                                # Classify action from reason text
+                                if action_type == 'other' and isinstance(reason, str):
+                                    if reason.startswith('immediate effect of '):
+                                        action_type = 'immediate_effect'
+                                        logger.debug(f"Move {move_number}: Detected immediate effect action")
+                                    elif reason.startswith('activation effect of '):
+                                        action_type = 'activation_effect'
+                                        logger.debug(f"Move {move_number}: Detected activation effect action")
                                 # If operation indicates a draw/draft, classify accordingly
                                 if (op_type == 'draw' or op.get('typeexpr') == 'draw') and action_type == 'other':
                                     action_type = 'draw'
@@ -1504,6 +1624,9 @@ class Parser:
                         elif action_type == 'other' and 'passes' in log_msg.lower():
                             action_type = 'pass'
                             logger.debug(f"Move {move_number}: Detected pass")
+                        elif action_type == 'other' and 'skips second action' in log_msg.lower():
+                            action_type = 'skip_action'
+                            logger.debug(f"Move {move_number}: Detected skip second action")
                     
                     elif item_type == 'undoMove':
                         # Check the undo label for action type
@@ -1521,6 +1644,73 @@ class Parser:
             logger.error(f"Error extracting action details from gamelogs for move {move_number}: {e}")
             return 'other', None, None, None, None
     
+    def _extract_hand_from_gamelogs(self, move_number: int, gamelogs: Dict[str, Any], card_names_map: Dict[str, str] = None) -> Optional[List[str]]:
+        """Extract the player's hand cards from gamelogs for a given move.
+
+        Looks at 'card' and 'sell' operations in gameStateChange events and
+        'card' operations in tokensUpdate events.  Uses the 'info' dict keys
+        (full hand) rather than 'target' (playable subset only).
+        """
+        if not gamelogs:
+            return None
+        try:
+            data_entries = gamelogs.get('data', {}).get('data', [])
+            hand_ids: Optional[List[str]] = None
+
+            for entry in data_entries:
+                if entry.get('move_id') != str(move_number):
+                    continue
+                for item in entry.get('data', []):
+                    if not isinstance(item, dict):
+                        continue
+                    item_type = item.get('type')
+
+                    ops_iter: list = []
+                    if item_type == 'gameStateChange':
+                        inner = (item.get('args') or {}).get('args', {})
+                        if isinstance(inner, dict):
+                            ops = inner.get('operations', {})
+                            if isinstance(ops, dict):
+                                ops_iter = list(ops.values())
+                    elif item_type == 'tokensUpdate':
+                        ops = (item.get('args') or {}).get('operations', [])
+                        if isinstance(ops, list):
+                            ops_iter = ops
+
+                    for op in ops_iter:
+                        if not isinstance(op, dict):
+                            continue
+                        op_type = op.get('type') or op.get('typeexpr')
+                        if op_type not in ('card', 'sell'):
+                            continue
+                        op_args = op.get('args') or {}
+                        # Prefer info keys (full hand including unplayable cards)
+                        info = op_args.get('info', {})
+                        if isinstance(info, dict) and info:
+                            cards = sorted(k for k in info if isinstance(k, str) and k.startswith('card_main_'))
+                            if cards:
+                                hand_ids = cards
+                                break
+                        # Fall back to target (e.g. sell operation has empty info)
+                        target = op_args.get('target', [])
+                        if isinstance(target, list) and target:
+                            cards = sorted(t for t in target if isinstance(t, str) and t.startswith('card_main_'))
+                            if cards:
+                                hand_ids = cards
+                                break
+                    if hand_ids is not None:
+                        break
+
+            if hand_ids is None:
+                return None
+
+            return [
+                card_names_map[cid] if card_names_map and cid in card_names_map else cid
+                for cid in hand_ids
+            ]
+        except Exception:
+            return None
+
     def _classify_action_type(self, log_entries: List[Tag], description: str) -> str:
         """Classify the type of action (fallback method)"""
         if 'plays card' in description:
@@ -2855,10 +3045,60 @@ class Parser:
             logger.error(f"Error inferring display name for {tracker_id}: {e}")
             return ""
 
+    # Common tracker prefixes stripped of player color suffix
+    _TRACKER_PREFIX_MAP = {
+        'tracker_m': 'M€',
+        'tracker_pm': 'M€ Production',
+        'tracker_s': 'Steel',
+        'tracker_ps': 'Steel Production',
+        'tracker_u': 'Titanium',
+        'tracker_pu': 'Titanium Production',
+        'tracker_p': 'Plant',
+        'tracker_pp': 'Plant Production',
+        'tracker_e': 'Energy',
+        'tracker_pe': 'Energy Production',
+        'tracker_h': 'Heat',
+        'tracker_ph': 'Heat Production',
+        'tracker_tr': 'TR',
+        'tracker_t': 'Temperature',
+        'tracker_o': 'Oxygen Level',
+        'tracker_w': 'Oceans',
+        'tracker_gen': 'Generation',
+        'tracker_city': 'City',
+        'tracker_cityonmars': 'City on Mars',
+        'tracker_forest': 'Forest',
+        'tracker_land': 'Land',
+        'tracker_passed': 'Passed',
+        'tracker_pdelta': 'Production Delta',
+        'tracker_ers': 'Earth Resources',
+        'tracker_eru': 'Earth Resource Units',
+        'tracker_tagAnimal': 'Animal tag',
+        'tracker_tagBuilding': 'Building tag',
+        'tracker_tagCity': 'City tag',
+        'tracker_tagEarth': 'Earth tag',
+        'tracker_tagEnergy': 'Energy tag',
+        'tracker_tagEvent': 'Event tag',
+        'tracker_tagJovian': 'Jovian tag',
+        'tracker_tagMicrobe': 'Microbe tag',
+        'tracker_tagPlant': 'Plant tag',
+        'tracker_tagScience': 'Science tag',
+        'tracker_tagSpace': 'Space tag',
+    }
+
     def _infer_from_tracker_id(self, tracker_id: str, tracker_dict: Dict[str, str]) -> str:
         """Infer display name from tracker ID patterns"""
-
-        return tracker_dict.get(tracker_id, f"Unknown ({tracker_id})")
+        result = tracker_dict.get(tracker_id)
+        if result:
+            return result
+        # Strip 6-char hex color suffix (e.g. tracker_m_ff0000 -> tracker_m)
+        base = re.sub(r'_[0-9a-fA-F]{6}$', '', tracker_id)
+        result = self._TRACKER_PREFIX_MAP.get(base)
+        if result:
+            return result
+        # Resource tokens: resource_COLOR_NUM -> "Resource"
+        if re.match(r'^resource_[0-9a-fA-F]{6}_\d+$', tracker_id):
+            return 'Resource'
+        return f"Unknown ({tracker_id})"
 
     def _render_bga_log_template(self, template: str, args: Dict[str, Any], tracker_dict: Dict[str, str]) -> str:
         """
@@ -2874,6 +3114,9 @@ class Parser:
                     # Always check if the value looks like a tracker ID, regardless of key name
                     if val.startswith('tracker_') or val.startswith('counter_'):
                         return self._infer_from_tracker_id(val, tracker_dict)
+                    # Check tracker_dict for any known ID (cards, tiles, hexes, etc.)
+                    if val in tracker_dict:
+                        return tracker_dict[val]
                     # Also check based on key name for safety
                     if key_name in ('token_name', 'counter_name'):
                         return self._infer_from_tracker_id(val, tracker_dict)
@@ -3386,7 +3629,7 @@ class Parser:
                             pass
                 for move_number in sorted(set(gl_move_ids)):
                     if move_number not in seen_move_numbers:
-                        synthetic = self._build_move_from_gamelogs(move_number, name_to_id, gamelogs, card_names_map)
+                        synthetic = self._build_move_from_gamelogs(move_number, name_to_id, gamelogs, card_names_map, tracker_dict)
                         if synthetic:
                             moves.append(synthetic)
                 # Keep moves sorted by move number
@@ -3396,7 +3639,7 @@ class Parser:
         
         return moves
 
-    def _build_move_from_gamelogs(self, move_number: int, name_to_id: Dict[str, str], gamelogs: Dict[str, Any], card_names_map: Dict[str, str] = None) -> Optional[Move]:
+    def _build_move_from_gamelogs(self, move_number: int, name_to_id: Dict[str, str], gamelogs: Dict[str, Any], card_names_map: Dict[str, str] = None, tracker_dict: Dict[str, str] = None) -> Optional[Move]:
         """
         Construct a Move purely from gamelogs when the HTML does not contain that move block.
         Focuses on draft/draw actions and sets card_options and card_drafted accordingly.
@@ -3428,7 +3671,24 @@ class Parser:
             action_type, card_played, tile_placed, tile_location, reason = self._extract_enhanced_action_details(
                 move_number, gamelogs, [], ""
             )
-            
+
+            # Map card_played ID to name
+            if card_played and card_names_map and card_played in card_names_map:
+                card_played = card_names_map[card_played]
+
+            # Map tile_placed and tile_location IDs to names
+            if tile_placed and card_names_map and tile_placed in card_names_map:
+                tile_placed = card_names_map[tile_placed]
+            if tile_location and card_names_map:
+                hex_name = card_names_map.get(tile_location)
+                if hex_name:
+                    # Include coordinates from hex ID (e.g. hex_5_9 -> "South Pole (5,9)")
+                    coords_match = re.match(r'hex_(\d+)_(\d+)', tile_location)
+                    if coords_match:
+                        tile_location = f"{hex_name} ({coords_match.group(1)},{coords_match.group(2)})"
+                    else:
+                        tile_location = hex_name
+
             # Build per-player options (draft/draw) and drafted selection
             card_options_map: Optional[Dict[str, List[str]]] = None
             card_drafted_name: Optional[str] = None
@@ -3624,15 +3884,88 @@ class Parser:
                         full_description = draft_desc_text.strip()
                     else:
                         full_description = f"{player_name} drafts {card_drafted_name}"
+                # Build description from gamelog log templates if still empty
+                if not full_description:
+                    try:
+                        # Build an augmented tracker dict that also maps card IDs to names
+                        aug_tracker = dict(tracker_dict or {})
+                        if card_names_map:
+                            aug_tracker.update(card_names_map)
+                        desc_parts: List[str] = []
+                        for entry in data_entries:
+                            if entry.get('move_id') != str(move_number):
+                                continue
+                            entry_data = entry.get('data', [])
+                            if not isinstance(entry_data, list):
+                                continue
+                            for data_item in entry_data:
+                                if not isinstance(data_item, dict):
+                                    continue
+                                log_t = data_item.get('log', '')
+                                if not isinstance(log_t, str) or not log_t.strip():
+                                    continue
+                                di_args = data_item.get('args', {})
+                                if not isinstance(di_args, dict):
+                                    continue
+                                rendered = self._render_bga_log_template(log_t, di_args, aug_tracker)
+                                # Append reason_tr if present
+                                rtr = di_args.get('reason_tr')
+                                if isinstance(rtr, dict):
+                                    reason_rendered = self._render_bga_log_template(rtr.get('log', ''), rtr.get('args', {}), aug_tracker)
+                                    if isinstance(reason_rendered, str) and reason_rendered.strip():
+                                        rendered = f"{rendered} ({reason_rendered.strip()})"
+                                if isinstance(rendered, str) and rendered.strip() and rendered.strip() not in desc_parts:
+                                    desc_parts.append(rendered.strip())
+                        if desc_parts:
+                            full_description = " | ".join(desc_parts)
+                    except Exception:
+                        pass
+
                 # If still empty, provide a generic based on action_type
                 if not full_description:
                     full_description = f"{player_name} {action_type.replace('_', ' ')}"
-            
+
             except Exception as map_err:
                 logger.debug(f"Move {move_number}: building from gamelogs mapping failed: {map_err}")
                 # Minimal fallback
                 full_description = f"{player_name} {action_type.replace('_', ' ')}"
             
+            # Detect cards sold (Sell patents standard project)
+            cards_sold_list: Optional[List[str]] = None
+            try:
+                is_sell_move = False
+                sold_card_ids: List[str] = []
+                for entry in data_entries:
+                    if entry.get('move_id') != str(move_number):
+                        continue
+                    entry_data = entry.get('data', [])
+                    if not isinstance(entry_data, list):
+                        continue
+                    for data_item in entry_data:
+                        if not isinstance(data_item, dict):
+                            continue
+                        if data_item.get('type') == 'tokenMovedHidden':
+                            reason_tr = (data_item.get('args') or {}).get('reason_tr')
+                            if isinstance(reason_tr, str) and 'sell patents' in reason_tr.lower():
+                                is_sell_move = True
+                        if data_item.get('type') == 'tokenMoved':
+                            tm_args = data_item.get('args') or {}
+                            place_id = str(tm_args.get('place_id', '') or tm_args.get('place_name', '')).lower()
+                            token_id = tm_args.get('token_id', '')
+                            if place_id == 'discard_main' and isinstance(token_id, str) and token_id.startswith('card_main_'):
+                                sold_card_ids.append(token_id)
+                if is_sell_move and sold_card_ids:
+                    cards_sold_list = []
+                    for cid in sold_card_ids:
+                        if card_names_map and cid in card_names_map:
+                            cards_sold_list.append(card_names_map[cid])
+                        else:
+                            cards_sold_list.append(cid)
+            except Exception:
+                pass
+
+            hand_list = self._extract_hand_from_gamelogs(move_number, gamelogs, card_names_map)
+
             return Move(
                 move_number=move_number,
                 timestamp=timestamp,
@@ -3640,12 +3973,14 @@ class Parser:
                 player_name=player_name,
                 action_type=action_type,
                 description=full_description,
-                card_played=None,
+                card_played=card_played,
                 card_drafted=card_drafted_name,
-                tile_placed=None,
-                tile_location=None,
+                tile_placed=tile_placed,
+                tile_location=tile_location,
                 card_options=card_options_map,
                 cards_kept=cards_kept_map,
+                cards_sold=cards_sold_list,
+                hand=hand_list,
                 reason=reason
             )
         except Exception as e:
