@@ -1420,6 +1420,24 @@ class Parser:
                     break
 
             if not found_player_id:
+                # Fallback: look for player_name and reverse-map to ID
+                for entry in move_entries:
+                    move_data = entry.get('data', [])
+                    if not isinstance(move_data, list):
+                        continue
+                    for data_item in move_data:
+                        if not isinstance(data_item, dict):
+                            continue
+                        args = data_item.get('args', {}) or {}
+                        pname = args.get('player_name')
+                        if isinstance(pname, str) and pname in name_to_id:
+                            found_player_id = name_to_id[pname]
+                            logger.debug(f"Move {move_number}: Found player via player_name '{pname}' -> {found_player_id}")
+                            break
+                    if found_player_id:
+                        break
+
+            if not found_player_id:
                 logger.debug(f"Move {move_number}: No player ID found in gamelogs args across entries")
                 return "Unknown", "unknown"
 
