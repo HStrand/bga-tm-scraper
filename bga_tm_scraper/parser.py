@@ -717,7 +717,7 @@ class Parser:
                                 tracker_dict[cn] = display
 
             # Track resources and production through all moves
-            tracking_progression = self._track_resources_and_production(gamelogs, player_ids, tracker_dict)
+            tracking_progression = self._track_resources_and_production(gamelogs, player_ids, tracker_dict, card_names_map)
             
             # Update game states with tracking data
             self._update_game_states_with_tracking(moves_with_states, tracking_progression)
@@ -3256,8 +3256,8 @@ class Parser:
         except Exception:
             return template
 
-    def _track_resources_and_production(self, gamelogs: Dict[str, Any], player_ids: List[str], 
-                                       tracker_dict: Dict[str, str]) -> List[Dict[str, Any]]:
+    def _track_resources_and_production(self, gamelogs: Dict[str, Any], player_ids: List[str],
+                                       tracker_dict: Dict[str, str], card_names_map: Dict[str, str] = None) -> List[Dict[str, Any]]:
         """Track comprehensive player state through all moves using gamelogs JSON"""
         logger.info(f"Starting comprehensive tracking for {len(player_ids)} players")
         logger.info(f"Tracker dictionary has {len(tracker_dict)} mappings")
@@ -3309,6 +3309,9 @@ class Parser:
             # Track global pile counters
             current_draw_pile = None
             current_discard_pile = None
+
+            # Track resources on cards per player: {player_id: {card_name: {'type': str, 'count': int}}}
+            card_resource_counts: Dict[int, Dict[str, Dict[str, Any]]] = {int(pid): {} for pid in player_ids}
 
             tracking_progression = []
             
@@ -3397,13 +3400,62 @@ class Parser:
 
                                     if display_name in player_data[actual_player_id]:
                                         player_data[actual_player_id][display_name] = validated_value
-                
+
+                        # Track resources added/removed from cards
+                        if submove.get('type') == 'tokenMoved':
+                            tid = str(args.get('token_id', ''))
+                            if tid.startswith('resource_'):
+                                log_txt = submove.get('log', '')
+                                place_id = str(args.get('place_id', ''))
+                                card_name = args.get('card_name', '')
+                                restype = args.get('restype_name', '')
+                                pid_from_args = args.get('player_id')
+
+                                # Determine player from args or resource token color
+                                res_player_id = None
+                                if pid_from_args is not None:
+                                    res_player_id = int(pid_from_args)
+                                else:
+                                    color_match = re.match(r'resource_([0-9a-fA-F]{6})_', tid)
+                                    if color_match:
+                                        color = color_match.group(1)
+                                        for pid_int in card_resource_counts:
+                                            for t_id, t_name in tracker_dict.items():
+                                                if t_id.endswith(f'_{color}'):
+                                                    res_player_id = pid_int
+                                                    break
+                                            if res_player_id:
+                                                break
+
+                                if res_player_id is not None and res_player_id in card_resource_counts:
+                                    if 'adds' in log_txt or ('moves' in log_txt and place_id.startswith('card_')):
+                                        # Resolve card name if not provided
+                                        if not card_name and place_id in (card_names_map or {}):
+                                            card_name = card_names_map[place_id]
+                                        if not card_name:
+                                            card_name = place_id
+                                        if card_name not in card_resource_counts[res_player_id]:
+                                            card_resource_counts[res_player_id][card_name] = {'type': restype or '', 'count': 0}
+                                        card_resource_counts[res_player_id][card_name]['count'] += 1
+                                        if restype:
+                                            card_resource_counts[res_player_id][card_name]['type'] = restype
+                                    elif 'removes' in log_txt:
+                                        if not card_name and place_id in (card_names_map or {}):
+                                            card_name = card_names_map[place_id]
+                                        if card_name:
+                                            # Search all players for this card (removals can cross players, e.g. Virus)
+                                            for owner_pid, owner_cards in card_resource_counts.items():
+                                                if card_name in owner_cards:
+                                                    owner_cards[card_name]['count'] = max(0, owner_cards[card_name]['count'] - 1)
+                                                    break
+
                 # Store snapshot of current state (includes all previous values + any updates from this move)
                 tracking_entry = {
                     'move_number': move_index,
                     'data': {pid: dict(data) for pid, data in player_data.items()},
                     'draw_pile': current_draw_pile,
                     'discard_pile': current_discard_pile,
+                    'card_resources': {str(pid): {cn: dict(cd) for cn, cd in cards.items()} for pid, cards in card_resource_counts.items() if cards},
                 }
                 tracking_progression.append(tracking_entry)
             
@@ -3438,6 +3490,16 @@ class Parser:
                 move.game_state.draw_pile = tracking_entry['draw_pile']
             if tracking_entry.get('discard_pile') is not None:
                 move.game_state.discard_pile = tracking_entry['discard_pile']
+
+            # Inject card_resources into player_vp details
+            cr = tracking_entry.get('card_resources')
+            if cr and move.game_state.player_vp:
+                for pid_str, resources in cr.items():
+                    if pid_str in move.game_state.player_vp:
+                        pv = move.game_state.player_vp[pid_str]
+                        if 'details' not in pv:
+                            pv['details'] = {}
+                        pv['details']['card_resources'] = resources
 
             if move_tracking:
                 # Store tracking data directly without categorization
