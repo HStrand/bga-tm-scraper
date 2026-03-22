@@ -4121,14 +4121,17 @@ class Parser:
                     except Exception:
                         pass
 
-                # If still empty, provide a generic based on action_type
+                # If still empty, this is a game state transition with no log text
                 if not full_description:
-                    full_description = f"{player_name} {action_type.replace('_', ' ')}"
+                    if action_type == 'other':
+                        action_type = 'game_state_change'
+                    full_description = ''
 
             except Exception as map_err:
                 logger.debug(f"Move {move_number}: building from gamelogs mapping failed: {map_err}")
-                # Minimal fallback
-                full_description = f"{player_name} {action_type.replace('_', ' ')}"
+                if action_type == 'other':
+                    action_type = 'game_state_change'
+                full_description = ''
             
             # Detect cards sold (Sell patents standard project)
             cards_sold_list: Optional[List[str]] = None
