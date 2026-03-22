@@ -48,6 +48,7 @@ data/raw/
 data/processed/
 data/parsed/
 data/registry/
+data/sample files/
 
 # Analysis output data
 analysis/data/
