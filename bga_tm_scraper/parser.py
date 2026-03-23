@@ -4326,12 +4326,30 @@ class Parser:
 
             # Track special tile placements (tiles that are not City, Forest, or Ocean)
             if move.action_type == 'place_tile' and move.tile_placed == 'tile':
+                tile_name = None
+                tile_hex = move.tile_location
+
+                # Try extracting tile name from description ("places X on Y")
                 tile_name_match = re.search(r'places (.+?) on (.+?)(?:\s*\(|$)', move.description)
                 if tile_name_match:
                     tile_name = tile_name_match.group(1)
-                    tile_hex = move.tile_location or tile_name_match.group(2)
-                    if move.player_id in current_special_tiles:
-                        current_special_tiles[move.player_id][tile_name] = tile_hex
+                    tile_hex = tile_hex or tile_name_match.group(2)
+
+                # Fallback: check this move's reason or recent prior moves for
+                # "immediate effect of X" / "triggered effect of X" to get the card name
+                if not tile_name:
+                    for check_move in [move] + list(reversed(moves[max(0, i-3):i])):
+                        if check_move.reason:
+                            effect_match = re.search(r'(?:immediate|triggered) effect of (.+)', check_move.reason)
+                            if effect_match:
+                                tile_name = effect_match.group(1)
+                                break
+                        if check_move.card_played and check_move.player_id == move.player_id:
+                            tile_name = check_move.card_played
+                            break
+
+                if tile_name and tile_hex and move.player_id in current_special_tiles:
+                    current_special_tiles[move.player_id][tile_name] = tile_hex
 
             # Get VP data for this move by matching move_number
             move_vp_data = vp_by_move_number.get(str(move.move_number), {})
