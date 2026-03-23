@@ -716,8 +716,19 @@ class Parser:
                             if display:
                                 tracker_dict[cn] = display
 
+            # Build color -> player_id mapping from HTML
+            # The HTML has elements like <div id="player_area_name_ff0000">PlayerName</div>
+            color_to_player_id = {}
+            for color_match in re.finditer(r'id="player_area_name_([0-9a-fA-F]{6})"[^>]*>([^<]+)<', replay_html):
+                color = color_match.group(1).lower()
+                pname = color_match.group(2).strip()
+                pid = name_to_id.get(pname)
+                if pid:
+                    color_to_player_id[color] = int(pid)
+            logger.info(f"Color to player mapping: {color_to_player_id}")
+
             # Track resources and production through all moves
-            tracking_progression = self._track_resources_and_production(gamelogs, player_ids, tracker_dict, card_names_map)
+            tracking_progression = self._track_resources_and_production(gamelogs, player_ids, tracker_dict, card_names_map, color_to_player_id)
             
             # Update game states with tracking data
             self._update_game_states_with_tracking(moves_with_states, tracking_progression)
@@ -3257,7 +3268,8 @@ class Parser:
             return template
 
     def _track_resources_and_production(self, gamelogs: Dict[str, Any], player_ids: List[str],
-                                       tracker_dict: Dict[str, str], card_names_map: Dict[str, str] = None) -> List[Dict[str, Any]]:
+                                       tracker_dict: Dict[str, str], card_names_map: Dict[str, str] = None,
+                                       color_to_player_id: Dict[str, int] = None) -> List[Dict[str, Any]]:
         """Track comprehensive player state through all moves using gamelogs JSON"""
         logger.info(f"Starting comprehensive tracking for {len(player_ids)} players")
         logger.info(f"Tracker dictionary has {len(tracker_dict)} mappings")
@@ -3386,11 +3398,18 @@ class Parser:
                                 if is_global:
                                     continue
 
-                                # Convert gamelogs player ID to actual player ID
-                                try:
-                                    actual_player_id = int(gamelogs_player_id)
-                                except (ValueError, TypeError):
-                                    continue
+                                # Determine actual player from color suffix in counter_name
+                                # The player_id in args is the perspective player, not the owner
+                                color_match = re.search(r'_([0-9a-fA-F]{6})$', counter_name)
+                                if color_match and color_to_player_id:
+                                    actual_player_id = color_to_player_id.get(color_match.group(1).lower())
+                                    if actual_player_id is None:
+                                        continue
+                                else:
+                                    try:
+                                        actual_player_id = int(gamelogs_player_id)
+                                    except (ValueError, TypeError):
+                                        continue
 
                                 if actual_player_id in player_data:
                                     try:
@@ -3411,21 +3430,13 @@ class Parser:
                                 restype = args.get('restype_name', '')
                                 pid_from_args = args.get('player_id')
 
-                                # Determine player from args or resource token color
+                                # Determine player from resource token color, then fallback to args
                                 res_player_id = None
-                                if pid_from_args is not None:
+                                color_match = re.match(r'resource_([0-9a-fA-F]{6})_', tid)
+                                if color_match and color_to_player_id:
+                                    res_player_id = color_to_player_id.get(color_match.group(1).lower())
+                                if res_player_id is None and pid_from_args is not None:
                                     res_player_id = int(pid_from_args)
-                                else:
-                                    color_match = re.match(r'resource_([0-9a-fA-F]{6})_', tid)
-                                    if color_match:
-                                        color = color_match.group(1)
-                                        for pid_int in card_resource_counts:
-                                            for t_id, t_name in tracker_dict.items():
-                                                if t_id.endswith(f'_{color}'):
-                                                    res_player_id = pid_int
-                                                    break
-                                            if res_player_id:
-                                                break
 
                                 if res_player_id is not None and res_player_id in card_resource_counts:
                                     if 'adds' in log_txt or ('moves' in log_txt and place_id.startswith('card_')):
