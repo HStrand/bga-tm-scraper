@@ -24,6 +24,16 @@ GAMES = [
             "90366871": EloData(player_name="Raduchon", player_id="90366871"),
         },
     },
+    {
+        "replay": "data/sample files/replay_824655675_86296239.html",
+        "output": "data/sample files/game_824655675_86296239_test.json",
+        "table_id": "824655675",
+        "perspective": "86296239",
+        "players": {
+            "86296239": EloData(player_name="StrandedKnight", player_id="86296239"),
+            "98490496": EloData(player_name="cdman234", player_id="98490496"),
+        },
+    },
 ]
 
 parser = Parser()

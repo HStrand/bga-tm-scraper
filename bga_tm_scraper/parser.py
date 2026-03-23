@@ -51,6 +51,7 @@ class GameState:
     milestones: Dict[str, Dict[str, Any]]  # milestone_name -> details
     awards: Dict[str, Dict[str, Any]]  # award_name -> details
     player_trackers: Dict[str, Dict[str, int]] = None  # player_id -> tracker_name -> value
+    special_tiles: Dict[str, Dict[str, str]] = None  # player_id -> {card_name: hex_location}
     draw_pile: Optional[int] = None
     discard_pile: Optional[int] = None
 
@@ -63,6 +64,8 @@ class GameState:
             self.awards = {}
         if self.player_trackers is None:
             self.player_trackers = {}
+        if self.special_tiles is None:
+            self.special_tiles = {}
 
 @dataclass
 class Move:
@@ -4220,11 +4223,12 @@ class Parser:
         current_oxygen = 0
         current_oceans = 0
         current_generation = 1
-        
-        # Track milestones and awards state throughout the game
+
+        # Track milestones, awards, and special tiles state throughout the game
         current_milestones = {}
         current_awards = {}
-        
+        current_special_tiles: Dict[str, Dict[str, str]] = {pid: {} for pid in player_ids}
+
         # Initialize default VP data for all players
         default_vp_data = {}
         for player_id in player_ids:
@@ -4299,10 +4303,19 @@ class Parser:
                         'move_number': move.move_number,
                         'timestamp': move.timestamp
                     }
-            
+
+            # Track special tile placements (tiles that are not City, Forest, or Ocean)
+            if move.action_type == 'place_tile' and move.tile_placed == 'tile':
+                tile_name_match = re.search(r'places (.+?) on (.+?)(?:\s*\(|$)', move.description)
+                if tile_name_match:
+                    tile_name = tile_name_match.group(1)
+                    tile_hex = move.tile_location or tile_name_match.group(2)
+                    if move.player_id in current_special_tiles:
+                        current_special_tiles[move.player_id][tile_name] = tile_hex
+
             # Get VP data for this move by matching move_number
             move_vp_data = vp_by_move_number.get(str(move.move_number), {})
-            
+
             # Ensure VP data is always present
             if move_vp_data:
                 # Update last known VP data with new data
@@ -4312,13 +4325,13 @@ class Parser:
                 # Use last known VP data if no new data available
                 move_vp_data = dict(last_vp_data)
                 logger.debug(f"Using carried-forward VP data for move {move.move_number}")
-            
+
             # Ensure all players have VP data (fill in missing players with defaults)
             for player_id in player_ids:
                 if player_id not in move_vp_data:
                     move_vp_data[player_id] = dict(default_vp_data[player_id])
                     logger.debug(f"Added default VP data for missing player {player_id} in move {move.move_number}")
-            
+
             # Create game state (without resource/production tracking)
             game_state = GameState(
                 move_number=move.move_number,
@@ -4328,11 +4341,12 @@ class Parser:
                 oceans=current_oceans,
                 player_vp=move_vp_data,
                 milestones=dict(current_milestones),
-                awards=dict(current_awards)
+                awards=dict(current_awards),
+                special_tiles={pid: dict(tiles) for pid, tiles in current_special_tiles.items()}
             )
-            
+
             move.game_state = game_state
-        
+
         return moves
 
     def _determine_winner_and_concession(self, moves: List[Move]) -> Tuple[str, bool]:
