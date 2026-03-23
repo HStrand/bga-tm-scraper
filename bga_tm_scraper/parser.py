@@ -3207,6 +3207,7 @@ class Parser:
         'tracker_tagPlant': 'Plant tag',
         'tracker_tagScience': 'Science tag',
         'tracker_tagSpace': 'Space tag',
+        'tracker_tagWild': 'Wild tag',
     }
 
     def _infer_from_tracker_id(self, tracker_id: str, tracker_dict: Dict[str, str]) -> str:
