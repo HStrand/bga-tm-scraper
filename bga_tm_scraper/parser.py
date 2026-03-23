@@ -110,6 +110,7 @@ class Player:
     cards_played: List[str]
     milestones_claimed: List[str]
     awards_funded: List[str]
+    color: Optional[str] = None
     starting_hand: Optional[StartingHand] = None
     elo_data: Optional[EloData] = None
 
@@ -694,14 +695,27 @@ class Parser:
         # Build game states for each move
         moves_with_states = self._build_game_states_simple(moves, vp_progression, list(player_id_map.keys()), gamelogs)
         
+        # Build color -> player_id mapping from HTML
+        # The HTML has elements like <div id="player_area_name_ff0000">PlayerName</div>
+        color_to_player_id = {}
+        player_id_to_color = {}
+        for color_match in re.finditer(r'id="player_area_name_([0-9a-fA-F]{6})"[^>]*>([^<]+)<', replay_html):
+            color = color_match.group(1).lower()
+            pname = color_match.group(2).strip()
+            pid = name_to_id.get(pname)
+            if pid:
+                color_to_player_id[color] = int(pid)
+                player_id_to_color[pid] = f"#{color}"
+        logger.info(f"Color to player mapping: {color_to_player_id}")
+
         # Add comprehensive resource/production/tag tracking if gamelogs available
         tracking_progression = []
         if gamelogs and player_id_map:
             logger.info("Adding comprehensive tracking data to game states")
-            
+
             # Get player IDs for tracking
             player_ids = list(player_id_map.keys())
-            
+
             # Augment tracker_dict with player-specific entries from _TRACKER_PREFIX_MAP
             # when HTML-based extraction returns few results
             if len(tracker_dict) < 10:
@@ -719,17 +733,6 @@ class Parser:
                             if display:
                                 tracker_dict[cn] = display
 
-            # Build color -> player_id mapping from HTML
-            # The HTML has elements like <div id="player_area_name_ff0000">PlayerName</div>
-            color_to_player_id = {}
-            for color_match in re.finditer(r'id="player_area_name_([0-9a-fA-F]{6})"[^>]*>([^<]+)<', replay_html):
-                color = color_match.group(1).lower()
-                pname = color_match.group(2).strip()
-                pid = name_to_id.get(pname)
-                if pid:
-                    color_to_player_id[color] = int(pid)
-            logger.info(f"Color to player mapping: {color_to_player_id}")
-
             # Track resources and production through all moves
             tracking_progression = self._track_resources_and_production(gamelogs, player_ids, tracker_dict, card_names_map, color_to_player_id)
             
@@ -742,7 +745,7 @@ class Parser:
             starting_hands = self._extract_starting_hands(soup, player_perspective)
 
         # Build final player objects from collected data
-        players_info = self._build_final_players(player_id_map, corporations, moves_with_states, game_metadata, starting_hands)
+        players_info = self._build_final_players(player_id_map, corporations, moves_with_states, game_metadata, starting_hands, player_id_to_color)
         
         # Determine winner and whether the game was conceded from the final moves' descriptions
         winner, conceded = self._determine_winner_and_concession(moves_with_states)
@@ -796,9 +799,10 @@ class Parser:
         logger.error("No player data available in GameMetadata")
         raise ValueError("Parser requires GameMetadata with player information")
     
-    def _build_final_players(self, player_id_map: Dict[str, str], corporations: Dict[str, str], 
+    def _build_final_players(self, player_id_map: Dict[str, str], corporations: Dict[str, str],
                                                moves_with_states: List[Move], game_metadata: GameMetadata,
-                                               starting_hands: Optional[Dict[str, StartingHand]]) -> Dict[str, Player]:
+                                               starting_hands: Optional[Dict[str, StartingHand]],
+                                               player_id_to_color: Dict[str, str] = None) -> Dict[str, Player]:
         """Build final player objects from collected data using GameMetadata"""
         players = {}
         
@@ -852,6 +856,7 @@ class Parser:
                 final_vp=final_vp,
                 final_tr=vp_breakdown.get('tr', 20),
                 vp_breakdown=vp_breakdown,
+                color=player_id_to_color.get(player_id) if player_id_to_color else None,
                 starting_hand=starting_hand,
                 cards_played=cards_played,
                 milestones_claimed=milestones_claimed,

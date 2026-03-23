@@ -33,6 +33,7 @@ GAMES = [
             "86296239": EloData(player_name="StrandedKnight", player_id="86296239"),
             "98490496": EloData(player_name="cdman234", player_id="98490496"),
         },
+        "map": "Elysium"
     },
 ]
 
