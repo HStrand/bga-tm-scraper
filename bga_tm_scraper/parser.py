@@ -1734,12 +1734,12 @@ class Parser:
                             logger.debug(f"Move {move_number}: Detected skip second action")
                     
                     elif item_type == 'undoMove':
-                        # Check the undo label for action type
+                        # Use undo label only as fallback when action not yet determined
                         label = args.get('label', '')
-                        if label == 'draw':
+                        if label == 'draw' and action_type == 'other':
                             action_type = 'draw'
                             logger.debug(f"Move {move_number}: Confirmed draw action from undo label")
-                        elif label == 'play':
+                        elif label == 'play' and action_type == 'other':
                             action_type = 'play_card'
                             logger.debug(f"Move {move_number}: Confirmed play card from undo label")
             
@@ -4024,6 +4024,10 @@ class Parser:
                 except Exception:
                     pass
 
+                # When a card play triggers draws as an effect, don't let draw processing
+                # override the action_type or description — keep play_card as primary action
+                is_card_play_with_draw = action_type == 'play_card' and (per_player_draw_ids or per_player_kept_ids)
+
                 # Build unified card_options from both sources
                 if card_names_map and (per_player_draft_ids or per_player_draw_ids or per_player_setup_ids):
                     card_options: Dict[str, List[str]] = {}
@@ -4058,7 +4062,8 @@ class Parser:
                                 parts.append(f"{pname} {verb} {names[0]}")
                             elif len(names) > 1:
                                 parts.append(f"{pname} {verb} {len(names)} cards: {', '.join(names)}")
-                        full_description = " | ".join(parts)
+                        if not is_card_play_with_draw:
+                            full_description = " | ".join(parts)
                         if source and source is per_player_draft_ids and action_type in ('other', 'draw', 'draft_card'):
                             action_type = 'draft'
                         if source and source is per_player_draw_ids and action_type == 'other':
@@ -4088,7 +4093,7 @@ class Parser:
                                     parts.append(f"{pname} {verb} {names[0]}")
                                 else:
                                     parts.append(f"{pname} {verb} {len(names)} cards: {', '.join(names)}")
-                            if parts:
+                            if parts and not is_card_play_with_draw:
                                 full_description = " | ".join(parts)
                         except Exception:
                             pass
@@ -4137,6 +4142,16 @@ class Parser:
                                     if clean and clean not in desc_parts:
                                         desc_parts.append(clean)
                         if desc_parts:
+                            if is_card_play_with_draw:
+                                # Reorder: payments and card play first, then effects (draws, etc.)
+                                primary = []
+                                effects = []
+                                for part in desc_parts:
+                                    if 'plays card' in part or 'pays' in part:
+                                        primary.append(part)
+                                    else:
+                                        effects.append(part)
+                                desc_parts = primary + effects
                             full_description = " | ".join(desc_parts)
                     except Exception:
                         pass
