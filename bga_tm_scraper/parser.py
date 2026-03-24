@@ -52,6 +52,7 @@ class GameState:
     awards: Dict[str, Dict[str, Any]]  # award_name -> details
     player_trackers: Dict[str, Dict[str, int]] = None  # player_id -> tracker_name -> value
     special_tiles: Dict[str, Dict[str, str]] = None  # player_id -> {card_name: hex_location}
+    starting_player: Optional[str] = None  # player_id of the starting player this generation
     draw_pile: Optional[int] = None
     discard_pile: Optional[int] = None
 
@@ -4268,10 +4269,10 @@ class Parser:
                     "cards": 0
                 }
             }
-        
+
         # Track the last known VP data to carry forward when no new data is available
         last_vp_data = dict(default_vp_data)
-        
+
         # Create a mapping from move_number to VP data for proper correlation
         vp_by_move_number = {}
         for vp_entry in vp_progression:
@@ -4279,17 +4280,52 @@ class Parser:
             if move_number:
                 # Convert move_number to string for consistent matching
                 vp_by_move_number[str(move_number)] = vp_entry.get('vp_data', {})
-        
+
         logger.info(f"Built VP mapping for {len(vp_by_move_number)} moves")
-        
-        # Extract parameter changes from gamelogs if available
+
+        # Extract parameter changes and starting player info from gamelogs
         parameter_changes_by_move = {}
+        starting_player_by_move = {}  # move_number -> player_id
         if gamelogs:
             parameter_changes_by_move = self._extract_parameter_changes_from_gamelogs(gamelogs)
             logger.info(f"Extracted parameter changes for {len(parameter_changes_by_move)} moves from gamelogs")
-        
+
+            # Build name -> id mapping from moves
+            name_to_id_local = {}
+            for m in moves:
+                if m.player_name and m.player_id:
+                    name_to_id_local[m.player_name] = m.player_id
+
+            # Extract starting player per generation
+            data_entries = gamelogs.get('data', {}).get('data', [])
+            for entry in data_entries:
+                if not isinstance(entry, dict):
+                    continue
+                for item in entry.get('data', []):
+                    if not isinstance(item, dict):
+                        continue
+                    log = item.get('log', '')
+                    if 'is starting player' in str(log):
+                        args = item.get('args', {})
+                        if not isinstance(args, dict):
+                            continue
+                        pname = args.get('player_name', '')
+                        mid = entry.get('move_id')
+                        if pname and mid:
+                            pid = name_to_id_local.get(pname, pname)
+                            try:
+                                starting_player_by_move[int(mid)] = pid
+                            except (ValueError, TypeError):
+                                pass
+
+        current_starting_player = None
+
         # Process each move and build game state
         for i, move in enumerate(moves):
+            # Update starting player if this move has a starting player change
+            if move.move_number in starting_player_by_move:
+                current_starting_player = starting_player_by_move[move.move_number]
+
             # Update parameters from gamelogs data
             move_parameter_changes = parameter_changes_by_move.get(move.move_number, {})
             if move_parameter_changes:
@@ -4385,7 +4421,8 @@ class Parser:
                 player_vp=move_vp_data,
                 milestones=dict(current_milestones),
                 awards=dict(current_awards),
-                special_tiles={pid: dict(tiles) for pid, tiles in current_special_tiles.items()}
+                special_tiles={pid: dict(tiles) for pid, tiles in current_special_tiles.items()},
+                starting_player=current_starting_player
             )
 
             move.game_state = game_state
