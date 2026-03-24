@@ -53,6 +53,7 @@ class GameState:
     player_trackers: Dict[str, Dict[str, int]] = None  # player_id -> tracker_name -> value
     special_tiles: Dict[str, Dict[str, str]] = None  # player_id -> {card_name: hex_location}
     starting_player: Optional[str] = None  # player_id of the starting player this generation
+    player_hands: Dict[str, List[str]] = None  # player_id -> list of card names in hand
     draw_pile: Optional[int] = None
     discard_pile: Optional[int] = None
 
@@ -67,6 +68,8 @@ class GameState:
             self.player_trackers = {}
         if self.special_tiles is None:
             self.special_tiles = {}
+        if self.player_hands is None:
+            self.player_hands = {}
 
 @dataclass
 class Move:
@@ -86,7 +89,6 @@ class Move:
     card_options: Optional[Dict[str, List[str]]] = None
     cards_kept: Optional[Dict[str, List[str]]] = None
     cards_discarded: Optional[List[str]] = None
-    hand: Optional[List[str]] = None
     reason: Optional[str] = None
 
     # Game state after this move
@@ -694,7 +696,7 @@ class Parser:
         moves = self._extract_all_moves_simple(soup, name_to_id, gamelogs, card_names_map, tracker_dict)
         
         # Build game states for each move
-        moves_with_states = self._build_game_states_simple(moves, vp_progression, list(player_id_map.keys()), gamelogs)
+        moves_with_states = self._build_game_states_simple(moves, vp_progression, list(player_id_map.keys()), gamelogs, player_perspective, card_names_map)
         
         # Build color -> player_id mapping from HTML
         # The HTML has elements like <div id="player_area_name_ff0000">PlayerName</div>
@@ -1371,8 +1373,6 @@ class Parser:
             except Exception:
                 pass
 
-            hand_list = self._extract_hand_from_gamelogs(move_number, gamelogs, card_names_map)
-
             move = Move(
                 move_number=move_number,
                 timestamp=timestamp,
@@ -1387,7 +1387,6 @@ class Parser:
                 card_options=card_options_map,
                 cards_kept=cards_kept_map,
                 cards_discarded=cards_discarded_list,
-                hand=hand_list,
                 reason=reason
             )
 
@@ -1730,18 +1729,22 @@ class Parser:
             logger.error(f"Error extracting action details from gamelogs for move {move_number}: {e}")
             return 'other', None, None, None, None
     
-    def _extract_hand_from_gamelogs(self, move_number: int, gamelogs: Dict[str, Any], card_names_map: Dict[str, str] = None) -> Optional[List[str]]:
-        """Extract the player's hand cards from gamelogs for a given move.
+    def _extract_hand_from_gamelogs(self, move_number: int, gamelogs: Dict[str, Any], card_names_map: Dict[str, str] = None) -> Optional[Tuple[str, List[str]]]:
+        """Extract a player's hand cards from gamelogs for a given move.
 
-        Looks at 'card' and 'sell' operations in gameStateChange events and
-        'card' operations in tokensUpdate events.  Uses the 'info' dict keys
-        (full hand) rather than 'target' (playable subset only).
+        Looks at 'card' and 'sell' operations in gameStateChange events.
+        Uses the 'info' dict keys (full hand) rather than 'target' (playable subset).
+        The owning player is identified via 'active_player' on the gameStateChange.
+
+        Returns:
+            Tuple of (player_id, hand_card_names) or None if no hand found.
         """
         if not gamelogs:
             return None
         try:
             data_entries = gamelogs.get('data', {}).get('data', [])
             hand_ids: Optional[List[str]] = None
+            hand_player_id: Optional[str] = None
 
             for entry in data_entries:
                 if entry.get('move_id') != str(move_number):
@@ -1749,21 +1752,21 @@ class Parser:
                 for item in entry.get('data', []):
                     if not isinstance(item, dict):
                         continue
-                    item_type = item.get('type')
+                    if item.get('type') != 'gameStateChange':
+                        continue
 
-                    ops_iter: list = []
-                    if item_type == 'gameStateChange':
-                        inner = (item.get('args') or {}).get('args', {})
-                        if isinstance(inner, dict):
-                            ops = inner.get('operations', {})
-                            if isinstance(ops, dict):
-                                ops_iter = list(ops.values())
-                    elif item_type == 'tokensUpdate':
-                        ops = (item.get('args') or {}).get('operations', [])
-                        if isinstance(ops, list):
-                            ops_iter = ops
+                    args = item.get('args') or {}
+                    inner = args.get('args', {})
+                    if not isinstance(inner, dict):
+                        continue
 
-                    for op in ops_iter:
+                    active_player = str(inner.get('active_player', args.get('active_player', '')))
+
+                    ops = inner.get('operations', {})
+                    if not isinstance(ops, dict):
+                        continue
+
+                    for op in ops.values():
                         if not isinstance(op, dict):
                             continue
                         op_type = op.get('type') or op.get('typeexpr')
@@ -1776,6 +1779,7 @@ class Parser:
                             cards = sorted(k for k in info if isinstance(k, str) and k.startswith('card_main_'))
                             if cards:
                                 hand_ids = cards
+                                hand_player_id = active_player
                                 break
                         # Fall back to target (e.g. sell operation has empty info)
                         target = op_args.get('target', [])
@@ -1783,17 +1787,19 @@ class Parser:
                             cards = sorted(t for t in target if isinstance(t, str) and t.startswith('card_main_'))
                             if cards:
                                 hand_ids = cards
+                                hand_player_id = active_player
                                 break
                     if hand_ids is not None:
                         break
 
-            if hand_ids is None:
+            if hand_ids is None or not hand_player_id:
                 return None
 
-            return [
+            hand_names = [
                 card_names_map[cid] if card_names_map and cid in card_names_map else cid
                 for cid in hand_ids
             ]
+            return (hand_player_id, hand_names)
         except Exception:
             return None
 
@@ -4191,8 +4197,6 @@ class Parser:
             except Exception:
                 pass
 
-            hand_list = self._extract_hand_from_gamelogs(move_number, gamelogs, card_names_map)
-
             return Move(
                 move_number=move_number,
                 timestamp=timestamp,
@@ -4207,14 +4211,13 @@ class Parser:
                 card_options=card_options_map,
                 cards_kept=cards_kept_map,
                 cards_discarded=cards_discarded_list,
-                hand=hand_list,
                 reason=reason
             )
         except Exception as e:
             logger.error(f"Error constructing synthetic move {move_number} from gamelogs: {e}")
             return None
 
-    def _build_game_states_simple(self, moves: List[Move], vp_progression: List[Dict[str, Any]], player_ids: List[str], gamelogs: Dict[str, Any] = None) -> List[Move]:
+    def _build_game_states_simple(self, moves: List[Move], vp_progression: List[Dict[str, Any]], player_ids: List[str], gamelogs: Dict[str, Any] = None, player_perspective: str = None, card_names_map: Dict[str, str] = None) -> List[Move]:
         """Build game states for each move with simple player ID list"""
         # Initialize tracking variables
         current_temp = -30
@@ -4222,10 +4225,11 @@ class Parser:
         current_oceans = 0
         current_generation = 1
 
-        # Track milestones, awards, and special tiles state throughout the game
+        # Track milestones, awards, special tiles, and hands throughout the game
         current_milestones = {}
         current_awards = {}
         current_special_tiles: Dict[str, Dict[str, str]] = {pid: {} for pid in player_ids}
+        current_player_hands: Dict[str, List[str]] = {}
 
         # Initialize default VP data for all players
         default_vp_data = {}
@@ -4383,6 +4387,13 @@ class Parser:
                     move_vp_data[player_id] = dict(default_vp_data[player_id])
                     logger.debug(f"Added default VP data for missing player {player_id} in move {move.move_number}")
 
+            # Extract hand for this move (keyed by active player)
+            if gamelogs:
+                hand_result = self._extract_hand_from_gamelogs(move.move_number, gamelogs, card_names_map)
+                if hand_result is not None:
+                    hand_pid, hand_cards = hand_result
+                    current_player_hands[hand_pid] = hand_cards
+
             # Create game state (without resource/production tracking)
             game_state = GameState(
                 move_number=move.move_number,
@@ -4394,7 +4405,8 @@ class Parser:
                 milestones=dict(current_milestones),
                 awards=dict(current_awards),
                 special_tiles={pid: dict(tiles) for pid, tiles in current_special_tiles.items()},
-                starting_player=current_starting_player
+                starting_player=current_starting_player,
+                player_hands={pid: list(cards) for pid, cards in current_player_hands.items()}
             )
 
             move.game_state = game_state
