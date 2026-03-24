@@ -129,5 +129,5 @@ for game in GAMES:
     print(f"Wrote {compact_output}")
 
     for move in game_data.moves:
-        if move.cards_sold:
-            print(f"Move {move.move_number}: cards_sold={move.cards_sold}")
+        if move.cards_discarded:
+            print(f"Move {move.move_number}: cards_discarded={move.cards_discarded}")

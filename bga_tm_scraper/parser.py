@@ -85,7 +85,7 @@ class Move:
     tile_location: Optional[str] = None
     card_options: Optional[Dict[str, List[str]]] = None
     cards_kept: Optional[Dict[str, List[str]]] = None
-    cards_sold: Optional[List[str]] = None
+    cards_discarded: Optional[List[str]] = None
     hand: Optional[List[str]] = None
     reason: Optional[str] = None
 
@@ -1336,15 +1336,14 @@ class Parser:
             except Exception:
                 pass
 
-            # Detect cards sold (Sell patents standard project)
-            cards_sold_list: Optional[List[str]] = None
+            # Detect discarded cards (sell patents, card effects like Mars University, etc.)
+            # Skip draft/draw moves where "discards" are just cards passed to other players
+            cards_discarded_list: Optional[List[str]] = None
             try:
                 if gamelogs:
                     data_entries_sell = gamelogs.get('data', {}).get('data', [])
-                    is_sell_move = False
-                    has_discard_hidden = False
-                    has_m_gain = False
-                    sold_card_ids: List[str] = []
+                    discarded_card_ids: List[str] = []
+                    has_draft_pass = False
                     for entry in data_entries_sell:
                         if entry.get('move_id') != str(move_number):
                             continue
@@ -1354,36 +1353,21 @@ class Parser:
                         for data_item in entry_data:
                             if not isinstance(data_item, dict):
                                 continue
-                            # Check for tokenMovedHidden with reason "Sell patents"
-                            if data_item.get('type') == 'tokenMovedHidden':
-                                reason_tr = (data_item.get('args') or {}).get('reason_tr')
-                                if isinstance(reason_tr, str) and 'sell patents' in reason_tr.lower():
-                                    is_sell_move = True
-                                elif 'discards' in (data_item.get('log') or '').lower():
-                                    has_discard_hidden = True
-                            # Collect tokenMoved to discard_main
                             if data_item.get('type') == 'tokenMoved':
                                 tm_args = data_item.get('args') or {}
-                                place_id = str(tm_args.get('place_id', '') or tm_args.get('place_name', '')).lower()
+                                place_id = str(tm_args.get('place_id', '') or tm_args.get('place_name', ''))
                                 token_id = tm_args.get('token_id', '')
+                                if place_id.startswith('draft_'):
+                                    has_draft_pass = True
                                 if place_id == 'discard_main' and isinstance(token_id, str) and token_id.startswith('card_main_'):
-                                    sold_card_ids.append(token_id)
-                            # Check for M€ gain (fallback sell indicator for older format)
-                            if data_item.get('type') == 'counter':
-                                c_args = data_item.get('args') or {}
-                                c_log = data_item.get('log', '')
-                                if 'gains' in c_log and re.match(r'tracker_m_[0-9a-fA-F]{6}$', str(c_args.get('counter_name', ''))):
-                                    has_m_gain = True
-                    # Fallback: tokenMovedHidden discards + M€ gain = sell patents (older format)
-                    if not is_sell_move and sold_card_ids and has_discard_hidden and has_m_gain:
-                        is_sell_move = True
-                    if is_sell_move and sold_card_ids:
-                        cards_sold_list = []
-                        for cid in sold_card_ids:
+                                    discarded_card_ids.append(token_id)
+                    if discarded_card_ids and not has_draft_pass:
+                        cards_discarded_list = []
+                        for cid in discarded_card_ids:
                             if card_names_map and cid in card_names_map:
-                                cards_sold_list.append(card_names_map[cid])
+                                cards_discarded_list.append(card_names_map[cid])
                             else:
-                                cards_sold_list.append(cid)
+                                cards_discarded_list.append(cid)
             except Exception:
                 pass
 
@@ -1402,7 +1386,7 @@ class Parser:
                 tile_location=tile_location,
                 card_options=card_options_map,
                 cards_kept=cards_kept_map,
-                cards_sold=cards_sold_list,
+                cards_discarded=cards_discarded_list,
                 hand=hand_list,
                 reason=reason
             )
@@ -4174,13 +4158,12 @@ class Parser:
                     action_type = 'game_state_change'
                 full_description = ''
             
-            # Detect cards sold (Sell patents standard project)
-            cards_sold_list: Optional[List[str]] = None
+            # Detect discarded cards (sell patents, card effects, etc.)
+            # Skip draft/draw moves where "discards" are just cards passed to other players
+            cards_discarded_list: Optional[List[str]] = None
             try:
-                is_sell_move = False
-                has_discard_hidden = False
-                has_m_gain = False
-                sold_card_ids: List[str] = []
+                discarded_card_ids: List[str] = []
+                has_draft_pass = False
                 for entry in data_entries:
                     if entry.get('move_id') != str(move_number):
                         continue
@@ -4190,32 +4173,21 @@ class Parser:
                     for data_item in entry_data:
                         if not isinstance(data_item, dict):
                             continue
-                        if data_item.get('type') == 'tokenMovedHidden':
-                            reason_tr = (data_item.get('args') or {}).get('reason_tr')
-                            if isinstance(reason_tr, str) and 'sell patents' in reason_tr.lower():
-                                is_sell_move = True
-                            elif 'discards' in (data_item.get('log') or '').lower():
-                                has_discard_hidden = True
                         if data_item.get('type') == 'tokenMoved':
                             tm_args = data_item.get('args') or {}
-                            place_id = str(tm_args.get('place_id', '') or tm_args.get('place_name', '')).lower()
+                            place_id = str(tm_args.get('place_id', '') or tm_args.get('place_name', ''))
                             token_id = tm_args.get('token_id', '')
+                            if place_id.startswith('draft_'):
+                                has_draft_pass = True
                             if place_id == 'discard_main' and isinstance(token_id, str) and token_id.startswith('card_main_'):
-                                sold_card_ids.append(token_id)
-                        if data_item.get('type') == 'counter':
-                            c_args = data_item.get('args') or {}
-                            c_log = data_item.get('log', '')
-                            if 'gains' in c_log and re.match(r'tracker_m_[0-9a-fA-F]{6}$', str(c_args.get('counter_name', ''))):
-                                has_m_gain = True
-                if not is_sell_move and sold_card_ids and has_discard_hidden and has_m_gain:
-                    is_sell_move = True
-                if is_sell_move and sold_card_ids:
-                    cards_sold_list = []
-                    for cid in sold_card_ids:
+                                discarded_card_ids.append(token_id)
+                if discarded_card_ids and not has_draft_pass:
+                    cards_discarded_list = []
+                    for cid in discarded_card_ids:
                         if card_names_map and cid in card_names_map:
-                            cards_sold_list.append(card_names_map[cid])
+                            cards_discarded_list.append(card_names_map[cid])
                         else:
-                            cards_sold_list.append(cid)
+                            cards_discarded_list.append(cid)
             except Exception:
                 pass
 
@@ -4234,7 +4206,7 @@ class Parser:
                 tile_location=tile_location,
                 card_options=card_options_map,
                 cards_kept=cards_kept_map,
-                cards_sold=cards_sold_list,
+                cards_discarded=cards_discarded_list,
                 hand=hand_list,
                 reason=reason
             )
