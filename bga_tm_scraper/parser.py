@@ -1004,7 +1004,22 @@ class Parser:
             action_type, card_played, tile_placed, tile_location, reason = self._extract_enhanced_action_details(
                 move_number, gamelogs, log_entries, full_description
             )
-            
+
+            # Map card_played, tile_placed, and tile_location IDs to names
+            if card_played and card_names_map and card_played in card_names_map:
+                card_played = card_names_map[card_played]
+            if tile_placed and card_names_map and tile_placed in card_names_map:
+                tile_placed = card_names_map[tile_placed]
+            if tile_location:
+                hex_name = card_names_map.get(tile_location) if card_names_map else None
+                coords_match = re.match(r'hex_(\d+)_(\d+)', tile_location)
+                if hex_name and coords_match:
+                    tile_location = f"{hex_name} ({coords_match.group(1)},{coords_match.group(2)})"
+                elif hex_name:
+                    tile_location = hex_name
+                elif coords_match:
+                    tile_location = f"Hex {coords_match.group(1)},{coords_match.group(2)}"
+
             # Map IDs to names and compute per-player card options (draws and drafts)
             card_options_map: Optional[Dict[str, List[str]]] = None
             card_drafted_name: Optional[str] = None
@@ -1175,11 +1190,6 @@ class Parser:
                                 full_description = " | ".join(parts)
                         except Exception:
                             pass
-                elif action_type == 'play_card' and card_played and card_names_map:
-                    # Map played card ID to name
-                    if card_played in card_names_map:
-                        card_played = card_names_map[card_played]
-
                 # Detect a concrete drafted selection (tokenMoved with 'draft' context)
                 if gamelogs and card_names_map and card_drafted_name is None:
                     data_entries = gamelogs.get('data', {}).get('data', [])
@@ -3815,19 +3825,11 @@ class Parser:
             return {}
 
     def _extract_all_moves_simple(self, soup: BeautifulSoup, name_to_id: Dict[str, str], gamelogs: Dict[str, Any] = None, card_names_map: Dict[str, str] = None, tracker_dict: Dict[str, str] = None) -> List[Move]:
-        """Extract all moves with simple name-to-ID mapping"""
-        moves = []
-        move_divs = soup.find_all('div', class_='replaylogs_move')
-        
-        for move_div in move_divs:
-            move = self._parse_single_move_detailed(move_div, name_to_id, gamelogs, card_names_map, tracker_dict)
-            if move:
-                moves.append(move)
-        
-        # Augment with gamelogs-only moves that might be missing from HTML (e.g., opponent's channel)
-        try:
-            if gamelogs:
-                seen_move_numbers = {m.move_number for m in moves}
+        """Extract all moves, preferring gamelogs JSON with HTML fallback"""
+        # Primary path: build all moves from gamelogs JSON
+        if gamelogs:
+            moves = []
+            try:
                 data_entries = gamelogs.get('data', {}).get('data', [])
                 gl_move_ids: List[int] = []
                 for entry in data_entries:
@@ -3838,15 +3840,23 @@ class Parser:
                         except ValueError:
                             pass
                 for move_number in sorted(set(gl_move_ids)):
-                    if move_number not in seen_move_numbers:
-                        synthetic = self._build_move_from_gamelogs(move_number, name_to_id, gamelogs, card_names_map, tracker_dict)
-                        if synthetic:
-                            moves.append(synthetic)
-                # Keep moves sorted by move number
-                moves.sort(key=lambda m: m.move_number)
-        except Exception as e:
-            logger.debug(f"Failed augmenting moves from gamelogs: {e}")
-        
+                    move = self._build_move_from_gamelogs(move_number, name_to_id, gamelogs, card_names_map, tracker_dict)
+                    if move:
+                        moves.append(move)
+            except Exception as e:
+                logger.debug(f"Failed extracting moves from gamelogs: {e}")
+            if moves:
+                return moves
+            logger.warning("Gamelogs produced no moves, falling back to HTML parsing")
+
+        # Fallback: parse from HTML move divs
+        moves = []
+        move_divs = soup.find_all('div', class_='replaylogs_move')
+        for move_div in move_divs:
+            move = self._parse_single_move_detailed(move_div, name_to_id, gamelogs, card_names_map, tracker_dict)
+            if move:
+                moves.append(move)
+
         return moves
 
     def _build_move_from_gamelogs(self, move_number: int, name_to_id: Dict[str, str], gamelogs: Dict[str, Any], card_names_map: Dict[str, str] = None, tracker_dict: Dict[str, str] = None) -> Optional[Move]:
