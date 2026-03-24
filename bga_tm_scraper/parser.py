@@ -3204,6 +3204,7 @@ class Parser:
         'tracker_pdelta': 'Global Parameters Delta',
         'tracker_ers': 'Steel Exchange Rate',
         'tracker_eru': 'Titanium Exchange Rate',
+        'tracker_resMicrobe': 'Microbe',
         'tracker_tagAnimal': 'Animal tag',
         'tracker_tagBuilding': 'Building tag',
         'tracker_tagCity': 'City tag',
@@ -4418,8 +4419,28 @@ class Parser:
         for move in reversed(moves):
             desc = move.description or ""
             # Detect concession anywhere in the final moves
-            if "concedes the game" in desc:
+            concession_match = re.search(r'(.+?) concedes (?:the|this) game', desc)
+            if concession_match:
                 conceded = True
+                # Determine winner: use highest VP among non-conceding players
+                conceding_player = concession_match.group(1).strip()
+                if winner == "Unknown":
+                    # Find the last game state with VP data
+                    best_vp = -1
+                    for m2 in reversed(moves):
+                        if m2.game_state and m2.game_state.player_vp:
+                            for pid, vp_data in m2.game_state.player_vp.items():
+                                pname = None
+                                for m3 in moves:
+                                    if m3.player_id == pid and m3.player_name:
+                                        pname = m3.player_name
+                                        break
+                                if pname and pname != conceding_player:
+                                    total = vp_data.get('total', 0) if isinstance(vp_data, dict) else 0
+                                    if total > best_vp:
+                                        best_vp = total
+                                        winner = pname
+                            break
             # Extract winner from end-of-game message variants
             m = re.search(r"(?:The )?[Ee]nd of (?:the )?game\s*:\s*(.+?)\s+wins", desc)
             if m:
