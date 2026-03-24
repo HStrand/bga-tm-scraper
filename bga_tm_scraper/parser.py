@@ -734,7 +734,7 @@ class Parser:
                                 tracker_dict[cn] = display
 
             # Track resources and production through all moves
-            tracking_progression = self._track_resources_and_production(gamelogs, player_ids, tracker_dict, card_names_map, color_to_player_id)
+            tracking_progression = self._track_resources_and_production(gamelogs, player_ids, tracker_dict, card_names_map, color_to_player_id, token_types)
             
             # Update game states with tracking data
             self._update_game_states_with_tracking(moves_with_states, tracking_progression)
@@ -3201,9 +3201,9 @@ class Parser:
         'tracker_forest': 'Forest',
         'tracker_land': 'Land',
         'tracker_passed': 'Passed',
-        'tracker_pdelta': 'Production Delta',
-        'tracker_ers': 'Earth Resources',
-        'tracker_eru': 'Earth Resource Units',
+        'tracker_pdelta': 'Global Parameters Delta',
+        'tracker_ers': 'Steel Exchange Rate',
+        'tracker_eru': 'Titanium Exchange Rate',
         'tracker_tagAnimal': 'Animal tag',
         'tracker_tagBuilding': 'Building tag',
         'tracker_tagCity': 'City tag',
@@ -3278,7 +3278,8 @@ class Parser:
 
     def _track_resources_and_production(self, gamelogs: Dict[str, Any], player_ids: List[str],
                                        tracker_dict: Dict[str, str], card_names_map: Dict[str, str] = None,
-                                       color_to_player_id: Dict[str, int] = None) -> List[Dict[str, Any]]:
+                                       color_to_player_id: Dict[str, int] = None,
+                                       token_types: Dict[str, Any] = None) -> List[Dict[str, Any]]:
         """Track comprehensive player state through all moves using gamelogs JSON"""
         logger.info(f"Starting comprehensive tracking for {len(player_ids)} players")
         logger.info(f"Tracker dictionary has {len(tracker_dict)} mappings")
@@ -3301,9 +3302,9 @@ class Parser:
             
             # Also filter out global trackers by name patterns
             global_tracker_patterns = [
-                'Temperature', 'Oxygen Level', 'Oceans', 'TR', 'Global Parameters Delta',
+                'Temperature', 'Oxygen Level', 'Oceans', 'TR',
                 'Number of Greenery on Mars', 'Number of owned land', 'Number of Cities',
-                'Number of Cities on Mars', 'Pass', 'Steel Exchange Rate', 'Titanium Exchange Rate'
+                'Number of Cities on Mars', 'Pass'
             ]
             
             # Remove global trackers from player tracker names
@@ -3320,11 +3321,24 @@ class Parser:
             player_tracker_names = filtered_tracker_names
             logger.info(f"After filtering global trackers: {len(player_tracker_names)} player-specific tracker names")
             
+            # Build default values from token_types (e.g. Steel Exchange Rate defaults to 2)
+            tracker_defaults = {}
+            if token_types:
+                for tt_key, tt_val in token_types.items():
+                    if isinstance(tt_val, dict) and 'state' in tt_val:
+                        display = self._TRACKER_PREFIX_MAP.get(tt_key)
+                        if display and display in player_tracker_names:
+                            try:
+                                tracker_defaults[display] = int(tt_val['state'])
+                            except (ValueError, TypeError):
+                                pass
+
             for player_id in player_ids:
-                # Initialize all trackers to 0
-                player_trackers = {tracker_name: 0 for tracker_name in player_tracker_names}
+                player_trackers = {name: tracker_defaults.get(name, 0) for name in player_tracker_names}
                 player_data[int(player_id)] = player_trackers
-            
+
+            if tracker_defaults:
+                logger.info(f"Tracker defaults from token_types: {tracker_defaults}")
             logger.info(f"Initialized {len(player_tracker_names)} player-specific trackers for each player")
 
             # Track global pile counters
@@ -3398,9 +3412,9 @@ class Parser:
                             if display_name:
                                 # Check if this tracker should be excluded
                                 global_tracker_patterns = [
-                                    'Temperature', 'Oxygen Level', 'Oceans', 'TR', 'Global Parameters Delta',
+                                    'Temperature', 'Oxygen Level', 'Oceans', 'TR',
                                     'Number of Greenery on Mars', 'Number of owned land', 'Number of Cities',
-                                    'Number of Cities on Mars', 'Pass', 'Steel Exchange Rate', 'Titanium Exchange Rate'
+                                    'Number of Cities on Mars', 'Pass'
                                 ]
 
                                 is_global = any(pattern in display_name for pattern in global_tracker_patterns)
