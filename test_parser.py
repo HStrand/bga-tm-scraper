@@ -10,8 +10,29 @@ GAMES = [
         "table_id": "741102170",
         "perspective": "93234993",
         "players": {
-            "93234993": EloData(player_name="Rutabaga00", player_id="93234993"),
-            "95706228": EloData(player_name="Flaming Pile", player_id="95706228"),
+            "93234993": EloData(
+                player_name="Rutabaga00", player_id="93234993",
+                arena_points=544, arena_points_change=-17,
+                game_rank=0, game_rank_change=-3,
+                position=2,
+            ),
+            "95706228": EloData(
+                player_name="Flaming Pile", player_id="95706228",
+                arena_points=323, arena_points_change=16,
+                game_rank=3, game_rank_change=3,
+                position=1,
+            ),
+        },
+        "metadata": {
+            "played_at": "2025-10-09T02:08:00",
+            "map": "Hellas",
+            "prelude_on": True,
+            "colonies_on": False,
+            "corporate_era_on": True,
+            "draft_on": True,
+            "beginners_corporations_on": False,
+            "game_speed": "Real-time \u00b7 Normal speed",
+            "game_mode": "Arena mode",
         },
     },
     {
@@ -20,8 +41,27 @@ GAMES = [
         "table_id": "507196426",
         "perspective": "94308984",
         "players": {
-            "94308984": EloData(player_name="JDansp", player_id="94308984"),
-            "90366871": EloData(player_name="Raduchon", player_id="90366871"),
+            "94308984": EloData(
+                player_name="JDansp", player_id="94308984",
+                arena_points=500, arena_points_change=4,
+                position=1,
+            ),
+            "90366871": EloData(
+                player_name="Raduchon", player_id="90366871",
+                arena_points=254, arena_points_change=-4,
+                position=2,
+            ),
+        },
+        "metadata": {
+            "played_at": "2024-05-01T18:27:00",
+            "map": "Tharsis",
+            "prelude_on": False,
+            "colonies_on": False,
+            "corporate_era_on": True,
+            "draft_on": True,
+            "beginners_corporations_on": False,
+            "game_speed": "Real-time \u00b7 Fast paced",
+            "game_mode": "Normal mode",
         },
     },
     {
@@ -30,10 +70,30 @@ GAMES = [
         "table_id": "824655675",
         "perspective": "86296239",
         "players": {
-            "86296239": EloData(player_name="StrandedKnight", player_id="86296239"),
-            "98490496": EloData(player_name="cdman234", player_id="98490496"),
+            "86296239": EloData(
+                player_name="StrandedKnight", player_id="86296239",
+                arena_points=1893, arena_points_change=5,
+                game_rank=673, game_rank_change=2,
+                position=1,
+            ),
+            "98490496": EloData(
+                player_name="cdman234", player_id="98490496",
+                arena_points=1551, arena_points_change=-5,
+                game_rank=309, game_rank_change=-2,
+                position=2,
+            ),
         },
-        "map": "Elysium"
+        "metadata": {
+            "played_at": "2026-03-21T21:04:00",
+            "map": "Elysium",
+            "prelude_on": True,
+            "colonies_on": False,
+            "corporate_era_on": True,
+            "draft_on": True,
+            "beginners_corporations_on": False,
+            "game_speed": "Real-time \u00b7 Normal speed",
+            "game_mode": "Arena mode",
+        },
     },
 ]
 
@@ -46,6 +106,9 @@ for game in GAMES:
 
     metadata = GameMetadata()
     metadata.players = game["players"]
+    for key, value in game.get("metadata", {}).items():
+        if hasattr(metadata, key):
+            setattr(metadata, key, value)
 
     game_data = parser.parse_complete_game(html, metadata, game["table_id"], game["perspective"])
     parser.export_to_json(game_data, game["output"], player_perspective=None)
