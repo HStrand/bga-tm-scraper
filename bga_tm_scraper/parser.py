@@ -719,12 +719,19 @@ class Parser:
             # Get player IDs for tracking
             player_ids = list(player_id_map.keys())
 
-            # Ensure tracker_dict has entries for all known prefixes × player colors
-            for prefix, display in self._TRACKER_PREFIX_MAP.items():
+            # Build tracker prefix -> name map from token_types (BGA's canonical names)
+            tracker_prefix_names = {}
+            for tt_key, tt_val in token_types.items():
+                if isinstance(tt_val, dict) and tt_key.startswith('tracker_') and 'name' in tt_val:
+                    if not re.search(r'_[0-9a-fA-F]{6}$', tt_key):
+                        tracker_prefix_names[tt_key] = tt_val['name']
+
+            # Ensure tracker_dict has entries for all known prefixes and prefix × player colors
+            for prefix, display in tracker_prefix_names.items():
+                tracker_dict[prefix] = display  # base prefix for description rendering
                 for color in color_to_player_id:
                     key = f"{prefix}_{color}"
-                    if key not in tracker_dict:
-                        tracker_dict[key] = display
+                    tracker_dict[key] = display
 
             # Track resources and production through all moves
             tracking_progression = self._track_resources_and_production(gamelogs, player_ids, tracker_dict, card_names_map, color_to_player_id, token_types)
@@ -3117,11 +3124,7 @@ class Parser:
                             tracker_dict[tracker_id] = display_name
             
             logger.info(f"Extracted {len(tracker_dict)} tracker mappings dynamically from HTML")
-            
-            tracker_dict["tracker_t"] = "Temperature"
-            tracker_dict["tracker_o"] = "Oxygen Level"
-            tracker_dict["tracker_w"] = "Oceans"
-            
+
             # Log some examples for debugging
             if tracker_dict:
                 sample_items = list(tracker_dict.items())[:5]
@@ -3168,48 +3171,6 @@ class Parser:
             logger.error(f"Error inferring display name for {tracker_id}: {e}")
             return ""
 
-    # Common tracker prefixes stripped of player color suffix
-    _TRACKER_PREFIX_MAP = {
-        'tracker_m': 'M€',
-        'tracker_pm': 'M€ Production',
-        'tracker_s': 'Steel',
-        'tracker_ps': 'Steel Production',
-        'tracker_u': 'Titanium',
-        'tracker_pu': 'Titanium Production',
-        'tracker_p': 'Plant',
-        'tracker_pp': 'Plant Production',
-        'tracker_e': 'Energy',
-        'tracker_pe': 'Energy Production',
-        'tracker_h': 'Heat',
-        'tracker_ph': 'Heat Production',
-        'tracker_tr': 'TR',
-        'tracker_t': 'Temperature',
-        'tracker_o': 'Oxygen Level',
-        'tracker_w': 'Oceans',
-        'tracker_gen': 'Generation',
-        'tracker_city': 'City',
-        'tracker_cityonmars': 'City on Mars',
-        'tracker_forest': 'Forest',
-        'tracker_land': 'Land',
-        'tracker_passed': 'Passed',
-        'tracker_pdelta': 'Global Parameters Delta',
-        'tracker_ers': 'Steel Exchange Rate',
-        'tracker_eru': 'Titanium Exchange Rate',
-        'tracker_resMicrobe': 'Microbe',
-        'tracker_tagAnimal': 'Animal tag',
-        'tracker_tagBuilding': 'Building tag',
-        'tracker_tagCity': 'City tag',
-        'tracker_tagEarth': 'Earth tag',
-        'tracker_tagEnergy': 'Energy tag',
-        'tracker_tagEvent': 'Event tag',
-        'tracker_tagJovian': 'Jovian tag',
-        'tracker_tagMicrobe': 'Microbe tag',
-        'tracker_tagPlant': 'Plant tag',
-        'tracker_tagScience': 'Science tag',
-        'tracker_tagSpace': 'Space tag',
-        'tracker_tagWild': 'Wild tag',
-    }
-
     def _infer_from_tracker_id(self, tracker_id: str, tracker_dict: Dict[str, str]) -> str:
         """Infer display name from tracker ID patterns"""
         result = tracker_dict.get(tracker_id)
@@ -3217,7 +3178,7 @@ class Parser:
             return result
         # Strip 6-char hex color suffix (e.g. tracker_m_ff0000 -> tracker_m)
         base = re.sub(r'_[0-9a-fA-F]{6}$', '', tracker_id)
-        result = self._TRACKER_PREFIX_MAP.get(base)
+        result = tracker_dict.get(base)
         if result:
             return result
         # Resource tokens: resource_COLOR_NUM -> "Resource"
@@ -3317,9 +3278,9 @@ class Parser:
             tracker_defaults = {}
             if token_types:
                 for tt_key, tt_val in token_types.items():
-                    if isinstance(tt_val, dict) and 'state' in tt_val:
-                        display = self._TRACKER_PREFIX_MAP.get(tt_key)
-                        if display and display in player_tracker_names:
+                    if isinstance(tt_val, dict) and 'state' in tt_val and 'name' in tt_val:
+                        display = tt_val['name']
+                        if display in player_tracker_names:
                             try:
                                 tracker_defaults[display] = int(tt_val['state'])
                             except (ValueError, TypeError):
@@ -4235,7 +4196,7 @@ class Parser:
         current_oceans = 0
         current_generation = 1
 
-        # Track milestones, awards, special tiles, and hands throughout the game
+        # Track milestones, awards, special tiles, hands, and tile counts throughout the game
         current_milestones = {}
         current_awards = {}
         current_special_tiles: Dict[str, Dict[str, str]] = {pid: {} for pid in player_ids}
