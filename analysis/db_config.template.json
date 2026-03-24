@@ -1,0 +1,9 @@
+{
+  "driver": "ODBC Driver 17 for SQL Server",
+  "server": "tcp:your-server.database.windows.net,1433",
+  "database": "your-database",
+  "username": "your-username",
+  "password": "your-password",
+  "encrypt": "yes",
+  "trust_server_certificate": "no"
+}

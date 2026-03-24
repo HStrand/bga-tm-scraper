@@ -53,6 +53,7 @@ data/sample files/
 # Analysis output data
 analysis/data/
 analysis/db_dump/
+analysis/db_config.json
 
 # Chrome debug profile
 chrome-debug-profile/
