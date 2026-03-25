@@ -4429,6 +4429,23 @@ class Parser:
                 winner = m.group(1).strip()
                 break
 
+        # Fallback: extract winner from "X scores N TOTAL VP" in final moves
+        if winner == "Unknown":
+            best_vp = -1
+            for move in reversed(moves):
+                desc = move.description or ""
+                # Split on pipe delimiter and check each part
+                for part in desc.split('|'):
+                    vp_match = re.search(r'(\w[\w\s]*?)\s+scores\s+(\d+)\s+TOTAL\s+VP', part.strip())
+                    if vp_match:
+                        pname = vp_match.group(1).strip()
+                        total_vp = int(vp_match.group(2))
+                        if total_vp > best_vp:
+                            best_vp = total_vp
+                            winner = pname
+                if best_vp >= 0:
+                    break
+
         return winner, conceded
 
     def _determine_winner_from_game_states(self, moves_with_states: List[Move], players_info: Dict[str, Player]) -> str:
