@@ -4431,20 +4431,35 @@ class Parser:
 
         # Fallback: extract winner from "X scores N TOTAL VP" in final moves
         if winner == "Unknown":
-            best_vp = -1
+            player_scores: List[Tuple[str, int, int]] = []  # (name, vp, m€)
             for move in reversed(moves):
                 desc = move.description or ""
-                # Split on pipe delimiter and check each part
-                for part in desc.split('|'):
-                    vp_match = re.search(r'(\w[\w\s]*?)\s+scores\s+(\d+)\s+TOTAL\s+VP', part.strip())
+                parts = desc.split('|')
+                # Collect all VP scores and M€ tiebreakers
+                tiebreaker_mc: Dict[str, int] = {}
+                for part in parts:
+                    p = part.strip()
+                    tb_match = re.search(r'(\w[\w\s]*?)\s+has\s+(\d+)\s+M', p)
+                    if tb_match and 'tiebreaker' in p.lower():
+                        tiebreaker_mc[tb_match.group(1).strip()] = int(tb_match.group(2))
+                    vp_match = re.search(r'(\w[\w\s]*?)\s+scores\s+(\d+)\s+TOTAL\s+VP', p)
                     if vp_match:
                         pname = vp_match.group(1).strip()
                         total_vp = int(vp_match.group(2))
-                        if total_vp > best_vp:
-                            best_vp = total_vp
-                            winner = pname
-                if best_vp >= 0:
+                        mc = tiebreaker_mc.get(pname, 0)
+                        player_scores.append((pname, total_vp, mc))
+                if player_scores:
                     break
+
+            if player_scores:
+                # Sort by VP descending, then M€ descending
+                player_scores.sort(key=lambda x: (x[1], x[2]), reverse=True)
+                top = player_scores[0]
+                # Check for tie: same VP and same M€ as runner-up
+                if len(player_scores) > 1 and top[1] == player_scores[1][1] and top[2] == player_scores[1][2]:
+                    winner = "Tie"
+                else:
+                    winner = top[0]
 
         return winner, conceded
 
