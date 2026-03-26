@@ -1363,6 +1363,7 @@ class Parser:
                     data_entries_sell = gamelogs.get('data', {}).get('data', [])
                     discarded_card_ids: List[str] = []
                     has_draft_pass = False
+                    revealed_card_ids: set = set()
                     for entry in data_entries_sell:
                         if entry.get('move_id') != str(move_number):
                             continue
@@ -1378,8 +1379,12 @@ class Parser:
                                 token_id = tm_args.get('token_id', '')
                                 if place_id.startswith('draft_'):
                                     has_draft_pass = True
+                                if place_id == 'reveal' and isinstance(token_id, str) and token_id.startswith('card_main_'):
+                                    revealed_card_ids.add(token_id)
                                 if place_id == 'discard_main' and isinstance(token_id, str) and token_id.startswith('card_main_'):
-                                    discarded_card_ids.append(token_id)
+                                    # Only count as discard if not a revealed deck card
+                                    if token_id not in revealed_card_ids:
+                                        discarded_card_ids.append(token_id)
                     if discarded_card_ids and not has_draft_pass:
                         cards_discarded_list = []
                         for cid in discarded_card_ids:
@@ -4141,6 +4146,7 @@ class Parser:
             try:
                 discarded_card_ids: List[str] = []
                 has_draft_pass = False
+                revealed_card_ids: set = set()
                 for entry in data_entries:
                     if entry.get('move_id') != str(move_number):
                         continue
@@ -4156,8 +4162,11 @@ class Parser:
                             token_id = tm_args.get('token_id', '')
                             if place_id.startswith('draft_'):
                                 has_draft_pass = True
+                            if place_id == 'reveal' and isinstance(token_id, str) and token_id.startswith('card_main_'):
+                                revealed_card_ids.add(token_id)
                             if place_id == 'discard_main' and isinstance(token_id, str) and token_id.startswith('card_main_'):
-                                discarded_card_ids.append(token_id)
+                                if token_id not in revealed_card_ids:
+                                    discarded_card_ids.append(token_id)
                 if discarded_card_ids and not has_draft_pass:
                     cards_discarded_list = []
                     for cid in discarded_card_ids:
@@ -4364,6 +4373,30 @@ class Parser:
                 if hand_result is not None:
                     hand_pid, hand_cards = hand_result
                     current_player_hands[hand_pid] = hand_cards
+
+            # Supplement hand tracking with move-level card data (fills gaps
+            # between gameStateChange events, e.g. cards kept during draft
+            # before the player's next action triggers a state update).
+            if move.cards_kept:
+                for pid, kept_cards in move.cards_kept.items():
+                    if pid not in current_player_hands:
+                        current_player_hands[pid] = []
+                    for card in kept_cards:
+                        if card not in current_player_hands[pid]:
+                            current_player_hands[pid].append(card)
+
+            if move.card_played and move.player_id in current_player_hands:
+                try:
+                    current_player_hands[move.player_id].remove(move.card_played)
+                except ValueError:
+                    pass
+
+            if move.cards_discarded and move.player_id in current_player_hands:
+                for card in move.cards_discarded:
+                    try:
+                        current_player_hands[move.player_id].remove(card)
+                    except ValueError:
+                        pass
 
             # Create game state (without resource/production tracking)
             game_state = GameState(
