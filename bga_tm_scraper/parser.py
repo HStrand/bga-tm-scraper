@@ -89,6 +89,7 @@ class Move:
     card_options: Optional[Dict[str, List[str]]] = None
     cards_kept: Optional[Dict[str, List[str]]] = None
     cards_discarded: Optional[List[str]] = None
+    draft_passed_to: Optional[Dict[str, str]] = None  # internal; promoted to GameData.draft_directions
     reason: Optional[str] = None
 
     # Game state after this move
@@ -135,7 +136,8 @@ class GameData:
     draft_on: Optional[bool] = None
     beginners_corporations_on: Optional[bool] = None
     game_speed: Optional[str] = None
-    
+    draft_directions: Optional[Dict[int, Dict[str, str]]] = None  # generation -> {player_id -> player_id they pass to}
+
     # Players
     players: Dict[str, Player] = None  # player_id -> Player
     
@@ -756,6 +758,15 @@ class Parser:
         # Calculate max generation from vp_progression or moves
         max_generation = self._calculate_max_generation(vp_progression, moves_with_states)            
 
+        # Collect draft directions per generation and strip from individual moves
+        draft_directions: Dict[int, Dict[str, str]] = {}
+        for m in moves_with_states:
+            if m.draft_passed_to and m.game_state:
+                gen = m.game_state.generation
+                if gen not in draft_directions:
+                    draft_directions[gen] = dict(m.draft_passed_to)
+                m.draft_passed_to = None
+
         # Create game data with game metadata fields
         game_data = GameData(
             replay_id=table_id,
@@ -772,6 +783,7 @@ class Parser:
             draft_on=game_metadata.draft_on,
             beginners_corporations_on=game_metadata.beginners_corporations_on,
             game_speed=game_metadata.game_speed,
+            draft_directions=draft_directions or None,
             players=players_info,
             moves=moves_with_states,
             metadata=metadata
@@ -1039,6 +1051,7 @@ class Parser:
                 per_player_setup_ids: Dict[str, List[str]] = {}
                 per_player_kept_ids: Dict[str, List[str]] = {}
                 per_player_names: Dict[str, str] = {}
+                color_to_pid: Dict[str, str] = {}  # hex color -> player_id (from draft_ place_ids)
                 if gamelogs:
                     data_entries = gamelogs.get('data', {}).get('data', [])
                     for entry in data_entries:
@@ -1063,6 +1076,10 @@ class Parser:
                                                 per_player_draft_ids.setdefault(pid, []).extend(ids)
                                             if isinstance(args.get('player_name'), str) and pid != "unknown":
                                                 per_player_names[pid] = args.get('player_name')
+                                            # Map draft color to player_id (e.g. draft_008000 -> pid)
+                                            color = place_tag[6:]  # strip 'draft_'
+                                            if color and pid != "unknown":
+                                                color_to_pid[color.lower()] = pid
                                         elif isinstance(place_tag, str) and str(place_tag).lower().startswith('hand_'):
                                             if ids:
                                                 per_player_kept_ids.setdefault(pid, []).extend(ids)
@@ -1084,6 +1101,8 @@ class Parser:
                                             if isinstance(args.get('player_name'), str) and pid != "unknown":
                                                 per_player_names[pid] = args.get('player_name')
                 # Merge newPrivateState draft targets into per_player_draft_ids for this move
+                # and extract draft pass direction from owner/next_color fields
+                draft_passed_to_map: Optional[Dict[str, str]] = None
                 try:
                     if gamelogs:
                         data_entries = gamelogs.get('data', {}).get('data', [])
@@ -1112,6 +1131,23 @@ class Parser:
                                                                     ids = [tid for tid in targ if isinstance(tid, str)]
                                                                     if ids:
                                                                         per_player_draft_ids.setdefault(str(pid_key), []).extend(ids)
+                                                                # Extract draft pass direction
+                                                                # next_color is nested at op.args.args.next_color
+                                                                op_outer_args = op.get('args', {})
+                                                                if not isinstance(op_outer_args, dict):
+                                                                    op_outer_args = {}
+                                                                op_inner_args = op_outer_args.get('args', {})
+                                                                if not isinstance(op_inner_args, dict):
+                                                                    op_inner_args = {}
+                                                                next_color = op_inner_args.get('next_color', '')
+                                                                owner_color = op.get('owner', '')
+                                                                if next_color and owner_color:
+                                                                    from_pid = color_to_pid.get(owner_color.lower())
+                                                                    to_pid = color_to_pid.get(next_color.lower())
+                                                                    if from_pid and to_pid:
+                                                                        if draft_passed_to_map is None:
+                                                                            draft_passed_to_map = {}
+                                                                        draft_passed_to_map[from_pid] = to_pid
                                                             elif otype == 'setuppick':
                                                                 # Starting hand options (corporation, preludes, projects). We only want project cards.
                                                                 targ = op.get('args', {}).get('target', [])
@@ -1409,6 +1445,7 @@ class Parser:
                 card_options=card_options_map,
                 cards_kept=cards_kept_map,
                 cards_discarded=cards_discarded_list,
+                draft_passed_to=draft_passed_to_map,
                 reason=reason
             )
 
@@ -3888,7 +3925,8 @@ class Parser:
                 per_player_setup_ids: Dict[str, List[str]] = {}
                 per_player_kept_ids: Dict[str, List[str]] = {}
                 per_player_names: Dict[str, str] = {}
-                
+                color_to_pid: Dict[str, str] = {}  # hex color -> player_id (from draft_ place_ids)
+
                 # Aggregate tokenMoved events for this move across all channels
                 for entry in data_entries:
                     if entry.get('move_id') != str(move_number):
@@ -3909,6 +3947,10 @@ class Parser:
                                 if isinstance(place_tag, str) and place_tag.lower().startswith('draft_'):
                                     if ids:
                                         per_player_draft_ids.setdefault(pid, []).extend(ids)
+                                    # Map draft color to player_id (e.g. draft_008000 -> pid)
+                                    color = place_tag[6:]
+                                    if color and pid != "unknown":
+                                        color_to_pid[color.lower()] = pid
                                 elif isinstance(place_tag, str) and place_tag.lower().startswith('hand_'):
                                     if ids:
                                         per_player_kept_ids.setdefault(pid, []).extend(ids)
@@ -3919,13 +3961,18 @@ class Parser:
                             tok_id = args.get('token_id')
                             if isinstance(place_tag, str) and place_tag.lower().startswith('draft_') and isinstance(tok_id, str):
                                 per_player_draft_ids.setdefault(pid, []).append(tok_id)
+                                color = place_tag[6:]
+                                if color and pid != "unknown":
+                                    color_to_pid[color.lower()] = pid
                             if isinstance(place_tag, str) and place_tag.lower().startswith('hand_') and isinstance(tok_id, str):
                                 per_player_kept_ids.setdefault(pid, []).append(tok_id)
                             # Track better player names
                             if isinstance(args.get('player_name'), str) and pid != "unknown":
                                 per_player_names[pid] = args.get('player_name')
                         # Detect a concrete drafted selection (token_id present)
-                        if isinstance(data_item, dict) and data_item.get('type') == 'tokenMoved':
+                        # Only capture the first selection — subsequent ones in the
+                        # same move are auto-picks (e.g. last card on the wheel).
+                        if card_drafted_name is None and isinstance(data_item, dict) and data_item.get('type') == 'tokenMoved':
                             args = data_item.get('args', {}) or {}
                             token_id = args.get('token_id')
                             if token_id:
@@ -3957,6 +4004,8 @@ class Parser:
                                         reason = 'draft'
                 
                 # Merge newPrivateState draft targets into per_player_draft_ids for this move
+                # and extract draft pass direction from owner/next_color fields
+                draft_passed_to_map: Optional[Dict[str, str]] = None
                 try:
                     if gamelogs:
                         for entry in data_entries:
@@ -3986,6 +4035,22 @@ class Parser:
                                                             ids = [tid for tid in targ if isinstance(tid, str)]
                                                             if ids:
                                                                 per_player_draft_ids.setdefault(str(pid_key), []).extend(ids)
+                                                        # Extract draft pass direction
+                                                        op_outer_args = op.get('args', {})
+                                                        if not isinstance(op_outer_args, dict):
+                                                            op_outer_args = {}
+                                                        op_inner_args = op_outer_args.get('args', {})
+                                                        if not isinstance(op_inner_args, dict):
+                                                            op_inner_args = {}
+                                                        next_color = op_inner_args.get('next_color', '')
+                                                        owner_color = op.get('owner', '')
+                                                        if next_color and owner_color:
+                                                            from_pid = color_to_pid.get(owner_color.lower())
+                                                            to_pid = color_to_pid.get(next_color.lower())
+                                                            if from_pid and to_pid:
+                                                                if draft_passed_to_map is None:
+                                                                    draft_passed_to_map = {}
+                                                                draft_passed_to_map[from_pid] = to_pid
                                                     elif otype == 'setuppick':
                                                         # Starting hand options (only project cards)
                                                         targ = op.get('args', {}).get('target', [])
@@ -4191,6 +4256,7 @@ class Parser:
                 card_options=card_options_map,
                 cards_kept=cards_kept_map,
                 cards_discarded=cards_discarded_list,
+                draft_passed_to=draft_passed_to_map,
                 reason=reason
             )
         except Exception as e:
