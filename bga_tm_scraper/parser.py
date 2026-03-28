@@ -4055,9 +4055,9 @@ class Parser:
                 except Exception:
                     pass
 
-                # When a card play triggers draws as an effect, don't let draw processing
-                # override the action_type or description — keep play_card as primary action
-                is_card_play_with_draw = action_type == 'play_card' and (per_player_draw_ids or per_player_kept_ids)
+                # When a card play/activation triggers draws as an effect, don't let draw
+                # processing override the action_type or description
+                is_card_play_with_draw = action_type in ('play_card', 'activate_card') and (per_player_draw_ids or per_player_kept_ids)
 
                 # Build unified card_options from both sources
                 if card_names_map and (per_player_draft_ids or per_player_draw_ids or per_player_setup_ids):
