@@ -213,6 +213,11 @@ def main():
         if not args.no_upload and api:
             print(f"\nUploading game log to API...")
             payload = tm_parser._convert_game_data_to_api_format(game_data, args.table_id, args.player_perspective)
+            # Add scraper version to metadata
+            from gui.version import BUILD_VERSION
+            if payload.get("metadata") is None:
+                payload["metadata"] = {}
+            payload["metadata"]["scraper_version"] = BUILD_VERSION
             if api.store_game_log(payload, scraped_by_email=config.BGA_EMAIL):
                 print(f"Uploaded game {args.table_id}")
             else:
