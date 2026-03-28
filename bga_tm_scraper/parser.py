@@ -3239,6 +3239,11 @@ class Parser:
                     # Check tracker_dict for any known ID (cards, tiles, hexes, etc.)
                     if val in tracker_dict:
                         return tracker_dict[val]
+                    # Resolve comma-separated token IDs (e.g. "card_main_3,card_main_43")
+                    if ',' in val and key_name in ('token_names', 'token_name'):
+                        parts = [v.strip() for v in val.split(',')]
+                        resolved = [tracker_dict.get(p, p) for p in parts]
+                        return ', '.join(resolved)
                     # Also check based on key name for safety
                     if key_name in ('token_name', 'counter_name'):
                         return self._infer_from_tracker_id(val, tracker_dict)
