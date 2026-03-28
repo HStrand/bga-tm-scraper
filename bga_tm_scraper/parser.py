@@ -693,15 +693,8 @@ class Parser:
 
         # Extract tracker dictionary dynamically from HTML
         tracker_dict = self._extract_tracker_dictionary_from_html(replay_html)
-        
-        # Extract all moves with detailed parsing (using simple name mapping and tracker dict)
-        moves = self._extract_all_moves_simple(soup, name_to_id, gamelogs, card_names_map, tracker_dict)
-        
-        # Build game states for each move
-        moves_with_states = self._build_game_states_simple(moves, vp_progression, list(player_id_map.keys()), gamelogs, player_perspective, card_names_map)
-        
+
         # Build color -> player_id mapping from HTML
-        # The HTML has elements like <div id="player_area_name_ff0000">PlayerName</div>
         color_to_player_id = {}
         player_id_to_color = {}
         for color_match in re.finditer(r'id="player_area_name_([0-9a-fA-F]{6})"[^>]*>([^<]+)<', replay_html):
@@ -713,6 +706,21 @@ class Parser:
                 player_id_to_color[pid] = f"#{color}"
         logger.info(f"Color to player mapping: {color_to_player_id}")
 
+        # Enrich tracker_dict with token_types × player colors so descriptions
+        # render correctly (e.g. tracker_m_ff0000 → "M€" instead of "Unknown")
+        for tt_key, tt_val in token_types.items():
+            if isinstance(tt_val, dict) and tt_key.startswith('tracker_') and 'name' in tt_val:
+                if not re.search(r'_[0-9a-fA-F]{6}$', tt_key):
+                    tracker_dict[tt_key] = tt_val['name']
+                    for color in color_to_player_id:
+                        tracker_dict[f"{tt_key}_{color}"] = tt_val['name']
+
+        # Extract all moves with detailed parsing (using simple name mapping and tracker dict)
+        moves = self._extract_all_moves_simple(soup, name_to_id, gamelogs, card_names_map, tracker_dict)
+        
+        # Build game states for each move
+        moves_with_states = self._build_game_states_simple(moves, vp_progression, list(player_id_map.keys()), gamelogs, player_perspective, card_names_map)
+        
         # Add comprehensive resource/production/tag tracking if gamelogs available
         tracking_progression = []
         if gamelogs and player_id_map:
@@ -720,20 +728,6 @@ class Parser:
 
             # Get player IDs for tracking
             player_ids = list(player_id_map.keys())
-
-            # Build tracker prefix -> name map from token_types (BGA's canonical names)
-            tracker_prefix_names = {}
-            for tt_key, tt_val in token_types.items():
-                if isinstance(tt_val, dict) and tt_key.startswith('tracker_') and 'name' in tt_val:
-                    if not re.search(r'_[0-9a-fA-F]{6}$', tt_key):
-                        tracker_prefix_names[tt_key] = tt_val['name']
-
-            # Ensure tracker_dict has entries for all known prefixes and prefix × player colors
-            for prefix, display in tracker_prefix_names.items():
-                tracker_dict[prefix] = display  # base prefix for description rendering
-                for color in color_to_player_id:
-                    key = f"{prefix}_{color}"
-                    tracker_dict[key] = display
 
             # Track resources and production through all moves
             tracking_progression = self._track_resources_and_production(gamelogs, player_ids, tracker_dict, card_names_map, color_to_player_id, token_types)
