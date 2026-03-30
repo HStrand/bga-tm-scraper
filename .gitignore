@@ -7,6 +7,7 @@ __pycache__/
 build/
 develop-eggs/
 dist/
+red_thumbs_dist/
 downloads/
 eggs/
 .eggs/
