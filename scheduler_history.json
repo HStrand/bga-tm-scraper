@@ -1,0 +1,20 @@
+[
+  {
+    "date": "2026-03-30T11:13:52.025817+00:00",
+    "processed": 10,
+    "successes": 10,
+    "failures": 0,
+    "limit_reached": false,
+    "duration_seconds": 155,
+    "status": "success"
+  },
+  {
+    "date": "2026-03-30T11:17:01.576607+00:00",
+    "processed": 3,
+    "successes": 3,
+    "failures": 0,
+    "limit_reached": false,
+    "duration_seconds": 60,
+    "status": "success"
+  }
+]

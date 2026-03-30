@@ -60,6 +60,11 @@ class ConfigManager:
                 "raw_data_dir": "data/raw",
                 "parsed_data_dir": "data/parsed",
                 "registry_data_dir": "data/registry"
+            },
+            "scheduler_settings": {
+                "enabled": False,
+                "time": "03:00",
+                "game_count": 200
             }
         }
     

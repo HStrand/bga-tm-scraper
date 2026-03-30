@@ -14,6 +14,7 @@ from gui.tabs.settings_tab import SettingsTab
 from gui.tabs.scraping_tab import ScrapingTab
 from gui.tabs.statistics_tab import StatisticsTab
 from gui.tabs.download_tab import DownloadTab
+from gui.tabs.scheduler_tab import SchedulerTab
 
 
 class MainWindow:
@@ -161,11 +162,12 @@ class MainWindow:
         self.statistics_tab = StatisticsTab(self.notebook, self.config_manager)
         self.download_tab = DownloadTab(self.notebook, self.config_manager)
         self.analysis_tab = AnalysisTab(self.notebook, self.config_manager)
-
+        self.scheduler_tab = SchedulerTab(self.notebook, self.config_manager)
 
         # Add tabs to notebook
         self.notebook.add(self.settings_tab.frame, text="⚙️ Settings")
         self.notebook.add(self.scraping_tab.frame, text="🚀 Scraping")
+        self.notebook.add(self.scheduler_tab.frame, text="📅 Scheduler")
         self.notebook.add(self.download_tab.frame, text="💾 Download Data")
         self.notebook.add(self.statistics_tab.frame, text="📊 Statistics")
         self.notebook.add(self.analysis_tab.frame, text="📈 Analysis")

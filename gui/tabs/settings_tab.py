@@ -72,6 +72,7 @@ class SettingsTab:
         self.notify_completion_var = tk.BooleanVar()
         self.notify_error_var = tk.BooleanVar()
         self.notify_limit_var = tk.BooleanVar()
+
         
         # Validation indicators
         self.email_valid = tk.BooleanVar()
@@ -111,7 +112,7 @@ class SettingsTab:
         self.create_browser_section(scrollable_frame)
         self.create_api_section(scrollable_frame)
         self.create_scraping_section(scrollable_frame)
-        
+
         # Add a visual separator
         separator = ttk.Separator(main_container, orient="horizontal")
         separator.pack(fill="x", padx=10, pady=5)
@@ -441,7 +442,7 @@ class SettingsTab:
         self.request_delay_var.set(scraping_settings.get("request_delay", 1.0))
         self.max_retries_var.set(scraping_settings.get("max_retries", 3))
         self.speed_profile_var.set(scraping_settings.get("speed_profile", "FAST"))
-    
+
     def save_settings(self):
         """Save current settings to config manager"""
         try:
@@ -486,10 +487,10 @@ class SettingsTab:
             
             # Save to file
             self.config_manager.save_config()
-            
+
             self.status_label.config(text="Settings saved successfully!", foreground="green")
             self.frame.after(3000, lambda: self.status_label.config(text=""))
-            
+
         except Exception as e:
             messagebox.showerror("Save Error", f"Failed to save settings:\n{str(e)}")
     

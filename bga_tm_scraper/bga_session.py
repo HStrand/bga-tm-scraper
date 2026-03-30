@@ -525,7 +525,7 @@ class BGASession:
             os.path.exists(self.chromedriver_path)):
             
             logger.info(f"Using manual ChromeDriver path: {self.chromedriver_path}")
-            return Service(self.chromedriver_path)
+            return Service(self.chromedriver_path, log_output=os.devnull)
         
         else:
             logger.info("Using webdriver-manager for ChromeDriver")
@@ -535,7 +535,7 @@ class BGASession:
                 # This call is fast if driver is cached, only downloads if needed
                 driver_path = ChromeDriverManager().install()
                 logger.info(f"ChromeDriver ready at: {driver_path}")
-                return Service(driver_path)
+                return Service(driver_path, log_output=os.devnull)
                 
             except ImportError:
                 logger.error("webdriver-manager not installed. Please install it with: pip install webdriver-manager")
@@ -560,8 +560,9 @@ class BGASession:
             chrome_options.add_argument('--disable-gpu')
             chrome_options.add_argument('--window-size=1920,1080')
             chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-            chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            chrome_options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
             chrome_options.add_experimental_option('useAutomationExtension', False)
+            chrome_options.add_argument('--log-level=3')
             
             # Set user agent to match session requests
             chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
