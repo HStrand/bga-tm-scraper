@@ -65,6 +65,9 @@ config.json
 config_local.py
 config_production.py
 
+# VM credentials
+vm credentials/
+
 # OS
 .DS_Store
 Thumbs.db

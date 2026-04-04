@@ -95,6 +95,35 @@ GAMES = [
             "game_mode": "Arena mode",
         },
     },
+    {
+        "replay": "data/sample files/replay_829956648_86296239.html",
+        "output": "data/sample files/game_829956648_86296239_test.json",
+        "table_id": "829956648",
+        "perspective": "86296239",
+        "players": {
+            "86296239": EloData(
+                player_name="StrandedKnight", player_id="86296239",
+                arena_points=0, game_rank=0,
+                position=1,
+            ),
+            "96958875": EloData(
+                player_name="Kirbypolo", player_id="96958875",
+                arena_points=0, game_rank=0,
+                position=2,
+            ),
+        },
+        "metadata": {
+            "played_at": "2026-03-28T00:00:00",
+            "map": "Tharsis",
+            "prelude_on": True,
+            "colonies_on": False,
+            "corporate_era_on": True,
+            "draft_on": True,
+            "beginners_corporations_on": False,
+            "game_speed": "Real-time · Normal speed",
+            "game_mode": "Arena mode",
+        },
+    },
 ]
 
 parser = Parser()

@@ -1558,7 +1558,7 @@ class Parser:
             # If we got meaningful data from gamelogs, return it
             # Only short-circuit when we truly identified a specific action or the played card.
             # Do NOT short-circuit on plain 'draw' with a reason, since HTML may contain "plays card ..."
-            if (card_played is not None) or (action_type not in ('other', 'draw')):
+            if (card_played is not None) or (action_type not in ('other', 'draw')) or (tile_location is not None):
                 return action_type, card_played, tile_placed, tile_location, reason
         
         # Fallback to HTML-based extraction
@@ -1625,6 +1625,12 @@ class Parser:
                                 tile_placed = tile_base
                                 tile_location = args.get('place_id') or args.get('place_name') or ''
                                 logger.debug(f"Move {move_number}: Detected tile placement {tile_base} on {tile_location}")
+                            # Marker placement on hex (e.g. Land Claim player cube)
+                            elif isinstance(token_id_val, str) and token_id_val.startswith('marker_'):
+                                marker_place = args.get('place_id') or args.get('place_name') or ''
+                                if isinstance(marker_place, str) and marker_place.startswith('hex_'):
+                                    tile_location = marker_place
+                                    logger.debug(f"Move {move_number}: Detected marker placement on {tile_location}")
                             # Card play: "plays card" in log (not activations)
                             elif 'plays card' in log_txt:
                                 action_type = 'play_card'
@@ -4385,6 +4391,19 @@ class Parser:
                         'move_number': move.move_number,
                         'timestamp': move.timestamp
                     }
+
+            # Back-link marker placements (e.g. Land Claim) to the preceding card play
+            if move.tile_location and not move.card_played and not move.tile_placed:
+                # This move only has a tile_location from a marker placement.
+                # Find the most recent card play by the same player and attach the location.
+                for prev_move in reversed(moves[max(0, i-3):i]):
+                    if prev_move.card_played and prev_move.player_id == move.player_id:
+                        prev_move.tile_location = move.tile_location
+                        # Also record in special_tiles
+                        if prev_move.player_id in current_special_tiles:
+                            current_special_tiles[prev_move.player_id][prev_move.card_played] = move.tile_location
+                        logger.debug(f"Move {move.move_number}: Linked marker placement {move.tile_location} back to {prev_move.card_played} (move {prev_move.move_number})")
+                        break
 
             # Track special tile placements (tiles that are not City, Forest, or Ocean)
             if move.action_type == 'place_tile' and move.tile_placed == 'tile':
