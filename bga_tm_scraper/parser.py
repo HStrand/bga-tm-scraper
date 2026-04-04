@@ -1626,11 +1626,9 @@ class Parser:
                                 tile_location = args.get('place_id') or args.get('place_name') or ''
                                 logger.debug(f"Move {move_number}: Detected tile placement {tile_base} on {tile_location}")
                             # Marker placement on hex (e.g. Land Claim player cube)
-                            elif isinstance(token_id_val, str) and token_id_val.startswith('marker_'):
-                                marker_place = args.get('place_id') or args.get('place_name') or ''
-                                if isinstance(marker_place, str) and marker_place.startswith('hex_'):
-                                    tile_location = marker_place
-                                    logger.debug(f"Move {move_number}: Detected marker placement on {tile_location}")
+                            elif isinstance(token_id_val, str) and token_id_val.startswith('marker_') and isinstance(args.get('place_id', ''), str) and args.get('place_id', '').startswith('hex_'):
+                                tile_location = args['place_id']
+                                logger.debug(f"Move {move_number}: Detected marker placement on {tile_location}")
                             # Card play: "plays card" in log (not activations)
                             elif 'plays card' in log_txt:
                                 action_type = 'play_card'
