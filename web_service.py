@@ -25,6 +25,7 @@ import config
 from bga_tm_scraper.scraper import TMScraper
 from bga_tm_scraper.parser import Parser
 from gui.api_client import APIClient
+from gui.version import BUILD_VERSION
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -309,6 +310,9 @@ class ScrapeOrchestrator:
             # Upload game log to API
             game_log_uploaded = False
             payload = self.parser._convert_game_data_to_api_format(game_data, table_id, player_perspective)
+            if payload.get("metadata") is None:
+                payload["metadata"] = {}
+            payload["metadata"]["scraper_version"] = BUILD_VERSION
             if self.api.store_game_log(payload, scraped_by_email=config.BGA_EMAIL):
                 game_log_uploaded = True
                 logger.info(f"[{table_id}] Game log uploaded to API")
