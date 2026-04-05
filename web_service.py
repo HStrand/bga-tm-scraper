@@ -93,6 +93,7 @@ class ScrapeOrchestrator:
         self.api = APIClient(
             api_key=config.API_KEY,
             base_url=getattr(config, "API_BASE_URL", "https://bga-tm-scraper-functions.azurewebsites.net/api"),
+            version=BUILD_VERSION,
         )
         self.api.timeout = getattr(config, "TIMEOUT", 60)
 
