@@ -19,6 +19,7 @@ from typing import Optional
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 import config
@@ -370,6 +371,13 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="BGA TM Scraper", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 async def _scrape_with_lock(table_id: str, player_perspective: str) -> ScrapeResponse:
