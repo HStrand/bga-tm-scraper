@@ -6,7 +6,7 @@ import re
 import json
 import os
 from typing import List, Dict, Optional, Any, Tuple
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, replace
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup, Tag
 import logging
@@ -1013,6 +1013,18 @@ class Parser:
                 # Fallback to HTML-based player determination
                 player_name, player_id = self._determine_move_player(log_entries, full_description, name_to_id)
             
+            # Detect takebacks before doing any draft/play processing
+            if gamelogs and self._is_takeback_move(move_number, gamelogs):
+                return Move(
+                    move_number=move_number,
+                    timestamp=timestamp,
+                    player_id=player_id,
+                    player_name=player_name,
+                    action_type='takeback',
+                    description=f"{player_name} takes back their move",
+                    reason='takeback',
+                )
+
             # Extract enhanced action details from gamelogs if available
             action_type, card_played, tile_placed, tile_location, reason = self._extract_enhanced_action_details(
                 move_number, gamelogs, log_entries, full_description
@@ -3852,7 +3864,7 @@ class Parser:
             except Exception as e:
                 logger.debug(f"Failed extracting moves from gamelogs: {e}")
             if moves:
-                return moves
+                return self._apply_takeback_cancellations(moves)
             logger.warning("Gamelogs produced no moves, falling back to HTML parsing")
 
         # Fallback: parse from HTML move divs
@@ -3863,7 +3875,77 @@ class Parser:
             if move:
                 moves.append(move)
 
-        return moves
+        return self._apply_takeback_cancellations(moves)
+
+    def _is_takeback_move(self, move_number: int, gamelogs: Dict[str, Any]) -> bool:
+        """
+        Return True if the gamelogs entries for this move_number contain a
+        takeback marker (a 'message' or 'undoRestore' entry whose log text
+        includes "takes back"). Such moves restore previous state and must
+        not be processed as drafts, plays, or other actions.
+        """
+        try:
+            data_entries = gamelogs.get('data', {}).get('data', []) if gamelogs else []
+            for entry in data_entries:
+                if entry.get('move_id') != str(move_number):
+                    continue
+                for data_item in entry.get('data', []) or []:
+                    if not isinstance(data_item, dict):
+                        continue
+                    log_txt = data_item.get('log') or ''
+                    if isinstance(log_txt, str) and 'takes back' in log_txt.lower():
+                        return True
+                    if data_item.get('type') == 'undoRestore':
+                        return True
+        except Exception:
+            pass
+        return False
+
+    def _apply_takeback_cancellations(self, moves: List[Move]) -> List[Move]:
+        """
+        Return a new list of moves where, for each takeback move, the
+        immediately preceding move by the same player is replaced with a new
+        Move marked as cancelled (action data cleared). A BGA "takes back"
+        undoes only the player's most recent action, so we only cancel that
+        single move. The original Move objects are not mutated — cancelled
+        moves are produced via dataclasses.replace.
+        """
+        cancelled_indices: set = set()
+        for i, m in enumerate(moves):
+            if getattr(m, 'action_type', None) != 'takeback':
+                continue
+            for j in range(i - 1, -1, -1):
+                prev = moves[j]
+                if prev.player_id != m.player_id:
+                    break
+                if prev.action_type in ('takeback', 'cancelled') or j in cancelled_indices:
+                    continue
+                cancelled_indices.add(j)
+                break
+
+        if not cancelled_indices:
+            return moves
+
+        result: List[Move] = []
+        for idx, m in enumerate(moves):
+            if idx in cancelled_indices:
+                result.append(replace(
+                    m,
+                    action_type='cancelled',
+                    description=f"{m.player_name}'s move was cancelled (takeback)",
+                    card_played=None,
+                    card_drafted=None,
+                    tile_placed=None,
+                    tile_location=None,
+                    card_options=None,
+                    cards_kept=None,
+                    cards_discarded=None,
+                    draft_passed_to=None,
+                    reason='cancelled',
+                ))
+            else:
+                result.append(m)
+        return result
 
     def _build_move_from_gamelogs(self, move_number: int, name_to_id: Dict[str, str], gamelogs: Dict[str, Any], card_names_map: Dict[str, str] = None, tracker_dict: Dict[str, str] = None) -> Optional[Move]:
         """
@@ -3892,7 +3974,22 @@ class Parser:
                 player_name = "Unknown"
             if not player_id:
                 player_id = "unknown"
-            
+
+            # Detect takebacks: a 'message' or 'undoRestore' entry whose log says
+            # "${player_name} takes back ..." indicates the player undid their previous action.
+            # These moves must not be processed as drafts/plays — the tokenMoved/newPrivateState
+            # entries that accompany them merely restore prior state.
+            if self._is_takeback_move(move_number, gamelogs):
+                return Move(
+                    move_number=move_number,
+                    timestamp=timestamp,
+                    player_id=player_id,
+                    player_name=player_name,
+                    action_type='takeback',
+                    description=f"{player_name} takes back their move",
+                    reason='takeback',
+                )
+
             # Extract action details using existing helper
             action_type, card_played, tile_placed, tile_location, reason = self._extract_enhanced_action_details(
                 move_number, gamelogs, [], ""
