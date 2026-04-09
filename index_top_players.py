@@ -193,7 +193,7 @@ def index_games_for_player(
     api_client: APIClient,
     player_id: str,
     player_name: str,
-    early_stop: bool = True
+    early_stop: bool = False
 ) -> Tuple[int, int]:
     """
     Index games for a single player
