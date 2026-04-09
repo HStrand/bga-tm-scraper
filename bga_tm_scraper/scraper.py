@@ -2316,15 +2316,27 @@ class TMScraper:
             
             logger.info(f"Found {len(game_rows)} potential game rows")
             
+            solo_skipped = 0
             for row in game_rows:
                 try:
                     # Extract table ID from this row
                     table_id_match = re.search(r'#(\d{8,})', str(row))
                     if not table_id_match:
                         continue
-                    
+
                     table_id = table_id_match.group(1)
-                    
+
+                    # Skip solo games: BGA's gamestats history lists solo runs
+                    # alongside multiplayer games, but they are not tracked in the
+                    # player's profile total and have no opponents to score against.
+                    # Multiplayer rows contain one <div class="simple-score-entry">
+                    # per player, so a row with fewer than 2 of them is a solo game.
+                    score_entries = row.find_all('div', class_='simple-score-entry') if hasattr(row, 'find_all') else []
+                    if len(score_entries) < 2:
+                        solo_skipped += 1
+                        logger.debug(f"Skipping solo game row table_id={table_id}")
+                        continue
+
                     # Extract datetime from this row
                     datetime_info = self._extract_datetime_from_row(row)
                     if not datetime_info:
@@ -2358,7 +2370,7 @@ class TMScraper:
                     unique_games.append(game)
                     seen_table_ids.add(table_id)
             
-            logger.info(f"Extracted {len(unique_games)} unique games with datetimes")
+            logger.info(f"Extracted {len(unique_games)} unique games with datetimes (skipped {solo_skipped} solo games)")
             return unique_games
             
         except Exception as e:
