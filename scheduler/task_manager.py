@@ -28,6 +28,11 @@ def _build_task_xml(exe_path: str, working_dir: str, time_str: str) -> str:
     <CalendarTrigger>
       <StartBoundary>2024-01-01T{start_time}</StartBoundary>
       <Enabled>true</Enabled>
+      <Repetition>
+        <Interval>PT1H</Interval>
+        <Duration>PT23H</Duration>
+        <StopAtDurationEnd>false</StopAtDurationEnd>
+      </Repetition>
       <ScheduleByDay>
         <DaysInterval>1</DaysInterval>
       </ScheduleByDay>

@@ -12,7 +12,7 @@ from gui.api_client import APIClient
 from bga_tm_scraper.scraper import TMScraper
 from bga_tm_scraper.parser import Parser
 from scrape_replays import scraping_loop, build_assignment_metadata, request_assignment
-from scheduler.history import append_run
+from scheduler.history import append_run, load_history
 
 try:
     from gui.version import BUILD_VERSION
@@ -59,7 +59,9 @@ def run_scheduled_scraping() -> int:
     base_dir = _get_base_dir()
     logger = _setup_logging(base_dir)
     logger.info("=" * 60)
-    logger.info("Scheduled scraping run starting")
+    logger.info(f"Scheduled scraping run starting (build={BUILD_VERSION}, pid={os.getpid()})")
+    logger.info(f"Base dir: {base_dir}")
+    logger.info(f"Current time (UTC): {datetime.now(timezone.utc).isoformat()}")
 
     start_time = time.time()
 
@@ -79,11 +81,51 @@ def run_scheduled_scraping() -> int:
         return 1
 
     scheduler_settings = config_manager.get_section("scheduler_settings")
-    game_count = min(max(int(scheduler_settings.get("game_count", 200)), 1), 200)
+    configured_count = int(scheduler_settings.get("game_count", 200))
+    game_count = min(max(configured_count, 1), 200)
+    scheduled_time = scheduler_settings.get("time", "?")
+    logger.info(
+        f"Scheduler settings: time={scheduled_time}, "
+        f"game_count={configured_count} (clamped to {game_count})"
+    )
 
     browser_settings = config_manager.get_section("browser_settings")
     scraping_settings = config_manager.get_section("scraping_settings")
     per_game_delay = scraping_settings.get("request_delay", 1.0)
+
+    # Skip if a successful run already occurred in the last 24 hours
+    # (hourly task repetition means we retry until one run lands).
+    history = load_history()
+    logger.info(f"Loaded {len(history)} run(s) from history")
+    last_good = None
+    for entry in reversed(history):
+        status = entry.get("status")
+        if status not in ("success", "partial", "limit_reached"):
+            continue
+        try:
+            entry_time = datetime.fromisoformat(entry["date"])
+            if entry_time.tzinfo is None:
+                entry_time = entry_time.replace(tzinfo=timezone.utc)
+            hours_ago = (datetime.now(timezone.utc) - entry_time).total_seconds() / 3600
+        except (ValueError, TypeError, KeyError):
+            continue
+        last_good = (entry, hours_ago)
+        break
+
+    if last_good:
+        entry, hours_ago = last_good
+        logger.info(
+            f"Last completed run: status={entry.get('status')}, "
+            f"at={entry.get('date')} ({hours_ago:.1f}h ago), "
+            f"processed={entry.get('processed')}, successes={entry.get('successes')}, "
+            f"failures={entry.get('failures')}"
+        )
+        if hours_ago < 24:
+            logger.info(f"Within 24h window, skipping this run.")
+            return 0
+        logger.info("Over 24h since last run, proceeding.")
+    else:
+        logger.info("No prior completed run in history, proceeding.")
 
     # Check daily limit
     limit_hit_at = config_manager.get_replay_limit_hit_at()
@@ -91,11 +133,14 @@ def run_scheduled_scraping() -> int:
         try:
             hit_time = datetime.fromisoformat(limit_hit_at)
             hours_ago = (datetime.now(timezone.utc) - hit_time.replace(tzinfo=timezone.utc)).total_seconds() / 3600
-            if hours_ago < 20:
+            logger.info(f"replay_limit_hit_at={limit_hit_at} ({hours_ago:.1f}h ago)")
+            if hours_ago < 24:
                 logger.info(f"Daily limit was hit {hours_ago:.1f} hours ago, skipping run.")
                 return 0
         except (ValueError, TypeError):
-            pass
+            logger.warning(f"Could not parse replay_limit_hit_at={limit_hit_at!r}")
+    else:
+        logger.info("No prior daily-limit marker set.")
 
     # Build API client
     api = APIClient(
