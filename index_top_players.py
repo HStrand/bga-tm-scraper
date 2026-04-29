@@ -324,7 +324,18 @@ def main():
                             help="Index a single player by ID (skips leaderboard fetch)")
     arg_parser.add_argument("-n", type=int, default=100,
                             help="Number of top players to index (default: 100)")
+    arg_parser.add_argument("--start-rank", type=int, default=None,
+                            help="Start rank (1-indexed, inclusive). Use with --end-rank to index a rank range.")
+    arg_parser.add_argument("--end-rank", type=int, default=None,
+                            help="End rank (1-indexed, inclusive). Use with --start-rank to index a rank range.")
     args = arg_parser.parse_args()
+
+    if (args.start_rank is None) != (args.end_rank is None):
+        arg_parser.error("--start-rank and --end-rank must be used together")
+    if args.start_rank is not None and args.start_rank > args.end_rank:
+        arg_parser.error("--start-rank must be <= --end-rank")
+    if args.start_rank is not None and args.start_rank < 1:
+        arg_parser.error("--start-rank must be >= 1")
 
     print("\n" + "="*80)
     print(f"BGA TM Scraper - Index Top {args.n} Players")
@@ -366,25 +377,34 @@ def main():
             print("="*80)
             return
 
-        # Full mode: fetch leaderboard and index top 100
+        # Full mode: fetch leaderboard and index selected rank range
         # Step 1: Fetch players
-        players = fetch_players(num_players=args.n)
+        if args.start_rank is not None:
+            fetch_count = args.end_rank
+            slice_start = args.start_rank - 1
+            slice_end = args.end_rank
+            range_label = f"ranks {args.start_rank}-{args.end_rank}"
+        else:
+            fetch_count = args.n
+            slice_start = 0
+            slice_end = args.n
+            range_label = f"top {args.n}"
+
+        players = fetch_players(num_players=fetch_count)
 
         # Step 2: Update players via API
         update_players_via_api(api_client, players)
 
-        # Step 3: Sort by Elo and get top 100
+        # Step 3: Sort by Elo and select rank range
         print("\n" + "="*80)
-        print(f"STEP 3: Indexing games for top {args.n} players by Elo")
+        print(f"STEP 3: Indexing games for {range_label} players by Elo")
         print("="*80)
 
         players_by_elo = sorted(players, key=lambda x: x['elo'], reverse=True)
-        top_100 = players_by_elo[:args.n]
-        # target_name = "StrandedKnight"
-        # top_100 = [p for p in players_by_elo if p.get("name") == target_name]
+        top_100 = players_by_elo[slice_start:slice_end]
 
-        print(f"\nTop {args.n} players by Elo:")
-        for i, player in enumerate(top_100, 1):
+        print(f"\n{range_label.capitalize()} players by Elo:")
+        for i, player in enumerate(top_100, slice_start + 1):
             print(f"  {i}. {player['name']} (Elo: {player['elo']}, ID: {player['playerId']})")
 
         # Initialize scraper
@@ -401,11 +421,11 @@ def main():
         print("Processing players...")
         print("="*80)
 
-        for i, player in enumerate(top_100, 1):
+        for i, player in enumerate(top_100, slice_start + 1):
             player_id = str(player['playerId'])
             player_name = player['name']
 
-            print(f"\n[{i}/{len(top_100)}] Processing {player_name} (Elo: {player['elo']})")
+            print(f"\n[{i}/{slice_end}] Processing {player_name} (Elo: {player['elo']})")
 
             try:
                 successful, failed = index_games_for_player(

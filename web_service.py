@@ -11,15 +11,20 @@ Usage:
 """
 
 import asyncio
+import json
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
+from html import escape
+from pathlib import Path
 from typing import Optional
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from pydantic import BaseModel
 
 import config
@@ -424,6 +429,146 @@ async def scrape(req: ScrapeRequest):
         raise HTTPException(status_code=500, detail=result.message)
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Jobs dashboard — reads run records written by run_with_record.sh
+# ---------------------------------------------------------------------------
+
+LOGS_ROOT = Path(os.environ.get("LOGS_ROOT", str(Path.home() / "logs")))
+RUNS_DIR = LOGS_ROOT / "runs"
+
+
+def _proc_alive(pid: int, run_id: str) -> bool:
+    """True iff the wrapper process is still running. Cmdline check guards
+    against PID reuse — wrappers pass run_id as part of their command."""
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            cmdline = f.read().decode("utf-8", errors="replace")
+    except (FileNotFoundError, ProcessLookupError, PermissionError):
+        return False
+    return "run_with_record" in cmdline
+
+
+def _load_records() -> list[dict]:
+    if not RUNS_DIR.is_dir():
+        return []
+    records = []
+    for path in RUNS_DIR.glob("*.json"):
+        try:
+            rec = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        # Compute live status
+        if rec.get("ended_at") is None:
+            if _proc_alive(rec.get("pid", -1), rec.get("run_id", "")):
+                rec["status"] = "running"
+            else:
+                rec["status"] = "crashed"  # wrapper died without writing end
+        else:
+            rec["status"] = "ok" if rec.get("exit_code") == 0 else "failed"
+        # Duration
+        try:
+            start = datetime.fromisoformat(rec["started_at"].replace("Z", "+00:00"))
+            end_iso = rec.get("ended_at")
+            end = (datetime.fromisoformat(end_iso.replace("Z", "+00:00"))
+                   if end_iso else datetime.now(timezone.utc))
+            rec["duration_seconds"] = int((end - start).total_seconds())
+        except (KeyError, ValueError, AttributeError):
+            rec["duration_seconds"] = None
+        records.append(rec)
+    records.sort(key=lambda r: r.get("started_at", ""), reverse=True)
+    return records
+
+
+@app.get("/jobs.json")
+async def jobs_json():
+    return {"records": _load_records()}
+
+
+_STATUS_COLORS = {
+    "running": "#1e88e5",
+    "ok": "#2e7d32",
+    "failed": "#c62828",
+    "crashed": "#ef6c00",
+}
+
+
+def _fmt_duration(seconds: Optional[int]) -> str:
+    if seconds is None:
+        return "—"
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m {seconds % 60}s"
+    h, rem = divmod(seconds, 3600)
+    return f"{h}h {rem // 60}m"
+
+
+@app.get("/jobs", response_class=HTMLResponse)
+async def jobs_html():
+    records = _load_records()
+    rows = []
+    for r in records:
+        status = r["status"]
+        color = _STATUS_COLORS.get(status, "#666")
+        args = " ".join(r.get("args") or [])
+        log_link = f'<a href="/jobs/log/{escape(r["run_id"])}">log</a>'
+        rows.append(
+            f"<tr>"
+            f"<td>{escape(r.get('job', '?'))}</td>"
+            f"<td><span style='color:{color};font-weight:600'>{status}</span></td>"
+            f"<td>{escape(r.get('started_at', '—'))}</td>"
+            f"<td>{_fmt_duration(r.get('duration_seconds'))}</td>"
+            f"<td>{r.get('exit_code') if r.get('exit_code') is not None else '—'}</td>"
+            f"<td><code>{escape(args)}</code></td>"
+            f"<td>{log_link}</td>"
+            f"</tr>"
+        )
+    body = "\n".join(rows) or "<tr><td colspan='7'>No runs recorded yet.</td></tr>"
+    html = f"""<!doctype html>
+<html><head><title>Jobs</title>
+<style>
+body {{ font-family: -apple-system, system-ui, sans-serif; margin: 2em; color: #222; }}
+h1 {{ margin-bottom: 0.2em; }}
+.subtitle {{ color: #666; margin-top: 0; font-size: 0.9em; }}
+table {{ border-collapse: collapse; width: 100%; margin-top: 1em; font-size: 0.9em; }}
+th, td {{ text-align: left; padding: 6px 10px; border-bottom: 1px solid #eee; }}
+th {{ background: #fafafa; font-weight: 600; }}
+tr:hover {{ background: #f7faff; }}
+code {{ background: #f4f4f4; padding: 1px 4px; border-radius: 3px; font-size: 0.85em; }}
+</style></head>
+<body>
+<h1>Jobs</h1>
+<p class="subtitle">Run records from <code>{escape(str(RUNS_DIR))}</code> · refresh to update</p>
+<table>
+<thead><tr><th>Job</th><th>Status</th><th>Started (UTC)</th><th>Duration</th><th>Exit</th><th>Args</th><th>Log</th></tr></thead>
+<tbody>
+{body}
+</tbody>
+</table>
+</body></html>"""
+    return HTMLResponse(html)
+
+
+@app.get("/jobs/log/{run_id}", response_class=PlainTextResponse)
+async def jobs_log(run_id: str):
+    record_path = RUNS_DIR / f"{run_id}.json"
+    if not record_path.is_file():
+        raise HTTPException(status_code=404, detail="Unknown run_id")
+    try:
+        rec = json.loads(record_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        raise HTTPException(status_code=500, detail="Could not read record")
+    log_path = Path(rec.get("log_path", ""))
+    # Path safety: must be inside LOGS_ROOT
+    try:
+        log_path.resolve().relative_to(LOGS_ROOT.resolve())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Log path outside LOGS_ROOT")
+    if not log_path.is_file():
+        raise HTTPException(status_code=404, detail="Log file missing")
+    return log_path.read_text(errors="replace")
 
 
 @app.post("/restart-browser")
