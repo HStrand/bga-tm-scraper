@@ -2780,6 +2780,26 @@ class TMScraper:
             logger.error(f"Error checking direct fetch capability for {table_id}: {e}")
             return False, None, None
 
+    def is_driver_alive(self) -> bool:
+        """Cheap probe: returns False if the WebDriver session is dead (e.g. Chrome crashed)."""
+        if not self.driver:
+            return False
+        try:
+            _ = self.driver.current_url
+            return True
+        except Exception:
+            return False
+
+    def restart_browser(self) -> bool:
+        """Tear down the current browser/session and start a fresh authenticated one."""
+        logger.warning("Restarting browser session...")
+        print("🔄 Restarting browser session...")
+        try:
+            self.close_browser()
+        except Exception as e:
+            logger.warning(f"Error during close_browser on restart: {e}")
+        return self.start_browser_and_login()
+
     def close_browser(self):
         """Close the browser and cleanup session"""
         if self.session:

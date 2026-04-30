@@ -28,6 +28,10 @@ logger = logging.getLogger(__name__)
 BASE_URL = 'https://boardgamearena.com'
 RANKING_URL = '/gamepanel/gamepanel/getRanking.html'
 
+# Recycle the browser every N successfully-attempted games to dodge Chrome
+# memory leaks / session decay during long indexing runs.
+BROWSER_RECYCLE_EVERY = 200
+
 
 def fetch_players(num_players: int = 100) -> List[Dict]:
     """
@@ -236,7 +240,18 @@ def index_games_for_player(
         # Process each new game
         for i, game_info in enumerate(new_games, 1):
             table_id = game_info['table_id']
-            
+
+            # Proactive recycle to dodge Chrome memory leaks during long runs.
+            games_since_recycle = getattr(scraper, '_games_since_recycle', 0)
+            if games_since_recycle >= BROWSER_RECYCLE_EVERY:
+                print(f"  ♻️  Recycling browser after {games_since_recycle} games...")
+                if scraper.restart_browser():
+                    scraper._games_since_recycle = 0
+                else:
+                    print(f"  ❌ Browser restart failed — aborting player {player_name}")
+                    return successful, failed
+
+            result = None
             try:
                 # Scrape table only (in memory)
                 result = scraper.scrape_table_only(table_id, player_id, save_raw=False, raw_data_dir=None)
@@ -303,7 +318,20 @@ def index_games_for_player(
                 failed += 1
                 logger.error(f"Error processing game {table_id}: {e}")
                 print(f"    [{i}/{len(new_games)}] ❌ Error processing game {table_id}: {e}")
-            
+
+            scraper._games_since_recycle = getattr(scraper, '_games_since_recycle', 0) + 1
+
+            # If the game failed because Chrome died, restart the browser before
+            # the next iteration so we don't churn through the rest of the queue
+            # against a dead session.
+            if (not result or not result.get('success')) and not scraper.is_driver_alive():
+                print(f"  ⚠️  WebDriver session is dead — restarting browser...")
+                if scraper.restart_browser():
+                    scraper._games_since_recycle = 0
+                else:
+                    print(f"  ❌ Browser restart failed — aborting player {player_name}")
+                    return successful, failed
+
             # Add delay between games
             if config.REQUEST_DELAY > 0:
                 time.sleep(config.REQUEST_DELAY)
