@@ -20,6 +20,32 @@ except Exception:
     BUILD_VERSION = None
 
 
+def _build_replay_envelope(raw_assignment: dict, games: list) -> dict:
+    """
+    Build the ``current_assignment`` envelope used by the GUI scraping
+    tab so that ``generate_assignment_id`` and the resume helpers can
+    operate on assignments fetched by the scheduler.
+    """
+    first = games[0] if games else {}
+    player_perspective_id = first.get("playerPerspective")
+    player_perspective_name = first.get("playerName")
+    return {
+        "type": "replayscraping",
+        "title": "Collect Game Logs Assignment",
+        "description": f"Collect logs for {len(games)} games",
+        "details": {
+            "game_count": len(games),
+            "player_perspective_id": (
+                str(player_perspective_id) if player_perspective_id else "Unknown"
+            ),
+            "player_perspective_name": player_perspective_name or "Unknown",
+            "games": games,
+            "assigned_at": datetime.now(timezone.utc).isoformat(),
+        },
+        "raw_data": raw_assignment,
+    }
+
+
 def _get_base_dir() -> str:
     if getattr(sys, "frozen", False):
         return os.path.dirname(sys.executable)
@@ -84,63 +110,85 @@ def run_scheduled_scraping() -> int:
     configured_count = int(scheduler_settings.get("game_count", 200))
     game_count = min(max(configured_count, 1), 200)
     scheduled_time = scheduler_settings.get("time", "?")
+    aggressive_mode = bool(scheduler_settings.get("aggressive_mode", False))
     logger.info(
         f"Scheduler settings: time={scheduled_time}, "
-        f"game_count={configured_count} (clamped to {game_count})"
+        f"game_count={configured_count} (clamped to {game_count}), "
+        f"aggressive_mode={aggressive_mode}"
     )
 
     browser_settings = config_manager.get_section("browser_settings")
     scraping_settings = config_manager.get_section("scraping_settings")
     per_game_delay = scraping_settings.get("request_delay", 1.0)
 
-    # Skip if a successful run already occurred in the last 24 hours
-    # (hourly task repetition means we retry until one run lands).
-    history = load_history()
-    logger.info(f"Loaded {len(history)} run(s) from history")
-    last_good = None
-    for entry in reversed(history):
-        status = entry.get("status")
-        if status not in ("success", "partial", "limit_reached"):
-            continue
-        try:
-            entry_time = datetime.fromisoformat(entry["date"])
-            if entry_time.tzinfo is None:
-                entry_time = entry_time.replace(tzinfo=timezone.utc)
-            hours_ago = (datetime.now(timezone.utc) - entry_time).total_seconds() / 3600
-        except (ValueError, TypeError, KeyError):
-            continue
-        last_good = (entry, hours_ago)
-        break
-
-    if last_good:
-        entry, hours_ago = last_good
+    # Check whether an existing assignment is still in progress. If so we
+    # always continue it (regardless of mode) — fetching a new one would
+    # lock additional games server-side while leaving the previous batch
+    # unfinished.
+    existing_assignment = config_manager.get_value("current_assignment", "data")
+    existing_status = config_manager.get_value("current_assignment", "status")
+    have_resumable = (
+        existing_assignment
+        and existing_status in ("ready", "in_progress")
+        and existing_assignment.get("type") == "replayscraping"
+        and existing_assignment.get("details", {}).get("games")
+    )
+    if have_resumable:
         logger.info(
-            f"Last completed run: status={entry.get('status')}, "
-            f"at={entry.get('date')} ({hours_ago:.1f}h ago), "
-            f"processed={entry.get('processed')}, successes={entry.get('successes')}, "
-            f"failures={entry.get('failures')}"
+            f"Found resumable assignment (status={existing_status}, "
+            f"games={len(existing_assignment['details']['games'])})"
         )
-        if hours_ago < 24:
-            logger.info(f"Within 24h window, skipping this run.")
-            return 0
-        logger.info("Over 24h since last run, proceeding.")
-    else:
-        logger.info("No prior completed run in history, proceeding.")
 
-    # Check daily limit
-    limit_hit_at = config_manager.get_replay_limit_hit_at()
-    if limit_hit_at:
-        try:
-            hit_time = datetime.fromisoformat(limit_hit_at)
-            hours_ago = (datetime.now(timezone.utc) - hit_time.replace(tzinfo=timezone.utc)).total_seconds() / 3600
-            logger.info(f"replay_limit_hit_at={limit_hit_at} ({hours_ago:.1f}h ago)")
+    # Gates only apply when we'd otherwise fetch a fresh assignment.
+    # Aggressive mode bypasses both gates entirely.
+    if not have_resumable and not aggressive_mode:
+        history = load_history()
+        logger.info(f"Loaded {len(history)} run(s) from history")
+        last_good = None
+        for entry in reversed(history):
+            status = entry.get("status")
+            if status not in ("success", "partial", "limit_reached"):
+                continue
+            try:
+                entry_time = datetime.fromisoformat(entry["date"])
+                if entry_time.tzinfo is None:
+                    entry_time = entry_time.replace(tzinfo=timezone.utc)
+                hours_ago = (datetime.now(timezone.utc) - entry_time).total_seconds() / 3600
+            except (ValueError, TypeError, KeyError):
+                continue
+            last_good = (entry, hours_ago)
+            break
+
+        if last_good:
+            entry, hours_ago = last_good
+            logger.info(
+                f"Last completed run: status={entry.get('status')}, "
+                f"at={entry.get('date')} ({hours_ago:.1f}h ago), "
+                f"processed={entry.get('processed')}, successes={entry.get('successes')}, "
+                f"failures={entry.get('failures')}"
+            )
             if hours_ago < 24:
-                logger.info(f"Daily limit was hit {hours_ago:.1f} hours ago, skipping run.")
+                logger.info(f"Within 24h window, skipping this run.")
                 return 0
-        except (ValueError, TypeError):
-            logger.warning(f"Could not parse replay_limit_hit_at={limit_hit_at!r}")
-    else:
-        logger.info("No prior daily-limit marker set.")
+            logger.info("Over 24h since last run, proceeding.")
+        else:
+            logger.info("No prior completed run in history, proceeding.")
+
+        limit_hit_at = config_manager.get_replay_limit_hit_at()
+        if limit_hit_at:
+            try:
+                hit_time = datetime.fromisoformat(limit_hit_at)
+                hours_ago = (datetime.now(timezone.utc) - hit_time.replace(tzinfo=timezone.utc)).total_seconds() / 3600
+                logger.info(f"replay_limit_hit_at={limit_hit_at} ({hours_ago:.1f}h ago)")
+                if hours_ago < 24:
+                    logger.info(f"Daily limit was hit {hours_ago:.1f} hours ago, skipping run.")
+                    return 0
+            except (ValueError, TypeError):
+                logger.warning(f"Could not parse replay_limit_hit_at={limit_hit_at!r}")
+        else:
+            logger.info("No prior daily-limit marker set.")
+    elif aggressive_mode:
+        logger.info("Aggressive mode enabled: ignoring replay limit.")
 
     # Build API client
     api = APIClient(
@@ -150,24 +198,35 @@ def run_scheduled_scraping() -> int:
     )
     api.timeout = api_settings.get("timeout", 60)
 
-    # Fetch assignment
-    logger.info(f"Requesting assignment for {email} (count={game_count})")
-    assignment = request_assignment(api, email, game_count)
-    if not assignment:
-        logger.info("No assignment available.")
-        return 0
+    if have_resumable:
+        envelope = existing_assignment
+        games = envelope["details"]["games"]
+        logger.info(f"Resuming existing assignment with {len(games)} game(s) total")
+    else:
+        logger.info(f"Requesting assignment for {email} (count={game_count})")
+        assignment = request_assignment(api, email, game_count)
+        if not assignment:
+            logger.info("No assignment available.")
+            return 0
 
-    assignment_type = str(assignment.get("assignmentType", "")).lower()
-    if assignment_type != "replayscraping":
-        logger.info(f"Assignment type '{assignment.get('assignmentType')}' not supported.")
-        return 0
+        assignment_type = str(assignment.get("assignmentType", "")).lower()
+        if assignment_type != "replayscraping":
+            logger.info(f"Assignment type '{assignment.get('assignmentType')}' not supported.")
+            return 0
 
-    games = assignment.get("games", [])
-    if not games:
-        logger.info("Assignment contains no games.")
-        return 0
+        games = assignment.get("games", [])
+        if not games:
+            logger.info("Assignment contains no games.")
+            return 0
 
-    logger.info(f"Received {len(games)} games to scrape")
+        envelope = _build_replay_envelope(assignment, games)
+        config_manager.set_value("current_assignment", "data", envelope)
+        config_manager.set_value("current_assignment", "status", "in_progress")
+        config_manager.save_config()
+        logger.info(f"Received {len(games)} games to scrape")
+
+    assignment_id = config_manager.generate_assignment_id(envelope)
+    logger.info(f"Assignment ID: {assignment_id}")
 
     # Build scraper
     scraper = TMScraper(
@@ -194,6 +253,8 @@ def run_scheduled_scraping() -> int:
             per_game_delay=per_game_delay,
             email=email,
             logger=logger,
+            config_manager=config_manager,
+            assignment_id=assignment_id,
         )
     finally:
         try:
@@ -202,6 +263,29 @@ def run_scheduled_scraping() -> int:
             pass
 
     duration = time.time() - start_time
+
+    # Determine assignment-level completion: if every game in the
+    # envelope is now in completed/failed/skipped, the assignment is done.
+    progress = config_manager.load_assignment_progress(assignment_id) or {}
+    done_ids = (
+        set(progress.get("completed_games", []))
+        | set(progress.get("failed_games", []))
+        | set(progress.get("skipped_games", []))
+    )
+    all_table_ids = {str(g.get("tableId", "")) for g in games}
+    remaining = all_table_ids - done_ids
+    assignment_complete = not remaining and not result["limit_reached"]
+
+    if assignment_complete:
+        config_manager.set_value("current_assignment", "status", "completed")
+        config_manager.clear_assignment_progress(assignment_id)
+        logger.info("Assignment fully complete; cleared progress.")
+    else:
+        config_manager.set_value("current_assignment", "status", "in_progress")
+        logger.info(
+            f"Assignment still in progress: {len(remaining)} game(s) remaining."
+        )
+    config_manager.save_config()
 
     # Record to history
     status = "success"

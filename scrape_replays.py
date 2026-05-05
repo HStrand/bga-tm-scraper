@@ -87,15 +87,37 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def scraping_loop(api, scraper, parser, games, per_game_delay, email, logger):
+def scraping_loop(api, scraper, parser, games, per_game_delay, email, logger,
+                  config_manager=None, assignment_id=None):
     """
     Process a list of replay scraping assignments.
+
+    If ``config_manager`` and ``assignment_id`` are supplied, per-game
+    progress is persisted via the assignment-progress helpers, and any
+    games already recorded as completed/failed/skipped for this
+    assignment are skipped on entry.
+
     Returns dict with keys: processed, successes, failures, limit_reached.
     """
     successes = 0
     failures = 0
     processed = 0
     limit_reached = False
+
+    persist = config_manager is not None and assignment_id is not None
+    already_processed: set = set()
+    if persist:
+        existing = config_manager.load_assignment_progress(assignment_id) or {}
+        already_processed = (
+            set(existing.get("completed_games", []))
+            | set(existing.get("failed_games", []))
+            | set(existing.get("skipped_games", []))
+        )
+        if already_processed:
+            logger.info(
+                f"Resuming assignment {assignment_id}: skipping "
+                f"{len(already_processed)} already-processed game(s)"
+            )
 
     for idx, game in enumerate(games, start=1):
         table_id = str(game.get("tableId", ""))
@@ -107,6 +129,9 @@ def scraping_loop(api, scraper, parser, games, per_game_delay, email, logger):
                 f"Skipping game #{idx}: missing tableId/versionId/playerPerspective"
             )
             failures += 1
+            continue
+
+        if persist and table_id in already_processed:
             continue
 
         logger.info(f"[{idx}/{len(games)}] Processing game {table_id} (version {version_id}) ...")
@@ -125,6 +150,8 @@ def scraping_loop(api, scraper, parser, games, per_game_delay, email, logger):
             logger.error(f"Scrape failed for table {table_id}: {e}")
             failures += 1
             processed += 1
+            if persist:
+                config_manager.update_game_completion(assignment_id, table_id, False)
             if per_game_delay and per_game_delay > 0:
                 time.sleep(per_game_delay)
             continue
@@ -146,6 +173,8 @@ def scraping_loop(api, scraper, parser, games, per_game_delay, email, logger):
             except Exception as e:
                 logger.error(f"Failed to report deleted game {table_id}: {e}")
             processed += 1
+            if persist:
+                config_manager.update_game_skipped(assignment_id, table_id)
             if per_game_delay and per_game_delay > 0:
                 time.sleep(per_game_delay)
             continue
@@ -154,6 +183,8 @@ def scraping_loop(api, scraper, parser, games, per_game_delay, email, logger):
             logger.warning(f"Failed to scrape replay for table {table_id}")
             failures += 1
             processed += 1
+            if persist:
+                config_manager.update_game_completion(assignment_id, table_id, False)
             if per_game_delay and per_game_delay > 0:
                 time.sleep(per_game_delay)
             continue
@@ -172,15 +203,19 @@ def scraping_loop(api, scraper, parser, games, per_game_delay, email, logger):
                 logger.error(f"Parsing failed for table {table_id}: {e}")
                 failures += 1
                 processed += 1
+                if persist:
+                    config_manager.update_game_completion(assignment_id, table_id, False)
                 if per_game_delay and per_game_delay > 0:
                     time.sleep(per_game_delay)
                 continue
         else:
             payload = replay_result
 
+        upload_ok = False
         try:
             if api.store_game_log(payload, scraped_by_email=email):
                 successes += 1
+                upload_ok = True
                 logger.info(f"  Uploaded logs for game {table_id}")
             else:
                 failures += 1
@@ -188,6 +223,9 @@ def scraping_loop(api, scraper, parser, games, per_game_delay, email, logger):
         except Exception as e:
             logger.error(f"Upload failed for table {table_id}: {e}")
             failures += 1
+
+        if persist:
+            config_manager.update_game_completion(assignment_id, table_id, upload_ok)
 
         processed += 1
 

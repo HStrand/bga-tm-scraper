@@ -20,6 +20,7 @@ class SchedulerTab:
         self.scheduler_enabled_var = tk.BooleanVar()
         self.scheduler_time_var = tk.StringVar()
         self.scheduler_game_count_var = tk.IntVar()
+        self.scheduler_aggressive_var = tk.BooleanVar()
 
         self.create_widgets()
         self.load_settings()
@@ -50,7 +51,16 @@ class SchedulerTab:
             row1, textvariable=self.scheduler_time_var, width=6,
         ).pack(side="right")
 
-        # Row 2: Save button + status
+        # Row 2: Aggressive mode checkbox
+        row_aggro = ttk.Frame(settings_frame)
+        row_aggro.pack(fill="x", pady=(5, 0))
+        ttk.Checkbutton(
+            row_aggro,
+            text="Aggressive mode (retry every hour even if replay limit was reached)",
+            variable=self.scheduler_aggressive_var,
+        ).pack(side="left")
+
+        # Row 3: Save button + status
         row2 = ttk.Frame(settings_frame)
         row2.pack(fill="x", pady=(5, 0))
 
@@ -112,16 +122,19 @@ class SchedulerTab:
         self.scheduler_enabled_var.set(scheduler_settings.get("enabled", False))
         self.scheduler_time_var.set(scheduler_settings.get("time", "03:00"))
         self.scheduler_game_count_var.set(scheduler_settings.get("game_count", 200))
+        self.scheduler_aggressive_var.set(scheduler_settings.get("aggressive_mode", False))
 
     def _save_settings(self):
         enabled = self.scheduler_enabled_var.get()
         time_str = self.scheduler_time_var.get() or "03:00"
         game_count = self.scheduler_game_count_var.get() or 200
+        aggressive = self.scheduler_aggressive_var.get()
 
         self.config_manager.update_section("scheduler_settings", {
             "enabled": enabled,
             "time": time_str,
             "game_count": game_count,
+            "aggressive_mode": aggressive,
         })
         self.config_manager.save_config()
 
