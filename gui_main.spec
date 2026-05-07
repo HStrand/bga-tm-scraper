@@ -6,7 +6,14 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[('assets/mars_icon.ico', 'assets')],
-    hiddenimports=['scheduler', 'scheduler.runner', 'scheduler.task_manager', 'scheduler.history'],
+    hiddenimports=[
+        'scheduler', 'scheduler.runner', 'scheduler.task_manager', 'scheduler.history',
+        # Selenium 4.43+ lazy-loads driver classes via selenium.webdriver.__getattr__,
+        # so PyInstaller's static analysis misses these.
+        'selenium.webdriver.chrome.webdriver',
+        'selenium.webdriver.chrome.options',
+        'selenium.webdriver.chrome.service',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

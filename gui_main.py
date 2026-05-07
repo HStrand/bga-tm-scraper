@@ -11,6 +11,16 @@ import sys
 import os
 from pathlib import Path
 
+# Python 3.14 + PyInstaller windowed builds bind stdout/stderr to the parent's
+# cp1252 stream on Windows; emoji in print() then raises UnicodeEncodeError and
+# breaks --scheduled-run. Force UTF-8 with replacement so prints can't crash.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        if _stream is not None:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 # Add the current directory to Python path to import our modules
 current_dir = Path(__file__).parent
 sys.path.insert(0, str(current_dir))
