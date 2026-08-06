@@ -157,7 +157,18 @@ class GameData:
 
 class Parser:
     """Comprehensive Terraforming Mars game log parser for BoardGameArena replays"""
-    
+
+    # Map option (id 107) values/short labels -> canonical map names
+    MAP_VALUE_NAMES = {
+        '0': 'Tharsis',
+        '1': 'Elysium',
+        '2': 'Hellas',
+        '3': 'Vastitas Borealis',
+        '4': 'Amazonis Planitia',
+        'Vastitas': 'Vastitas Borealis',
+        'Amazonis': 'Amazonis Planitia',
+    }
+
     def __init__(self):
         pass
     
@@ -300,7 +311,26 @@ class Parser:
                             map_name = value_div.get_text().strip()
                             logger.info(f"Extracted actual map from replay (fallback): {map_name}")
                             return map_name
-            
+
+            # Fallback for the newer replay page format: the map is in the embedded
+            # bgaGameData JSON as tableOptions entry {"id":107,"name":"Map","value":N,"valueLabel":"..."}
+            # with the resolved map name even when the table selection was "Random".
+            option_match = re.search(
+                r'\{"id":\s*107\s*,\s*"name":\s*"Map"\s*,\s*"value":\s*(\d+)\s*(?:,\s*"valueLabel":\s*"([^"]*)")?',
+                replay_html
+            )
+            if option_match:
+                value_label = option_match.group(2)
+                if value_label:
+                    map_name = self.MAP_VALUE_NAMES.get(value_label, value_label)
+                    logger.info(f"Extracted actual map from replay (tableOptions): {map_name}")
+                    return map_name
+                map_value = option_match.group(1)
+                map_name = self.MAP_VALUE_NAMES.get(map_value)
+                if map_name:
+                    logger.info(f"Extracted actual map from replay (tableOptions value {map_value}): {map_name}")
+                    return map_name
+
             logger.debug("Map element not found in replay HTML Game options")
             return None
             
