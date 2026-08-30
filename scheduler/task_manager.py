@@ -1,9 +1,10 @@
-"""Windows Task Scheduler management for daily scraping."""
+"""OS-aware task scheduling for daily scraping (Windows Task Scheduler / Linux crontab)."""
 
 import csv
 import io
 import logging
 import os
+import platform
 import subprocess
 import sys
 import tempfile
@@ -12,6 +13,10 @@ from typing import Optional, Dict
 logger = logging.getLogger(__name__)
 
 TASK_NAME = "BGA TM Scraper - Daily"
+CRON_COMMENT = "bga-tm-scraper-daily"
+
+IS_WINDOWS = platform.system() == "Windows"
+IS_LINUX = platform.system() == "Linux"
 
 
 def _build_task_xml(exe_path: str, working_dir: str, time_str: str) -> str:
@@ -68,7 +73,7 @@ def _build_task_xml(exe_path: str, working_dir: str, time_str: str) -> str:
 
 def create_or_update_task(exe_path: str, working_dir: str, time_str: str) -> bool:
     """
-    Create or update a daily scheduled task.
+    Create or update a daily scheduled task (OS-aware).
 
     Args:
         exe_path: Full path to the executable
@@ -78,6 +83,52 @@ def create_or_update_task(exe_path: str, working_dir: str, time_str: str) -> boo
     Returns:
         True if the task was created/updated successfully.
     """
+    if IS_WINDOWS:
+        return _win_create_or_update_task(exe_path, working_dir, time_str)
+    elif IS_LINUX:
+        return _linux_create_or_update_cron(exe_path, working_dir, time_str)
+    else:
+        logger.error(f"Scheduling not supported on {platform.system()}")
+        return False
+
+
+def delete_task() -> bool:
+    """Delete the scheduled task. Returns True if deleted or didn't exist."""
+    if IS_WINDOWS:
+        return _win_delete_task()
+    elif IS_LINUX:
+        return _linux_delete_cron()
+    else:
+        logger.error(f"Scheduling not supported on {platform.system()}")
+        return False
+
+
+def query_task() -> Optional[Dict[str, str]]:
+    """
+    Query the scheduled task status.
+
+    Returns:
+        Dict with keys: next_run, last_run, last_result, status
+        None if task doesn't exist.
+    """
+    if IS_WINDOWS:
+        return _win_query_task()
+    elif IS_LINUX:
+        return _linux_query_cron()
+    else:
+        return None
+
+
+def is_task_installed() -> bool:
+    """Check if the scheduled task exists."""
+    return query_task() is not None
+
+
+# ---------------------------------------------------------------------------
+# Windows Task Scheduler
+# ---------------------------------------------------------------------------
+
+def _win_create_or_update_task(exe_path: str, working_dir: str, time_str: str) -> bool:
     xml_content = _build_task_xml(exe_path, working_dir, time_str)
 
     try:
@@ -113,8 +164,8 @@ def create_or_update_task(exe_path: str, working_dir: str, time_str: str) -> boo
         return False
 
 
-def delete_task() -> bool:
-    """Delete the scheduled task. Returns True if deleted or didn't exist."""
+def _win_delete_task() -> bool:
+    """Delete the Windows scheduled task. Returns True if deleted or didn't exist."""
     try:
         result = subprocess.run(
             ["schtasks", "/Delete", "/TN", TASK_NAME, "/F"],
@@ -133,14 +184,8 @@ def delete_task() -> bool:
         return False
 
 
-def query_task() -> Optional[Dict[str, str]]:
-    """
-    Query the scheduled task status.
-
-    Returns:
-        Dict with keys: next_run, last_run, last_result, status
-        None if task doesn't exist.
-    """
+def _win_query_task() -> Optional[Dict[str, str]]:
+    """Query the Windows scheduled task status."""
     try:
         result = subprocess.run(
             ["schtasks", "/Query", "/TN", TASK_NAME, "/FO", "CSV", "/V"],
@@ -163,9 +208,128 @@ def query_task() -> Optional[Dict[str, str]]:
         return None
 
 
-def is_task_installed() -> bool:
-    """Check if the scheduled task exists."""
-    return query_task() is not None
+# ---------------------------------------------------------------------------
+# Linux crontab
+# ---------------------------------------------------------------------------
+
+def _get_current_crontab() -> str:
+    """Read the current user's crontab. Returns empty string if none."""
+    try:
+        result = subprocess.run(
+            ["crontab", "-l"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            return result.stdout
+        return ""
+    except Exception:
+        return ""
+
+
+def _write_crontab(content: str) -> bool:
+    """Write a new crontab for the current user."""
+    try:
+        proc = subprocess.run(
+            ["crontab", "-"],
+            input=content, capture_output=True, text=True, timeout=10,
+        )
+        return proc.returncode == 0
+    except Exception as e:
+        logger.error(f"Failed to write crontab: {e}")
+        return False
+
+
+def _build_cron_line(exe_path: str, working_dir: str, time_str: str) -> str:
+    """Build a crontab line for the daily scraping job."""
+    parts = time_str.split(":")
+    hour = parts[0] if len(parts) >= 1 else "3"
+    minute = parts[1] if len(parts) >= 2 else "0"
+
+    # Use python3 for .py files, direct path for frozen executables
+    if exe_path.endswith(".py"):
+        python = sys.executable or "python3"
+        command = f"cd {working_dir} && {python} {exe_path} --scheduled-run"
+    else:
+        command = f"cd {working_dir} && {exe_path} --scheduled-run"
+
+    return f"{minute} {hour} * * * {command} # {CRON_COMMENT}"
+
+
+def _linux_create_or_update_cron(exe_path: str, working_dir: str, time_str: str) -> bool:
+    """Create or update the crontab entry for daily scraping."""
+    try:
+        existing = _get_current_crontab()
+
+        # Remove any existing entry for this app
+        lines = [
+            line for line in existing.splitlines()
+            if CRON_COMMENT not in line
+        ]
+
+        # Add our new entry
+        new_line = _build_cron_line(exe_path, working_dir, time_str)
+        lines.append(new_line)
+
+        # Ensure trailing newline (crontab requires it)
+        new_crontab = "\n".join(lines).strip() + "\n"
+
+        if _write_crontab(new_crontab):
+            logger.info(f"Cron job created/updated for {time_str}")
+            return True
+        else:
+            logger.error("Failed to write crontab")
+            return False
+    except Exception as e:
+        logger.error(f"Failed to create cron job: {e}")
+        return False
+
+
+def _linux_delete_cron() -> bool:
+    """Remove the crontab entry. Returns True if removed or didn't exist."""
+    try:
+        existing = _get_current_crontab()
+        lines = [
+            line for line in existing.splitlines()
+            if CRON_COMMENT not in line
+        ]
+
+        new_crontab = "\n".join(lines).strip()
+        if new_crontab:
+            new_crontab += "\n"
+            return _write_crontab(new_crontab)
+        else:
+            # No entries left, remove crontab entirely
+            subprocess.run(["crontab", "-r"], capture_output=True, timeout=10)
+            return True
+    except Exception as e:
+        logger.error(f"Failed to delete cron job: {e}")
+        return False
+
+
+def _linux_query_cron() -> Optional[Dict[str, str]]:
+    """Query whether the cron job is installed and return status info."""
+    try:
+        existing = _get_current_crontab()
+        for line in existing.splitlines():
+            if CRON_COMMENT in line:
+                # Parse the time from the cron expression
+                parts = line.strip().split()
+                if len(parts) >= 5:
+                    minute = parts[0]
+                    hour = parts[1]
+                    next_run = f"Daily at {hour.zfill(2)}:{minute.zfill(2)}"
+                else:
+                    next_run = "Daily (see crontab)"
+                return {
+                    "next_run": next_run,
+                    "last_run": "See scheduler.log",
+                    "last_result": "",
+                    "status": "Installed",
+                    "task_name": CRON_COMMENT,
+                }
+        return None
+    except Exception:
+        return None
 
 
 def get_exe_path() -> str:
