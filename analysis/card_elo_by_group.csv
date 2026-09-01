@@ -1,0 +1,216 @@
+Card,Group,GameCount,AvgEloChange
+Large Convoy,Biology,60043,0.9296337624702297
+Imported Nitrogen,Biology,48701,0.8518100244348166
+CEO's Favourite Project,Biology,30119,0.7794083468906671
+Eos Chasma National Park,Biology,42961,0.778473499220223
+Ecological Zone,Biology,76655,0.7397430043702302
+Symbiotic Fungus,Biology,19538,0.7269935510287645
+Fish,Biology,49252,0.7242345488508081
+Herbivores,Biology,54619,0.7020633845365166
+Birds,Biology,47724,0.6925446316318833
+Small Animals,Biology,54559,0.6687255998093806
+Advanced Ecosystems,Biology,45382,0.660217707461108
+Viral Enhancers,Biology,77625,0.6542995169082125
+Livestock,Biology,32879,0.6504151586118799
+Tardigrades,Biology,22461,0.5582120119317929
+Decomposers,Biology,66600,0.5511411411411411
+Ants,Biology,16635,0.415990381725278
+Predators,Biology,23822,0.31840315674586517
+Pets,Biology,52009,0.24453459978080716
+Nitrite Reducing Bacteria,Biology,17407,0.09478945251910151
+Extreme-Cold Fungus,Biology,18965,0.07292380701291853
+Protected Habitats,Biology,71641,0.06726595106154297
+Regolith Eaters,Biology,14575,-0.15711835334476845
+Cartel,Economy,51720,1.0239172467130704
+Media Group,Economy,75197,1.0087902442916605
+Mining Area,Economy,69629,0.8006290482413937
+Space Hotels,Economy,56145,0.7977379998218898
+Miranda Resort,Economy,59974,0.792910261113149
+Media Archives,Economy,42463,0.726891646845489
+Space Elevator,Economy,63861,0.6561124943236091
+Satellites,Economy,43749,0.6545292463827744
+Investment Loan,Economy,69580,0.6492814027019258
+Hired Raiders,Economy,76434,0.6377659156919695
+Indentured Workers,Economy,64099,0.6290425747671571
+Mineral Deposit,Economy,70540,0.6241990360079388
+Sabotage,Economy,75254,0.620658038110931
+Hackers,Economy,26595,0.5768377514570407
+Mining Rights,Economy,71853,0.5764686234395223
+Bribed Committee,Economy,42460,0.5605040037682525
+Mine,Economy,59824,0.5087757421770527
+Great Escarpment Consortium,Economy,36223,0.5056179775280899
+Acquired Company,Economy,52221,0.4689684226652113
+Rad-Suits,Economy,28946,0.4575761763283355
+Building Industries,Economy,52267,0.4182753936518262
+Sponsors,Economy,57112,0.38415744502031096
+Zeppelins,Economy,15568,0.3595837615621788
+Titanium Mine,Economy,59423,0.34651565891994685
+Fuel Factory,Economy,51476,0.3071722744579998
+Cupola City,Economy,57772,0.2464861870802465
+Insulation,Economy,9273,0.1748085840612531
+Power Plant,Economy,47696,0.13810382422006037
+Toll Station,Economy,21607,0.07090294811866525
+Immigration Shuttles,Economy,34751,0.04874679865327616
+Food Factory,Economy,17463,-0.09797858329038539
+Equatorial Magnetizer,Industry,11709,0.8982833717653087
+Open City,Industry,36203,0.8224732756953843
+Power Infrastructure,Industry,14778,0.7186358099878197
+Ironworks,Industry,9294,0.6957176673122445
+Magnetic Field Generators,Industry,13079,0.6811682850370824
+Magnetic Field Dome,Industry,16903,0.6426669821925102
+Ore Processor,Industry,11124,0.6423049262855088
+Steelworks,Industry,12997,0.6330691698084173
+Windmills,Industry,30871,0.5719283469923229
+Medical Lab,Industry,65392,0.5646715194519207
+Lightning Harvest,Industry,37047,0.5565902772154291
+Capital,Industry,39072,0.5500358312858313
+Heat Trappers,Industry,29441,0.5458034713494786
+Electro Catapult,Industry,54874,0.5262237125050114
+Biomass Combustors,Industry,26907,0.43999702679600106
+Energy Tapping,Industry,36107,0.4236574625418894
+Urbanized Area,Industry,34305,0.4004372540445999
+Commercial District,Industry,50997,0.35535423652371706
+Industrial Center,Industry,61201,0.3413833107302168
+Rad-Chem Factory,Industry,45498,0.33695986636775244
+Martian Rails,Industry,14973,0.3237160221732452
+Power Supply Consortium,Industry,32320,0.2963180693069307
+Domed Crater,Industry,48652,0.2947052536380827
+Noctis City,Industry,62853,0.2801298267385805
+Soil Factory,Industry,17924,0.2364985494309306
+SF Memorial,Industry,54598,0.20775486281548775
+Corporate Stronghold,Industry,37220,0.19854916711445458
+House Printing,Industry,51290,0.19050497172938194
+Wave Power,Industry,27099,0.18380752057271485
+Industrial Microbes,Industry,49039,0.17072126266848833
+Rover Construction,Industry,60375,0.16455486542443065
+Tropical Resort,Industry,18003,0.13275565183580515
+Water Splitting Plant,Industry,6835,0.11894659839063643
+Deep Well Heating,Industry,44931,0.11544368030980837
+Tectonic Stress Power,Industry,27340,0.10954645208485735
+Fusion Power,Industry,33333,0.10758107581075811
+Strip Mine,Industry,45569,0.07382211591213325
+Fueled Generators,Industry,32586,0.040324065549622534
+Great Dam,Industry,29523,0.027233004775937406
+Energy Saving,Industry,7917,-0.017051913603637742
+Geothermal Power,Industry,38115,-0.02676111767020858
+Peroxide Power,Industry,32363,-0.04468065383308099
+Giant Space Mirror,Industry,34049,-0.046609298364122295
+Lava Tube Settlement,Industry,47341,-0.0920343887961809
+Power Grid,Industry,7354,-0.1029371770465053
+Underground City,Industry,43029,-0.10625392177368752
+Nuclear Power,Industry,22786,-0.1704555428772053
+Solar Power,Industry,30293,-0.17310929917802792
+Immigrant City,Industry,68150,-0.24638297872340426
+Space Mirrors,Industry,12881,-0.38242372486608184
+Terraforming Ganymede,Jovians,29610,0.9346842283012495
+Interstellar Colony Ship,Jovians,33877,0.8961832511733625
+Asteroid Mining Consortium,Jovians,54734,0.7571345050608397
+Shuttles,Jovians,55427,0.6137442040882602
+Water Import From Europa,Jovians,34824,0.527452331725247
+Ganymede Colony,Jovians,40131,0.4412050534499514
+Methane From Titan,Jovians,49585,0.3426641121306847
+Space Station,Jovians,68567,0.33705718494319425
+Io Mining Industries,Jovians,51416,0.2740003111871791
+Vesta Shipyard,Jovians,65279,0.20280641553945372
+Beam From a Thorium Asteroid,Jovians,33628,0.0636969192339717
+Callisto Penal Mines,Jovians,45781,0.05799349074943754
+Asteroid Mining,Jovians,56263,0.05520501928443204
+Security Fleet,Jovians,11895,-0.029424127784783524
+Colonizer Training Camp,Jovians,43803,-0.046617811565417895
+Phobos Space Haven,Jovians,47650,-0.15693599160545646
+Anti-Gravity Technology,Science,58300,1.6703945111492282
+AI Central,Science,65332,1.6021551460233883
+Earth Catapult,Science,77152,1.4886717129821652
+Mass Converter,Science,64185,1.3791540079457818
+Research Outpost,Science,79920,1.1813063063063063
+Restricted Area,Science,74350,1.0541223940820443
+Advanced Alloys,Science,71810,1.0158752262916029
+Quantum Extractor,Science,61925,0.8956156641098103
+Mars University,Science,77047,0.8259374148247174
+Development Center,Science,64561,0.8215486129397004
+Natural Preserve,Science,53424,0.7852650494159928
+Earth Office,Science,72615,0.7804172691592646
+Olympus Conference,Science,76011,0.7634684453565931
+Business Contacts,Science,74509,0.6537465272651626
+Research,Science,73442,0.6515073118923776
+Physics Complex,Science,23783,0.6339402093932641
+Invention Contest,Science,78502,0.6108124633767292
+Technology Demonstration,Science,79575,0.6003518693056865
+Gene Repair,Science,57284,0.5580615878779415
+Robotic Workforce,Science,54718,0.4919587704228956
+Inventors' Guild,Science,62043,0.45571619683122994
+Trans-Neptune Probe,Science,64083,0.4515082003027324
+Business Network,Science,65201,0.43602091992454106
+Solar Wind Power,Science,71679,0.4299725163576501
+Research Coordination,Science,53902,0.4178880189974398
+Breathing Filters,Science,30128,0.39846654275092935
+Lagrange Observatory,Science,70681,0.3793523011841938
+Dust Seals,Science,18200,0.34873626373626376
+Adaptation Technology,Science,33006,0.3424831848754772
+Search For Life,Science,41007,0.2634915989952935
+Martian Survey,Science,40318,0.16870876531573986
+Artificial Photosynthesis,Science,42292,-0.032795800624231534
+Lake Marineris,Terraforming,26405,1.2490816133308085
+Ice cap Melting,Terraforming,16405,1.2348674184699786
+Giant Ice Asteroid,Terraforming,67660,1.2097546556310967
+Nitrogen-Rich Asteroid,Terraforming,69191,1.0790276191990287
+Special Design,Terraforming,18604,1.0370887981079338
+Deimos Down,Terraforming,66533,1.0195992965896623
+Mangrove,Terraforming,44747,0.9471249469238161
+Artificial Lake,Terraforming,19637,0.9438305240107959
+Nuclear Zone,Terraforming,68918,0.9281610029310194
+Kelp Farming,Terraforming,70437,0.8982353024688728
+Optimal Aerobraking,Terraforming,71491,0.8954413842301828
+Psychrophiles,Terraforming,46332,0.8093973927307261
+Insects,Terraforming,62238,0.7684212217616248
+Worms,Terraforming,17953,0.7577563638389128
+Permafrost extraction,Terraforming,28429,0.7394913644517922
+Farming,Terraforming,38334,0.7182918557938123
+Big Asteroid,Terraforming,69276,0.714922917027542
+Protected Valley,Terraforming,56984,0.711234732556507
+Land Claim,Terraforming,30643,0.6616192931501484
+Greenhouses,Terraforming,58091,0.6573651684426159
+Imported Hydrogen,Terraforming,73513,0.6552310475698175
+Arctic Algae,Terraforming,56888,0.648168330755168
+Trees,Terraforming,55506,0.6367419738406659
+Ice Asteroid,Terraforming,63083,0.6353534232677583
+Virus,Terraforming,59069,0.6193773383669945
+GHG Producing Bacteria,Terraforming,24843,0.6184035744475305
+Comet,Terraforming,66858,0.5859433426067188
+Flooding,Terraforming,48534,0.5623480446697161
+Asteroid,Terraforming,70961,0.5296571356097011
+Plantation,Terraforming,63289,0.5045900551438639
+Lava Flows,Terraforming,52380,0.5026345933562428
+Convoy From Europa,Terraforming,66381,0.48072490622316627
+Towing a Comet,Terraforming,63295,0.4791373726202702
+Algae,Terraforming,65570,0.4761933811194144
+Bushes,Terraforming,66513,0.4612331423932164
+Tundra Farming,Terraforming,32028,0.4578806044710878
+Noctis Farming,Terraforming,64479,0.4519921214659036
+Local Heat Trapping,Terraforming,35636,0.45173420136940173
+Imported GHG,Terraforming,58788,0.44473361910594
+Moss,Terraforming,57985,0.4177459687850306
+Heather,Terraforming,61779,0.40708007575389693
+Grass,Terraforming,61540,0.3587097822554436
+Import of Advanced GHG,Terraforming,50888,0.3558009746895142
+Nitrophilic Moss,Terraforming,58116,0.33044256314956294
+Lichen,Terraforming,55045,0.29078027068761925
+Standard Technology,Terraforming,55509,0.2824947305842296
+Subterranean Reservoir,Terraforming,47109,0.2710946952811565
+Mohole Area,Terraforming,36860,0.2571622354856213
+Mining Expedition,Terraforming,32098,0.2186740606891395
+Micro-Mills,Terraforming,13576,0.17965527401296405
+Designed Microorganisms,Terraforming,41722,0.17201955802694022
+Archaebacteria,Terraforming,39367,0.07364035867604847
+Aquifer Pumping,Terraforming,8796,0.07094133697135062
+Adapted Lichen,Terraforming,37548,0.05656759348034516
+Release of Inert Gases,Terraforming,26072,0.021517336606320957
+Caretaker Contract,Terraforming,7315,-0.009569377990430622
+Black Polar Dust,Terraforming,18276,-0.02522433792952506
+Cloud Seeding,Terraforming,22021,-0.04809045910721584
+Carbonate Processing,Terraforming,26016,-0.06034747847478475
+GHG Factories,Terraforming,28324,-0.1794591159440757
+Aerobraked Ammonia Asteroid,Terraforming,12452,-0.20133311917764216
+Lunar Beam,Terraforming,25632,-0.29638732833957554
+Underground Detonations,Terraforming,1925,-0.49558441558441557
+Soletta,Terraforming,15346,-0.7660628176723576

@@ -33,17 +33,19 @@ RANKING_URL = '/gamepanel/gamepanel/getRanking.html'
 BROWSER_RECYCLE_EVERY = 200
 
 
-def fetch_players(num_players: int = 100) -> List[Dict]:
+def fetch_players(num_players: Optional[int] = None) -> List[Dict]:
     """
-    Fetch all Terraforming Mars players from BGA leaderboard
-    
+    Fetch Terraforming Mars players from BGA leaderboard.
+
+    If num_players is None, fetch the entire leaderboard until exhausted.
+
     Returns:
         list: List of player dictionaries with id, name, country, elo, updatedAt
     """
     print("\n" + "="*80)
     print("STEP 1: Fetching players from BGA")
     print("="*80)
-    
+
     session = BGASession(
         email=config.BGA_EMAIL,
         password=config.BGA_PASSWORD,
@@ -51,34 +53,37 @@ def fetch_players(num_players: int = 100) -> List[Dict]:
         chrome_path=config.CHROME_PATH,
         headless=True
     )
-    
+
     print("Logging into BGA...")
     if not session.login():
         raise RuntimeError("Failed to login to BGA")
-    
+
     params = {'game': 1924}
-    # num_players passed as parameter
     players = []
-    
-    print(f"Fetching up to {num_players} players from leaderboard...")
-    
-    for start in range(0, num_players, 10):
+
+    if num_players is None:
+        print("Fetching full leaderboard...")
+    else:
+        print(f"Fetching up to {num_players} players from leaderboard...")
+
+    start = 0
+    while True:
         params['start'] = start
         resp = session.get(f'{BASE_URL}{RANKING_URL}', params=params)
-        
+
         data = resp.json()
-        
+
         if 'data' not in data or 'ranks' not in data['data']:
             print(f"Unexpected response format at start={start}")
             break
-            
+
         ranks_data = data['data']['ranks']
         if not ranks_data:
             print(f"No more players found at start={start}")
             break
-                
+
         for player in ranks_data:
-            if len(players) >= num_players:
+            if num_players is not None and len(players) >= num_players:
                 break
 
             try:
@@ -102,9 +107,14 @@ def fetch_players(num_players: int = 100) -> List[Dict]:
         # If we got fewer than 10 players, we've reached the end
         if len(ranks_data) < 10:
             break
-            
+
+        if num_players is not None and len(players) >= num_players:
+            break
+
         if len(players) % 100 == 0:
             print(f"Fetched {len(players)} players so far...")
+
+        start += 10
     
     # Close the session
     session.close_browser()
@@ -406,19 +416,18 @@ def main():
             return
 
         # Full mode: fetch leaderboard and index selected rank range
-        # Step 1: Fetch players
+        # Step 1: Always fetch the full leaderboard so the Players table
+        # gets updated Elo for everyone, not just the slice being indexed.
         if args.start_rank is not None:
-            fetch_count = args.end_rank
             slice_start = args.start_rank - 1
             slice_end = args.end_rank
             range_label = f"ranks {args.start_rank}-{args.end_rank}"
         else:
-            fetch_count = args.n
             slice_start = 0
             slice_end = args.n
             range_label = f"top {args.n}"
 
-        players = fetch_players(num_players=fetch_count)
+        players = fetch_players(num_players=None)
 
         # Step 2: Update players via API
         update_players_via_api(api_client, players)

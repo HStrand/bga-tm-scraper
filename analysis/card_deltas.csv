@@ -1,0 +1,36 @@
+Card,ActualCost,ModelCost,PredictedDelta,ObservedDelta
+Power Plant,7,7.0,0.0,-0.072
+Geothermal Power,14,14.0,0.0,0.079
+Giant Space Mirror,20,22.0,0.28,0.045
+Peroxide Power,10,8.3,-0.238,0.048
+Nuclear Power,13,9.6,-0.476,0.212
+Micro-Mills,6,4.5,-0.21,-0.544
+Import of Advanced GHG,12,9.0,-0.42,-0.423
+Soletta,38,32.5,-0.77,-0.19
+Archaebacteria,9,9.0,0.0,-0.059
+Adapted Lichen,12,10.0,-0.28,-0.846
+Designed Microorganisms,19,21.6,0.364,0.427
+Lichen,10,10.0,0.0,0.36
+Search For Life,6,3.6,-0.336,-0.835
+Trans-Neptune Probe,9,6.1,-0.406,-0.178
+Lagrange Observatory,12,6.1,-0.826,-0.887
+Inventors' Guild,12,14.6,0.364,0.466
+Business Network,7,6.3,-0.098,0.097
+Building Industries,9,13.0,0.56,0.441
+Industrial Microbes,15,17.0,0.28,0.358
+Mine,7,10.0,0.42,0.567
+Asteroid Mining Consortium,16,30.5,2.03,1.785
+Io Mining Industries,44,47.7,0.518,0.845
+Asteroid Mining,33,33.0,0.0,0.226
+Titanium Mine,10,14.0,0.56,0.63
+Vesta Shipyard,18,16.0,-0.28,-0.038
+Phobos Space Haven,28,19.5,-1.19,-1.256
+Protected Habitats,8,1.0,-0.98,-0.852
+Pets,13,1.0,-1.68,-0.955
+Rover Construction,11,1.5,-1.33,-1.021
+Space Station,13,1.0,-1.68,-0.588
+Viral Enhancers,12,3.6,-1.176,-0.5
+Sponsors,9,12.4,0.476,0.44
+Acquired Company,13,18.1,0.714,0.713
+Immigration Shuttles,34,33.5,-0.07,-0.021
+Hackers,6,14.3,1.162,0.994
