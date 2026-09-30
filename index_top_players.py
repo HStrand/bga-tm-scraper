@@ -6,6 +6,7 @@ Fetches updated player list from BGA, updates via API, and indexes games for top
 import argparse
 import json
 import time
+import requests
 import logging
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple
@@ -69,9 +70,18 @@ def fetch_players(num_players: Optional[int] = None) -> List[Dict]:
     start = 0
     while True:
         params['start'] = start
-        resp = session.get(f'{BASE_URL}{RANKING_URL}', params=params)
-
-        data = resp.json()
+        data = None
+        for attempt in range(1, 6):
+            try:
+                resp = session.get(f'{BASE_URL}{RANKING_URL}', params=params)
+                data = resp.json()
+                break
+            except (requests.exceptions.RequestException, ValueError) as e:
+                wait = 10 * attempt
+                print(f"Leaderboard request failed at start={start} (attempt {attempt}/5): {e}; retrying in {wait}s")
+                time.sleep(wait)
+        if data is None:
+            raise RuntimeError(f"Leaderboard fetch failed repeatedly at start={start}")
 
         if 'data' not in data or 'ranks' not in data['data']:
             print(f"Unexpected response format at start={start}")

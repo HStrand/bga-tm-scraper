@@ -1,0 +1,18 @@
+Corporation,Kept,Offered,Keep %,"Delta (elo, all-not-kept, hand-controlled)",Delta SE,"Delta (elo, offered-but-declined)",Observed value (MC),Value vs average corp (MC),Starting MC,Tangible value (MC),Ability value (MC),Ability SE (MC),Baseline anchor,Ability
+Point Luna,28044,36340,77.2,0.86,0.05,0.882,74.1,6.1,38,58.0,16.1,0.4,yes,draw a card per Earth tag played IN-GAME (setup self-draw is tangible)
+Cheung Shing Mars,21912,36445,60.1,0.537,0.055,0.384,71.8,3.8,44,61.1,10.7,0.4,,building cards cost 2 less
+Saturn Systems,21579,36939,58.4,0.518,0.055,0.431,71.7,3.7,42,62.7,9.0,0.4,,+1 MC prod per Jovian tag played IN-GAME by anyone (setup self-trigger is tangible)
+Interplanetary Cinematics,17424,36934,47.2,0.447,0.062,0.648,71.2,3.2,30,70.0,1.2,0.4,,"+2 MC per event played. NOT SEPARABLE: 20 steel is heavily bulk-discounted (~1.5/steel => ~30, not 40) so the rebate is really ~8-12 MC (4-6 events); needs an event count to pin down"
+Valley Trust,25629,36812,69.6,0.322,0.052,0.404,70.3,2.3,37,40.6,29.7,0.4,,play 1 extra prelude chosen from 3 (E[best of 3 measured preludes] = 26.4 MC) + science cards cost 2 less (remainder ~3.3 => ~1.6 science cards)
+Ecoline,21405,36702,58.3,0.324,0.055,0.3,70.3,2.3,36,59.5,10.8,0.4,,"greenery costs 7 plants (not 8). INTERACTION: under Ecoline plant prod ~10 (x8/7) and plants ~1.7, so of the ~11 ability ~2.6 is its own production being worth more and ~8 is the effect on everything else; split not uniquely identifiable"
+Vitor,23276,36875,63.1,0.272,0.056,0.399,69.9,1.9,45,46.0,23.9,0.4,,fund an award free; +3 MC per card with non-negative VP
+CrediCor,23263,37004,62.9,0.224,0.055,0.31,69.6,1.6,57,57.0,12.6,0.4,,+4 MC after each >=20 MC card / standard project
+Mining Guild,19144,36783,52.0,0.084,0.059,0.137,68.6,0.6,30,50.0,18.6,0.4,,+1 steel prod per steel/ti placement bonus
+Tharsis Republic,20616,37135,55.5,0.072,0.055,-0.056,68.5,0.5,40,57.7,10.8,0.4,,"+1 MC prod per city (anyone) and +3 MC per own city, IN-GAME (the setup city's own triggers are tangible)"
+Teractor,17934,36672,48.9,-0.177,0.06,-0.055,66.7,-1.3,60,61.0,5.7,0.4,,"Earth cards cost 3 less (~6 MC = ~2 Earth cards). Earth Office (same effect, 1+3 MC) reads ~8.9 as a gen-1 card, but that is selection-inflated (played when Earth targets are in hand); cash discount at 60 MC unlikely (Loan fits at 1:1)"
+Robinson Industries,15045,36771,40.9,-0.261,0.064,-0.245,66.1,-1.9,47,47.0,19.1,0.5,,action: 4 MC -> +1 step of your lowest production
+Helion,14336,37064,38.7,-0.847,0.065,-0.589,61.9,-6.1,42,60.1,1.8,0.5,yes,"heat spendable as MC: heat prod counted at the MC-prod floor (5.7) in tangible; ability = flexibility premium only (~2-3 MC; Helion is a baseline anchor, assumed 1.0)"
+Inventrix,15635,36629,42.7,-0.939,0.064,-0.802,61.3,-6.7,45,60.6,0.7,0.5,yes,global requirements +/-2 steps
+PhoboLog,12424,36503,34.0,-1.002,0.068,-0.788,60.8,-7.2,23,49.0,11.8,0.5,,titanium worth +1 MC (10 ti -> +10 face; ti prod too)
+ThorGate,6448,36522,17.7,-1.273,0.094,-0.917,58.9,-9.1,48,55.0,3.9,0.7,,power cards & power-plant SP cost 3 less
+United Nations Mars Initiative,7180,36974,19.4,-1.653,0.085,-1.303,56.2,-11.8,40,41.0,15.2,0.6,,action: 3 MC -> +1 TR (if TR raised this gen)

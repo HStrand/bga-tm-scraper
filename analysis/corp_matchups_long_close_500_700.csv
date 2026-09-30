@@ -1,0 +1,273 @@
+Corp,Opp,effect,n,se,z,raw_mean
+Cheung Shing Mars,CrediCor,0.0604,370,0.5012,0.1206,0.7486
+Cheung Shing Mars,Ecoline,0.0961,305,0.5813,0.1654,0.6459
+Cheung Shing Mars,Helion,0.5221,194,0.6600,0.7911,3.1959
+Cheung Shing Mars,Interplanetary Cinematics,-0.6038,261,0.6002,-1.0061,-0.6207
+Cheung Shing Mars,Inventrix,-0.2632,208,0.6711,-0.3922,1.5096
+Cheung Shing Mars,Mining Guild,-0.7064,254,0.6159,-1.1470,-0.3110
+Cheung Shing Mars,PhoboLog,1.9440,116,0.8080,2.4058,3.6724
+Cheung Shing Mars,Point Luna,0.3492,461,0.4467,0.7818,-0.2950
+Cheung Shing Mars,Robinson Industries,-0.6835,208,0.6569,-1.0404,0.5433
+Cheung Shing Mars,Saturn Systems,0.6077,259,0.5954,1.0207,0.7143
+Cheung Shing Mars,Teractor,-0.5093,262,0.6224,-0.8184,0.4542
+Cheung Shing Mars,Tharsis Republic,-0.7814,250,0.6224,-1.2555,0.0120
+Cheung Shing Mars,ThorGate,0.9866,67,1.0708,0.9214,3.7910
+Cheung Shing Mars,United Nations Mars Initiative,0.2125,68,1.0104,0.2103,4.0000
+Cheung Shing Mars,Valley Trust,-0.2439,376,0.4914,-0.4963,0.2234
+Cheung Shing Mars,Vitor,0.4204,421,0.4884,0.8608,0.9026
+CrediCor,Cheung Shing Mars,-0.0531,370,0.5034,-0.1054,-0.7757
+CrediCor,Ecoline,0.7357,405,0.4822,1.5257,0.5136
+CrediCor,Helion,-0.6292,211,0.6578,-0.9566,1.4028
+CrediCor,Interplanetary Cinematics,-0.1130,358,0.5219,-0.2166,-0.6257
+CrediCor,Inventrix,0.8807,240,0.5850,1.5055,2.4042
+CrediCor,Mining Guild,-0.2640,272,0.5786,-0.4563,-0.1250
+CrediCor,PhoboLog,-0.1589,166,0.7490,-0.2122,1.1627
+CrediCor,Point Luna,0.2088,503,0.4336,0.4816,-0.8668
+CrediCor,Robinson Industries,-0.0784,260,0.6060,-0.1294,0.4923
+CrediCor,Saturn Systems,-0.2558,357,0.5242,-0.4880,-0.5854
+CrediCor,Teractor,0.3540,284,0.5644,0.6272,1.2711
+CrediCor,Tharsis Republic,0.3033,292,0.5880,0.5158,0.4349
+CrediCor,ThorGate,-0.2715,99,0.9486,-0.2862,1.9293
+CrediCor,United Nations Mars Initiative,-1.3068,79,1.0157,-1.2866,1.8228
+CrediCor,Valley Trust,-0.4507,431,0.4718,-0.9552,-0.8121
+CrediCor,Vitor,-0.1821,419,0.4713,-0.3864,-0.1551
+Ecoline,Cheung Shing Mars,-0.0695,305,0.5822,-0.1194,-0.6492
+Ecoline,CrediCor,-0.7500,405,0.4806,-1.5606,-0.5432
+Ecoline,Helion,1.0943,213,0.6347,1.7242,3.0892
+Ecoline,Interplanetary Cinematics,-0.2533,268,0.5836,-0.4341,-0.4179
+Ecoline,Inventrix,0.7271,218,0.6500,1.1186,1.9037
+Ecoline,Mining Guild,0.2679,238,0.6531,0.4102,0.7311
+Ecoline,PhoboLog,-1.4498,121,0.8826,-1.6427,-0.1074
+Ecoline,Point Luna,0.5528,440,0.4664,1.1852,-0.5545
+Ecoline,Robinson Industries,1.3954,191,0.6942,2.0100,1.7120
+Ecoline,Saturn Systems,-0.4211,275,0.5894,-0.7145,-0.5091
+Ecoline,Teractor,0.6549,230,0.6412,1.0212,1.0783
+Ecoline,Tharsis Republic,-0.2255,264,0.5641,-0.3998,-0.1932
+Ecoline,ThorGate,-0.2170,63,1.1645,-0.1863,2.5714
+Ecoline,United Nations Mars Initiative,0.6700,84,1.0085,0.6644,4.2143
+Ecoline,Valley Trust,-0.1303,381,0.5072,-0.2569,-0.1916
+Ecoline,Vitor,-0.9267,394,0.5004,-1.8520,-1.0330
+Helion,Cheung Shing Mars,-0.4946,194,0.6570,-0.7529,-3.1959
+Helion,CrediCor,0.6562,211,0.6527,1.0053,-1.3886
+Helion,Ecoline,-1.1186,213,0.6402,-1.7471,-3.1221
+Helion,Interplanetary Cinematics,-0.6651,143,0.7438,-0.8943,-2.9441
+Helion,Inventrix,-1.3654,113,0.8955,-1.5247,-1.9292
+Helion,Mining Guild,-0.2747,141,0.7997,-0.3436,-2.7730
+Helion,PhoboLog,-0.1420,69,1.0876,-0.1305,-1.1014
+Helion,Point Luna,1.9002,230,0.6183,3.0733,-1.2174
+Helion,Robinson Industries,0.5924,104,0.9610,0.6165,-0.6923
+Helion,Saturn Systems,-0.6725,186,0.6645,-1.0121,-3.2903
+Helion,Teractor,0.2855,141,0.8647,0.3302,-1.1986
+Helion,Tharsis Republic,-0.8067,145,0.7770,-1.0383,-2.8414
+Helion,ThorGate,0.9122,27,2.0808,0.4384,1.3333
+Helion,United Nations Mars Initiative,1.9136,33,1.6186,1.1823,2.4242
+Helion,Valley Trust,-0.0550,219,0.6425,-0.0857,-2.7032
+Helion,Vitor,0.5155,235,0.6279,0.8209,-1.8553
+Interplanetary Cinematics,Cheung Shing Mars,0.5721,261,0.5995,0.9543,0.5709
+Interplanetary Cinematics,CrediCor,0.0781,358,0.5180,0.1507,0.5866
+Interplanetary Cinematics,Ecoline,0.2643,268,0.5884,0.4492,0.4291
+Interplanetary Cinematics,Helion,0.6413,143,0.7340,0.8737,2.9231
+Interplanetary Cinematics,Inventrix,-0.3096,171,0.6982,-0.4433,1.3275
+Interplanetary Cinematics,Mining Guild,-0.8287,193,0.6756,-1.2266,-0.4819
+Interplanetary Cinematics,PhoboLog,-1.3921,109,0.9089,-1.5316,0.1101
+Interplanetary Cinematics,Point Luna,-0.0810,399,0.4749,-0.1705,-0.9724
+Interplanetary Cinematics,Robinson Industries,0.4706,193,0.6995,0.6727,1.5337
+Interplanetary Cinematics,Saturn Systems,0.1188,234,0.6058,0.1961,0.1624
+Interplanetary Cinematics,Teractor,-0.2233,216,0.6285,-0.3554,0.7870
+Interplanetary Cinematics,Tharsis Republic,0.4064,236,0.6116,0.6645,1.4237
+Interplanetary Cinematics,ThorGate,-1.3992,55,1.2500,-1.1193,1.1818
+Interplanetary Cinematics,United Nations Mars Initiative,-1.7904,50,1.4694,-1.2185,1.5200
+Interplanetary Cinematics,Valley Trust,-0.0976,330,0.5285,-0.1847,0.0788
+Interplanetary Cinematics,Vitor,0.2984,300,0.5684,0.5250,0.8367
+Inventrix,Cheung Shing Mars,0.2156,208,0.6651,0.3242,-1.5817
+Inventrix,CrediCor,-0.9747,240,0.5849,-1.6665,-2.5083
+Inventrix,Ecoline,-0.6341,218,0.6453,-0.9826,-1.8165
+Inventrix,Helion,1.2891,113,0.8875,1.4524,1.8496
+Inventrix,Interplanetary Cinematics,0.3272,171,0.6946,0.4711,-1.3041
+Inventrix,Mining Guild,0.0648,177,0.7231,0.0896,-1.6102
+Inventrix,PhoboLog,1.2132,100,0.9835,1.2336,1.2100
+Inventrix,Point Luna,-0.2827,304,0.5172,-0.5466,-2.6316
+Inventrix,Robinson Industries,-0.6540,124,0.8180,-0.7995,-1.8226
+Inventrix,Saturn Systems,0.1942,209,0.6181,0.3142,-1.1483
+Inventrix,Teractor,0.4076,140,0.8208,0.4966,-0.3500
+Inventrix,Tharsis Republic,-0.9403,181,0.6510,-1.4446,-2.3260
+Inventrix,ThorGate,-0.9130,53,1.4273,-0.6397,0.0189
+Inventrix,United Nations Mars Initiative,2.5536,36,1.4294,1.7865,4.7222
+Inventrix,Valley Trust,0.4603,240,0.6487,0.7097,-1.2042
+Inventrix,Vitor,0.3519,223,0.6448,0.5457,-0.7085
+Mining Guild,Cheung Shing Mars,0.7347,254,0.6138,1.1969,0.3150
+Mining Guild,CrediCor,0.2405,272,0.5785,0.4157,0.0919
+Mining Guild,Ecoline,-0.2501,238,0.6558,-0.3813,-0.7185
+Mining Guild,Helion,0.3061,141,0.7973,0.3839,2.8014
+Mining Guild,Interplanetary Cinematics,0.9109,193,0.6767,1.3461,0.5699
+Mining Guild,Inventrix,-0.0646,177,0.7210,-0.0896,1.6102
+Mining Guild,PhoboLog,-1.7112,89,0.9949,-1.7199,-0.2809
+Mining Guild,Point Luna,0.0916,343,0.5330,0.1718,-1.1254
+Mining Guild,Robinson Industries,0.9886,148,0.8117,1.2180,1.6284
+Mining Guild,Saturn Systems,0.4830,234,0.6301,0.7666,-0.1880
+Mining Guild,Teractor,-0.6013,227,0.6418,-0.9369,-0.1366
+Mining Guild,Tharsis Republic,-1.0475,217,0.6594,-1.5885,-0.7742
+Mining Guild,ThorGate,1.5633,57,1.1831,1.3213,3.7719
+Mining Guild,United Nations Mars Initiative,-1.3284,53,1.1613,-1.1440,2.7170
+Mining Guild,Valley Trust,-0.2737,274,0.5944,-0.4604,-0.3321
+Mining Guild,Vitor,-0.3442,344,0.5141,-0.6696,-0.1628
+PhoboLog,Cheung Shing Mars,-1.9555,116,0.8074,-2.4220,-3.7155
+PhoboLog,CrediCor,0.2306,166,0.7533,0.3061,-1.1084
+PhoboLog,Ecoline,1.4051,121,0.8804,1.5959,0.0496
+PhoboLog,Helion,0.2248,69,1.0951,0.2053,1.1739
+PhoboLog,Interplanetary Cinematics,1.3384,109,0.9150,1.4627,-0.1651
+PhoboLog,Inventrix,-1.2751,100,0.9821,-1.2983,-1.2800
+PhoboLog,Mining Guild,1.7857,89,0.9930,1.7983,0.3483
+PhoboLog,Point Luna,0.1947,180,0.6931,0.2809,-2.5167
+PhoboLog,Robinson Industries,-1.4632,84,1.0546,-1.3874,-1.9405
+PhoboLog,Saturn Systems,-1.1749,109,0.9080,-1.2939,-2.8165
+PhoboLog,Teractor,-0.8102,109,0.9590,-0.8448,-1.2294
+PhoboLog,Tharsis Republic,1.1196,107,0.9754,1.1478,-0.0654
+PhoboLog,ThorGate,2.7214,26,1.6613,1.6381,5.4231
+PhoboLog,United Nations Mars Initiative,0.2461,23,2.0416,0.1205,1.9565
+PhoboLog,Valley Trust,0.4141,143,0.7964,0.5200,-1.4895
+PhoboLog,Vitor,-0.7841,160,0.7456,-1.0517,-2.3312
+Point Luna,Cheung Shing Mars,-0.2977,461,0.4484,-0.6640,0.3319
+Point Luna,CrediCor,-0.2126,503,0.4332,-0.4907,0.8628
+Point Luna,Ecoline,-0.5389,440,0.4650,-1.1589,0.5727
+Point Luna,Helion,-1.8807,230,0.6276,-2.9965,1.2435
+Point Luna,Interplanetary Cinematics,0.0906,399,0.4716,0.1921,0.9975
+Point Luna,Inventrix,0.3191,304,0.5159,0.6186,2.6776
+Point Luna,Mining Guild,-0.1536,343,0.5337,-0.2878,1.0729
+Point Luna,PhoboLog,-0.2633,180,0.6922,-0.3804,2.4500
+Point Luna,Robinson Industries,-0.4187,262,0.6010,-0.6967,1.7328
+Point Luna,Saturn Systems,1.1943,408,0.4570,2.6132,1.9975
+Point Luna,Teractor,0.1673,319,0.5397,0.3100,1.8840
+Point Luna,Tharsis Republic,1.0104,334,0.5173,1.9533,2.4401
+Point Luna,ThorGate,1.1897,111,0.8074,1.4736,5.5495
+Point Luna,United Nations Mars Initiative,-0.6922,84,0.9640,-0.7180,3.9881
+Point Luna,Valley Trust,-0.2304,488,0.4294,-0.5366,0.8852
+Point Luna,Vitor,0.3018,500,0.4358,0.6924,1.1740
+Robinson Industries,Cheung Shing Mars,0.6953,208,0.6581,1.0566,-0.5529
+Robinson Industries,CrediCor,0.1085,260,0.6002,0.1808,-0.4692
+Robinson Industries,Ecoline,-1.5126,191,0.6944,-2.1782,-1.8325
+Robinson Industries,Helion,-0.5153,104,0.9540,-0.5401,0.7692
+Robinson Industries,Interplanetary Cinematics,-0.5471,193,0.6969,-0.7851,-1.6010
+Robinson Industries,Inventrix,0.7073,124,0.8220,0.8604,1.8790
+Robinson Industries,Mining Guild,-1.1266,148,0.8053,-1.3990,-1.7635
+Robinson Industries,PhoboLog,1.5628,84,1.0470,1.4927,2.0357
+Robinson Industries,Point Luna,0.4558,262,0.5995,0.7603,-1.6832
+Robinson Industries,Saturn Systems,0.1130,212,0.6497,0.1740,-0.8491
+Robinson Industries,Teractor,0.7480,165,0.7710,0.9702,1.1576
+Robinson Industries,Tharsis Republic,0.9745,155,0.7899,1.2337,1.0258
+Robinson Industries,ThorGate,-3.0156,40,1.4003,-2.1535,-2.0500
+Robinson Industries,United Nations Mars Initiative,0.5965,38,1.5760,0.3785,2.7632
+Robinson Industries,Valley Trust,-0.1259,243,0.6047,-0.2082,-1.2840
+Robinson Industries,Vitor,-0.2705,245,0.6204,-0.4360,-0.9184
+Saturn Systems,Cheung Shing Mars,-0.5954,259,0.5916,-1.0064,-0.7143
+Saturn Systems,CrediCor,0.3065,357,0.5215,0.5877,0.6387
+Saturn Systems,Ecoline,0.4213,275,0.5884,0.7159,0.5164
+Saturn Systems,Helion,0.6093,186,0.6696,0.9099,3.2366
+Saturn Systems,Interplanetary Cinematics,-0.1459,234,0.6054,-0.2409,-0.1709
+Saturn Systems,Inventrix,-0.1971,209,0.6154,-0.3203,1.1579
+Saturn Systems,Mining Guild,-0.5257,234,0.6258,-0.8400,0.1581
+Saturn Systems,PhoboLog,1.1419,109,0.9125,1.2515,2.7890
+Saturn Systems,Point Luna,-1.2286,408,0.4571,-2.6879,-2.0098
+Saturn Systems,Robinson Industries,-0.1146,212,0.6571,-0.1744,0.8632
+Saturn Systems,Teractor,-0.1709,243,0.6101,-0.2802,0.5267
+Saturn Systems,Tharsis Republic,0.9466,239,0.6587,1.4370,1.5649
+Saturn Systems,ThorGate,-0.7630,78,1.1409,-0.6688,1.7949
+Saturn Systems,United Nations Mars Initiative,-1.9660,75,1.1714,-1.6783,2.0000
+Saturn Systems,Valley Trust,0.5131,356,0.5387,0.9526,0.3961
+Saturn Systems,Vitor,0.7214,353,0.5238,1.3772,0.7875
+Teractor,Cheung Shing Mars,0.5203,262,0.6263,0.8307,-0.4771
+Teractor,CrediCor,-0.3381,284,0.5650,-0.5983,-1.2746
+Teractor,Ecoline,-0.6353,230,0.6421,-0.9894,-1.0739
+Teractor,Helion,-0.2231,141,0.8713,-0.2560,1.2482
+Teractor,Interplanetary Cinematics,0.1624,216,0.6228,0.2608,-0.8519
+Teractor,Inventrix,-0.4336,140,0.8190,-0.5294,0.3143
+Teractor,Mining Guild,0.5403,227,0.6435,0.8396,0.0661
+Teractor,PhoboLog,0.8817,109,0.9613,0.9173,1.2844
+Teractor,Point Luna,-0.1956,319,0.5397,-0.3625,-1.9122
+Teractor,Robinson Industries,-0.7411,165,0.7619,-0.9726,-1.1576
+Teractor,Saturn Systems,0.2457,243,0.6053,0.4060,-0.4486
+Teractor,Tharsis Republic,-0.7594,233,0.6148,-1.2352,-1.1803
+Teractor,ThorGate,-2.0083,46,1.3594,-1.4774,-0.5217
+Teractor,United Nations Mars Initiative,-0.5626,53,1.3362,-0.4210,1.6604
+Teractor,Valley Trust,0.5770,297,0.5496,1.0498,0.0404
+Teractor,Vitor,0.6585,299,0.5442,1.2101,0.0635
+Tharsis Republic,Cheung Shing Mars,0.7196,250,0.6272,1.1475,-0.0720
+Tharsis Republic,CrediCor,-0.3124,292,0.5889,-0.5305,-0.4281
+Tharsis Republic,Ecoline,0.1862,264,0.5609,0.3320,0.1742
+Tharsis Republic,Helion,0.8247,145,0.7791,1.0585,2.8828
+Tharsis Republic,Interplanetary Cinematics,-0.4172,236,0.6148,-0.6787,-1.4025
+Tharsis Republic,Inventrix,0.9142,181,0.6469,1.4132,2.3260
+Tharsis Republic,Mining Guild,1.1137,217,0.6673,1.6689,0.8664
+Tharsis Republic,PhoboLog,-1.1477,107,0.9733,-1.1792,0.0561
+Tharsis Republic,Point Luna,-1.0162,334,0.5144,-1.9755,-2.4102
+Tharsis Republic,Robinson Industries,-0.9780,155,0.7969,-1.2273,-1.0000
+Tharsis Republic,Saturn Systems,-0.9265,239,0.6546,-1.4153,-1.5063
+Tharsis Republic,Teractor,0.7559,233,0.6124,1.2343,1.1931
+Tharsis Republic,ThorGate,1.9624,69,1.1290,1.7381,3.9130
+Tharsis Republic,United Nations Mars Initiative,0.0524,55,1.2335,0.0425,2.7818
+Tharsis Republic,Valley Trust,0.1543,286,0.5598,0.2757,0.0070
+Tharsis Republic,Vitor,-0.3183,281,0.5581,-0.5703,-0.7580
+ThorGate,Cheung Shing Mars,-0.9584,67,1.0668,-0.8984,-3.7910
+ThorGate,CrediCor,0.2742,99,0.9528,0.2877,-1.9394
+ThorGate,Ecoline,0.2580,63,1.1642,0.2216,-2.5397
+ThorGate,Helion,-0.9061,27,2.0860,-0.4344,-1.3333
+ThorGate,Interplanetary Cinematics,1.5965,55,1.2530,1.2742,-0.9818
+ThorGate,Inventrix,0.9534,53,1.4398,0.6622,0.0189
+ThorGate,Mining Guild,-1.7006,57,1.1978,-1.4197,-3.9123
+ThorGate,PhoboLog,-2.7870,26,1.6642,-1.6747,-5.5000
+ThorGate,Point Luna,-1.2053,111,0.8059,-1.4955,-5.5586
+ThorGate,Robinson Industries,2.8661,40,1.4127,2.0288,1.9000
+ThorGate,Saturn Systems,0.8682,78,1.1322,0.7669,-1.6795
+ThorGate,Teractor,1.9347,46,1.3776,1.4044,0.4348
+ThorGate,Tharsis Republic,-1.8982,69,1.1213,-1.6929,-3.8261
+ThorGate,United Nations Mars Initiative,-0.2796,9,3.6552,-0.0765,0.8889
+ThorGate,Valley Trust,1.0103,88,0.9544,1.0585,-1.5682
+ThorGate,Vitor,-0.1648,101,0.8899,-0.1852,-2.6931
+United Nations Mars Initiative,Cheung Shing Mars,-0.3037,68,1.0145,-0.2994,-4.1176
+United Nations Mars Initiative,CrediCor,1.2164,79,1.0234,1.1885,-1.9241
+United Nations Mars Initiative,Ecoline,-0.6153,84,1.0065,-0.6114,-4.1667
+United Nations Mars Initiative,Helion,-1.9694,33,1.5914,-1.2375,-2.4848
+United Nations Mars Initiative,Interplanetary Cinematics,1.8660,50,1.4796,1.2612,-1.4400
+United Nations Mars Initiative,Inventrix,-2.5789,36,1.4226,-1.8128,-4.7500
+United Nations Mars Initiative,Mining Guild,1.3863,53,1.1639,1.1911,-2.6604
+United Nations Mars Initiative,PhoboLog,-0.1486,23,2.0321,-0.0731,-1.8696
+United Nations Mars Initiative,Point Luna,0.6959,84,0.9648,0.7213,-3.9762
+United Nations Mars Initiative,Robinson Industries,-0.4921,38,1.5629,-0.3149,-2.6579
+United Nations Mars Initiative,Saturn Systems,1.9813,75,1.1726,1.6897,-1.9733
+United Nations Mars Initiative,Teractor,0.6302,53,1.3249,0.4757,-1.6038
+United Nations Mars Initiative,Tharsis Republic,-0.1136,55,1.2353,-0.0920,-2.8182
+United Nations Mars Initiative,ThorGate,0.2841,9,3.7280,0.0762,-0.8889
+United Nations Mars Initiative,Valley Trust,-1.6358,96,0.8595,-1.9032,-5.9062
+United Nations Mars Initiative,Vitor,-1.2203,74,1.0755,-1.1346,-4.7432
+Valley Trust,Cheung Shing Mars,0.1962,376,0.4906,0.4000,-0.2819
+Valley Trust,CrediCor,0.4703,431,0.4722,0.9960,0.8353
+Valley Trust,Ecoline,0.1487,381,0.5003,0.2971,0.2178
+Valley Trust,Helion,0.0177,219,0.6408,0.0277,2.6758
+Valley Trust,Interplanetary Cinematics,0.1115,330,0.5252,0.2124,-0.0455
+Valley Trust,Inventrix,-0.3943,240,0.6402,-0.6158,1.2833
+Valley Trust,Mining Guild,0.2933,274,0.5946,0.4933,0.3650
+Valley Trust,PhoboLog,-0.4198,143,0.8032,-0.5226,1.4895
+Valley Trust,Point Luna,0.2402,488,0.4293,0.5596,-0.8525
+Valley Trust,Robinson Industries,0.1301,243,0.6057,0.2147,1.3045
+Valley Trust,Saturn Systems,-0.5109,356,0.5393,-0.9472,-0.3680
+Valley Trust,Teractor,-0.5841,297,0.5503,-1.0614,-0.0438
+Valley Trust,Tharsis Republic,-0.1347,286,0.5629,-0.2392,0.0524
+Valley Trust,ThorGate,-1.0204,88,0.9488,-1.0755,1.5682
+Valley Trust,United Nations Mars Initiative,1.6238,96,0.8537,1.9020,5.9062
+Valley Trust,Vitor,-0.2432,496,0.4402,-0.5524,-0.2218
+Vitor,Cheung Shing Mars,-0.4167,421,0.4884,-0.8530,-0.9192
+Vitor,CrediCor,0.1809,419,0.4714,0.3837,0.1480
+Vitor,Ecoline,0.8981,394,0.5033,1.7842,1.0025
+Vitor,Helion,-0.5421,235,0.6269,-0.8648,1.8298
+Vitor,Interplanetary Cinematics,-0.2250,300,0.5610,-0.4011,-0.7533
+Vitor,Inventrix,-0.3600,223,0.6452,-0.5579,0.7040
+Vitor,Mining Guild,0.3982,344,0.5127,0.7767,0.2209
+Vitor,PhoboLog,0.7691,160,0.7423,1.0361,2.3125
+Vitor,Point Luna,-0.3055,500,0.4376,-0.6982,-1.1640
+Vitor,Robinson Industries,0.3331,245,0.6260,0.5321,0.9878
+Vitor,Saturn Systems,-0.7437,353,0.5216,-1.4257,-0.7932
+Vitor,Teractor,-0.6766,299,0.5437,-1.2443,-0.0870
+Vitor,Tharsis Republic,0.3666,281,0.5574,0.6577,0.8363
+Vitor,ThorGate,0.0751,101,0.8946,0.0839,2.6040
+Vitor,United Nations Mars Initiative,1.1918,74,1.0777,1.1059,4.7162
+Vitor,Valley Trust,0.1978,496,0.4407,0.4488,0.1935
