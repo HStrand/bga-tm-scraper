@@ -1511,8 +1511,14 @@ class Parser:
                 move_data = entry.get('data', [])
                 if not isinstance(move_data, list):
                     continue
+                is_private = str(entry.get('channel', '')).startswith('/player/')
                 for data_item in move_data:
                     if not isinstance(data_item, dict):
+                        continue
+                    # BGA sends each player a private gameStateChange naming the player who
+                    # becomes active after the move. Those packets come before the table
+                    # packet describing the move itself, so they would name the wrong player.
+                    if is_private and data_item.get('type') == 'gameStateChange':
                         continue
                     args = data_item.get('args', {}) or {}
                     if 'active_player' in args:

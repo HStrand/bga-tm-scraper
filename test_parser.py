@@ -124,9 +124,43 @@ GAMES = [
             "game_mode": "Arena mode",
         },
     },
+    {
+        # October 2026 replay format: each move also carries private gameStateChange
+        # packets naming the player who becomes active next.
+        "replay": "data/sample files/86296239/replay_926358228.html",
+        "output": "data/sample files/game_926358228_86296239_test.json",
+        "table_id": "926358228",
+        "perspective": "86296239",
+        "players": {
+            "86296239": EloData(
+                player_name="StrandedKnight", player_id="86296239",
+                arena_points=1950, arena_points_change=2,
+                game_rank=682, game_rank_change=2,
+                position=1,
+            ),
+            "91942669": EloData(
+                player_name="Vero_Vendetta", player_id="91942669",
+                arena_points=1454, arena_points_change=-2,
+                game_rank=222, game_rank_change=-2,
+                position=2,
+            ),
+        },
+        "metadata": {
+            "played_at": "2026-10-04T22:32:00",
+            "map": "Tharsis",
+            "prelude_on": True,
+            "colonies_on": False,
+            "corporate_era_on": True,
+            "draft_on": True,
+            "beginners_corporations_on": False,
+            "game_speed": "Real-time · Normal speed",
+            "game_mode": "Arena mode",
+        },
+    },
 ]
 
 parser = Parser()
+misattributed = []
 
 for game in GAMES:
     print(f"\n=== {game['table_id']} ===")
@@ -160,3 +194,21 @@ for game in GAMES:
     for move in game_data.moves:
         if move.cards_discarded:
             print(f"Move {move.move_number}: cards_discarded={move.cards_discarded}")
+
+    # A played card must be filed under the player the log line names.
+    names = {elo.player_name: pid for pid, elo in game["players"].items()}
+    for move in game_data.moves:
+        if not move.card_played or move.action_type == "draft":
+            continue
+        for line in (move.description or "").split(" | "):
+            for name, pid in names.items():
+                if line == f"{name} plays card {move.card_played}" and str(move.player_id) != pid:
+                    misattributed.append(
+                        f"{game['table_id']} move {move.move_number}: {line!r} is filed under {move.player_name}"
+                    )
+
+if misattributed:
+    print(f"\nFAILED: {len(misattributed)} card play(s) filed under the wrong player")
+    for problem in misattributed:
+        print(f"  {problem}")
+    raise SystemExit(1)
