@@ -57,13 +57,14 @@ LOCK_TIMEOUT_SECONDS = 300
 
 class ScrapeRequest(BaseModel):
     tableId: str
-    playerPerspective: str
+    # Whose seat to load the replay from. Left out, the highest-rated player at the table is used.
+    playerPerspective: Optional[str] = None
 
 
 class ScrapeResponse(BaseModel):
     success: bool
     tableId: str
-    playerPerspective: str
+    playerPerspective: Optional[str] = None
     message: str
     versionId: Optional[str] = None
     gameMode: Optional[str] = None
@@ -75,6 +76,19 @@ class ScrapeResponse(BaseModel):
     indexUploaded: bool = False
     gameLogUploaded: bool = False
     durationSeconds: Optional[float] = None
+
+
+def highest_rated_player(elo_data) -> Optional[str]:
+    """The id of the highest-rated player on a table page, by Elo and then arena points."""
+    players = [elo for elo in (elo_data or {}).values() if elo and elo.player_id]
+    if not players:
+        return None
+
+    def rating(elo):
+        return (elo.game_rank if elo.game_rank is not None else -1,
+                elo.arena_points if elo.arena_points is not None else -1)
+
+    return str(max(players, key=rating).player_id)
 
 
 class HealthResponse(BaseModel):
@@ -157,7 +171,7 @@ class ScrapeOrchestrator:
             dailyLimitReached=self.daily_limit_reached,
         )
 
-    def scrape_and_upload(self, table_id: str, player_perspective: str) -> ScrapeResponse:
+    def scrape_and_upload(self, table_id: str, player_perspective: Optional[str] = None) -> ScrapeResponse:
         start = time.time()
 
         if not self.browser_alive or not self.scraper:
@@ -178,8 +192,9 @@ class ScrapeOrchestrator:
         try:
             # Phase 1: Index (table + gamereview)
             logger.info(f"[{table_id}] Phase 1: Indexing...")
+            # The table page is the same for every player; the id only names a folder for raw files.
             index_result = self.scraper.scrape_table_only(
-                table_id, player_perspective, save_raw=False, raw_data_dir=None
+                table_id, player_perspective or "", save_raw=False, raw_data_dir=None
             )
 
             if not index_result or not index_result.get("success"):
@@ -207,6 +222,16 @@ class ScrapeOrchestrator:
             # Upload index to API
             index_uploaded = False
             elo_data = index_result.get("elo_data", {})
+
+            if not player_perspective:
+                player_perspective = highest_rated_player(elo_data)
+                if not player_perspective:
+                    return ScrapeResponse(
+                        success=False, tableId=table_id,
+                        message="Failed to scrape table page: no players found", versionId=version_id,
+                    )
+                logger.info(f"[{table_id}] No perspective given, using highest-rated player {player_perspective}")
+
             players_list = []
             for pname, elo in elo_data.items():
                 players_list.append({
@@ -386,7 +411,7 @@ app.add_middleware(
 )
 
 
-async def _scrape_with_lock(table_id: str, player_perspective: str) -> ScrapeResponse:
+async def _scrape_with_lock(table_id: str, player_perspective: Optional[str]) -> ScrapeResponse:
     async with scrape_lock:
         return await asyncio.to_thread(orchestrator.scrape_and_upload, table_id, player_perspective)
 
