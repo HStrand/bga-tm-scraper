@@ -11,6 +11,8 @@ from datetime import datetime, timedelta
 from bs4 import BeautifulSoup, Tag
 import logging
 
+from .dates import parse_slash_date
+
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -596,19 +598,19 @@ class Parser:
                 date_str = alt_absolute_match.group(1)
                 time_str = alt_absolute_match.group(2)
                 
-                # Parse the date (assuming DD/MM/YYYY format)
+                # BGA writes these month first; see parse_slash_date
                 date_parts = date_str.split('/')
-                day = int(date_parts[0])
-                month = int(date_parts[1])
+                first = int(date_parts[0])
+                second = int(date_parts[1])
                 year = int(date_parts[2])
-                
+
                 # Parse the time
                 time_parts = time_str.split(':')
                 hour = int(time_parts[0])
                 minute = int(time_parts[1])
-                
+
                 # Create the datetime
-                parsed_datetime = datetime(year, month, day, hour, minute, 0)
+                parsed_datetime = parse_slash_date(first, second, year, hour, minute)
                 
                 return {
                     'raw_datetime': f"{date_str} at {time_str}",

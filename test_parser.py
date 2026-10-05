@@ -207,6 +207,33 @@ for game in GAMES:
                         f"{game['table_id']} move {move.move_number}: {line!r} is filed under {move.player_name}"
                     )
 
+# Dates written with slashes are month first, and never land in the future.
+from datetime import datetime
+from bga_tm_scraper.dates import parse_slash_date
+
+date_problems = []
+today = datetime(2026, 3, 16, 12, 0)
+for text, expected in [
+    ("03/04/2026 at 13:08", datetime(2026, 3, 4, 13, 8)),    # day-first would be April 3rd, after "today"
+    ("02/01/2025 at 07:00", datetime(2025, 2, 1, 7, 0)),     # both readings are in the past: month first
+    ("07/07/2025 at 02:29", datetime(2025, 7, 7, 2, 29)),
+    ("15/06/2025 at 00:29", datetime(2025, 6, 15, 0, 29)),   # cannot be month first
+    ("12/03/2026 at 09:00", datetime(2026, 3, 12, 9, 0)),    # month-first would be December, after "today"
+]:
+    a, b, rest = text.split("/")
+    hour, minute = rest.split(" at ")[1].split(":")
+    got = parse_slash_date(int(a), int(b), int(rest[:4]), int(hour), int(minute), now=today)
+    if got != expected:
+        date_problems.append(f"{text!r} read as {got}, expected {expected}")
+parsed = parser._parse_game_datetime("01/02/2025 at 10:00")
+if not parsed or parsed["parsed_datetime"] != "2025-01-02T10:00:00":
+    date_problems.append(f"Parser._parse_game_datetime read 01/02/2025 as {parsed and parsed['parsed_datetime']}")
+if date_problems:
+    print(f"\nFAILED: {len(date_problems)} date(s) read wrongly")
+    for problem in date_problems:
+        print(f"  {problem}")
+    raise SystemExit(1)
+
 if misattributed:
     print(f"\nFAILED: {len(misattributed)} card play(s) filed under the wrong player")
     for problem in misattributed:
