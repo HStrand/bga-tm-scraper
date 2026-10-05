@@ -80,3 +80,5 @@ Thumbs.db
 *.tmp
 *.temp
 chrome_debug.log
+
+data/rescraped/
