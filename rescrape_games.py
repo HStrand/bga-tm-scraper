@@ -69,7 +69,7 @@ def scrape_and_parse(scraper, tm_parser, table_id, perspective):
         return None, "empty replay"
 
     game_metadata = None
-    table_html = index_result.get("table_html", "")
+    table_html = (index_result.get("table_data") or {}).get("html_content", "")
     if table_html:
         game_metadata = tm_parser.parse_table_metadata(table_html)
     if not game_metadata:
