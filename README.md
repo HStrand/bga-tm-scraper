@@ -104,9 +104,23 @@ python main.py status
    python main.py status
    ```
 
+### Linux Setup
+
+1. **Install Chromium and ChromeDriver**
+   ```bash
+   sudo apt install chromium-browser chromium-driver
+   ```
+
+2. **Set the correct ChromeDriver path in `config.py`**
+   ```bash
+   which chromedriver
+   # /usr/bin/chromedriver
+   ```
+   Update `config.py` with the path returned above.
+
 ### Important Notes
 - **Social Login Users (Google, Facebook, etc.)**: If you log in to BGA using a social login provider, you won't have a BGA-specific password. To create one, go to the BGA login page and click "Forgot password" to set a separate password for your account. This will not affect your ability to continue logging in with your social login provider.
-- **ChromeDriver is installed automatically** - no manual setup required!
+- **ChromeDriver is installed automatically** on Windows/macOS - Linux users see [Linux Setup](#linux-setup) above
 - **BGA Daily Replay Limit**: BoardGameArena limits replay access per day
 - **API Key**: Optional for cloud features and assignments
 
