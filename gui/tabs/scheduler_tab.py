@@ -1,6 +1,7 @@
 """Scheduler dashboard tab showing run history, status, and configuration."""
 
 import os
+import platform
 import subprocess
 import sys
 import tkinter as tk
@@ -298,6 +299,22 @@ class SchedulerTab:
             return
 
         try:
-            os.startfile(log_path)
+            if platform.system() == "Windows":
+                os.startfile(log_path)
+            elif platform.system() == "Linux":
+                subprocess.Popen(["xdg-open", log_path])
+            elif platform.system() == "Darwin":
+                subprocess.Popen(["open", log_path])
+            else:
+                subprocess.Popen(["xdg-open", log_path])
         except Exception:
-            subprocess.Popen(["notepad", log_path])
+            if platform.system() == "Windows":
+                subprocess.Popen(["notepad", log_path])
+            else:
+                # Fallback: try common terminal editors
+                for editor in ["xdg-open", "gedit", "xed", "nano"]:
+                    try:
+                        subprocess.Popen([editor, log_path])
+                        break
+                    except FileNotFoundError:
+                        continue
