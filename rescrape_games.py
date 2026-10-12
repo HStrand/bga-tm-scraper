@@ -74,6 +74,11 @@ def scrape_and_parse(scraper, tm_parser, table_id, perspective):
         game_metadata = tm_parser.parse_table_metadata(table_html)
     if not game_metadata:
         return None, "no table metadata"
+    # The table page's date is read by the scraper, not by parse_table_metadata; without it
+    # the parser falls back to today's date for game_date.
+    date_info = index_result.get("game_date_info") or {}
+    if not game_metadata.played_at and date_info.get("parsed_datetime"):
+        game_metadata.played_at = date_info["parsed_datetime"]
 
     game_data = tm_parser.parse_complete_game(
         replay_html=replay_html, game_metadata=game_metadata,
