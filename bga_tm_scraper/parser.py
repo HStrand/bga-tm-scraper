@@ -3902,7 +3902,7 @@ class Parser:
             except Exception as e:
                 logger.debug(f"Failed extracting moves from gamelogs: {e}")
             if moves:
-                return self._apply_takeback_cancellations(moves)
+                return self._apply_takeback_cancellations(moves, gamelogs)
             logger.warning("Gamelogs produced no moves, falling back to HTML parsing")
 
         # Fallback: parse from HTML move divs
@@ -3913,7 +3913,7 @@ class Parser:
             if move:
                 moves.append(move)
 
-        return self._apply_takeback_cancellations(moves)
+        return self._apply_takeback_cancellations(moves, gamelogs)
 
     def _is_takeback_move(self, move_number: int, gamelogs: Dict[str, Any]) -> bool:
         """
@@ -3921,6 +3921,9 @@ class Parser:
         takeback marker (a 'message' or 'undoRestore' entry whose log text
         includes "takes back"). Such moves restore previous state and must
         not be processed as drafts, plays, or other actions.
+
+        BGA logs two kinds of takeback; see _takeback_reverses_previous_move
+        for which of them cancels the move before it.
         """
         try:
             data_entries = gamelogs.get('data', {}).get('data', []) if gamelogs else []
@@ -3939,18 +3942,57 @@ class Parser:
             pass
         return False
 
-    def _apply_takeback_cancellations(self, moves: List[Move]) -> List[Move]:
+    def _takeback_reverses_previous_move(self, move_number: int, gamelogs: Dict[str, Any]) -> bool:
         """
-        Return a new list of moves where, for each takeback move, the
-        immediately preceding move by the same player is replaced with a new
-        Move marked as cancelled (action data cleared). A BGA "takes back"
-        undoes only the player's most recent action, so we only cancel that
-        single move. The original Move objects are not mutated — cancelled
-        moves are produced via dataclasses.replace.
+        Whether this takeback move undid the move logged just before it.
+
+        BGA logs two kinds of takeback:
+
+        - An explicit reversal during a draft or research buy: a 'message'
+          "takes back their move" together with a silent tokenMoved that puts
+          the card back, and no undoRestore packet. The previous pick or buy
+          was undone and the player picks again in the next move. The previous
+          move must be cancelled.
+        - A savepoint restore: an 'undoRestore' (and 'undoRestoreDISAB')
+          packet whose undo_move is the move just before the takeback. BGA has
+          already dropped the undone moves from the replay and renumbered the
+          rest, so the move before the takeback stood: the counters logged
+          after it (hand size, M€, tableau size) continue from its values.
+          Nothing in the replay is cancelled. (Verified on tables 929799439,
+          926358228 and 825224074; cancelling that move lost real tile
+          placements, card plays and research keeps.)
+        """
+        try:
+            data_entries = gamelogs.get('data', {}).get('data', []) if gamelogs else []
+            has_message = False
+            for entry in data_entries:
+                if entry.get('move_id') != str(move_number):
+                    continue
+                for data_item in entry.get('data', []) or []:
+                    if not isinstance(data_item, dict):
+                        continue
+                    if data_item.get('type') in ('undoRestore', 'undoRestoreDISAB'):
+                        return False
+                    log_txt = data_item.get('log') or ''
+                    if isinstance(log_txt, str) and 'takes back' in log_txt.lower():
+                        has_message = True
+            return has_message
+        except Exception:
+            return False
+
+    def _apply_takeback_cancellations(self, moves: List[Move], gamelogs: Dict[str, Any]) -> List[Move]:
+        """
+        Return a new list of moves where, for each takeback that reversed the
+        move before it (see _takeback_reverses_previous_move), the immediately
+        preceding move by the same player is replaced with a new Move marked as
+        cancelled (action data cleared). The original Move objects are not
+        mutated — cancelled moves are produced via dataclasses.replace.
         """
         cancelled_indices: set = set()
         for i, m in enumerate(moves):
             if getattr(m, 'action_type', None) != 'takeback':
+                continue
+            if not self._takeback_reverses_previous_move(m.move_number, gamelogs):
                 continue
             for j in range(i - 1, -1, -1):
                 prev = moves[j]

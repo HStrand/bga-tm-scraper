@@ -157,10 +157,34 @@ GAMES = [
             "game_mode": "Arena mode",
         },
     },
+    {
+        # Takebacks whose savepoint is the player's own previous move (a tile placement,
+        # card plays, a research keep). Those moves stood; the parser must keep them.
+        "replay": "data/sample files/98180562/replay_929799439.html",
+        "output": "data/sample files/game_929799439_98180562_test.json",
+        "table_id": "929799439",
+        "perspective": "98180562",
+        "players": {
+            "98180562": EloData(player_name="tom37610", player_id="98180562", position=1),
+            "96938426": EloData(player_name="ft029", player_id="96938426", position=2),
+        },
+        "metadata": {
+            "played_at": "2026-10-11T00:00:00",
+            "map": "Elysium",
+            "prelude_on": True,
+            "colonies_on": False,
+            "corporate_era_on": True,
+            "draft_on": True,
+            "beginners_corporations_on": False,
+            "game_speed": "No time limit · with friends only",
+            "game_mode": "Normal mode",
+        },
+    },
 ]
 
 parser = Parser()
 misattributed = []
+takeback_problems = []
 
 for game in GAMES:
     print(f"\n=== {game['table_id']} ===")
@@ -207,6 +231,35 @@ for game in GAMES:
                         f"{game['table_id']} move {move.move_number}: {line!r} is filed under {move.player_name}"
                     )
 
+    # An explicit reversal (a "takes back" message during a draft or research buy) undid the
+    # previous move; a savepoint restore (undoRestore) did not: BGA has already dropped the
+    # undone moves from the replay, and the move before the takeback stood.
+    gamelogs = parser._extract_g_gamelogs(html)
+    for i, move in enumerate(game_data.moves):
+        if move.action_type != "takeback" or i == 0:
+            continue
+        prev = game_data.moves[i - 1]
+        if prev.player_id != move.player_id:
+            continue
+        reverses = parser._takeback_reverses_previous_move(move.move_number, gamelogs)
+        if prev.action_type == "cancelled" and not reverses:
+            takeback_problems.append(
+                f"{game['table_id']} move {prev.move_number} was cancelled by the savepoint-restore takeback after it"
+            )
+        if prev.action_type != "cancelled" and reverses:
+            takeback_problems.append(
+                f"{game['table_id']} move {prev.move_number} was reversed by the takeback after it but not cancelled"
+            )
+    if game["table_id"] == "929799439":
+        by_number = {m.move_number: m for m in game_data.moves}
+        if by_number[51].tile_location != "Olympus Mons (8,3)":
+            takeback_problems.append(f"929799439 move 51: Nuclear Zone tile on Olympus Mons lost, got {by_number[51].tile_location!r}")
+        if by_number[118].card_played != "Moss" or by_number[431].card_played != "Magnetic Field Generators":
+            takeback_problems.append("929799439: card play before a takeback lost (moves 118, 431)")
+        tiles = by_number[52].game_state.special_tiles.get("98180562", {})
+        if tiles.get("Nuclear Zone") != "Olympus Mons (8,3)":
+            takeback_problems.append(f"929799439 move 52: special_tiles lacks Nuclear Zone on Olympus Mons, got {tiles}")
+
 # Dates written with slashes are month first, and never land in the future.
 from datetime import datetime
 from bga_tm_scraper.dates import parse_slash_date
@@ -231,6 +284,12 @@ if not parsed or parsed["parsed_datetime"] != "2025-01-02T10:00:00":
 if date_problems:
     print(f"\nFAILED: {len(date_problems)} date(s) read wrongly")
     for problem in date_problems:
+        print(f"  {problem}")
+    raise SystemExit(1)
+
+if takeback_problems:
+    print(f"\nFAILED: {len(takeback_problems)} takeback problem(s)")
+    for problem in takeback_problems:
         print(f"  {problem}")
     raise SystemExit(1)
 
