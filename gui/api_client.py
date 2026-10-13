@@ -223,8 +223,15 @@ class APIClient:
                 logger.warning(f"Replay page for table {table_id} is empty or too small; not stored")
                 return False
             params = {'code': self.api_key, 'tableId': str(table_id), 'playerPerspective': str(player_perspective)}
-            if self.version:
-                params['version'] = self.version
+            version = self.version
+            if not version:
+                try:
+                    from gui.version import BUILD_VERSION  # scripts build the client without a version
+                    version = BUILD_VERSION
+                except Exception:
+                    version = None
+            if version:
+                params['version'] = version
             if scraped_by_email:
                 params['scrapedBy'] = scraped_by_email
             body = gzip.compress(sanitize_replay_html(html).encode('utf-8'), compresslevel=6)
