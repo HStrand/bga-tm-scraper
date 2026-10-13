@@ -220,6 +220,8 @@ def main():
             payload["metadata"]["scraper_version"] = BUILD_VERSION
             if api.store_game_log(payload, scraped_by_email=config.BGA_EMAIL):
                 print(f"Uploaded game {args.table_id}")
+                if api.store_replay_html(args.table_id, args.player_perspective, replay_html, scraped_by_email=config.BGA_EMAIL):
+                    print(f"Stored replay page for game {args.table_id}")
             else:
                 print(f"Failed to upload game {args.table_id}")
 

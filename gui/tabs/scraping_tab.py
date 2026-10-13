@@ -1037,6 +1037,11 @@ class ScrapingTab:
                                 self.successful_items += 1
                                 self.frame.after(0, lambda tid=table_id: 
                                                self.log_message(f"✅ Collected and uploaded logs for game {tid}"))
+                                # Also store the raw replay page (best effort; never affects the result)
+                                last_tid, last_html = getattr(scraper, 'last_replay_html', (None, None))
+                                if last_html and last_tid == str(table_id):
+                                    api_client.store_replay_html(table_id, game_player_perspective, last_html, bga_email)
+                                scraper.last_replay_html = (None, None)
                             else:
                                 self.failed_items += 1
                                 self.frame.after(0, lambda tid=table_id: 

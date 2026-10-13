@@ -348,6 +348,8 @@ class ScrapeOrchestrator:
             if self.api.store_game_log(payload, scraped_by_email=config.BGA_EMAIL):
                 game_log_uploaded = True
                 logger.info(f"[{table_id}] Game log uploaded to API")
+                if self.api.store_replay_html(table_id, player_perspective, replay_html, scraped_by_email=config.BGA_EMAIL):
+                    logger.info(f"[{table_id}] Replay page stored")
             else:
                 logger.warning(f"[{table_id}] Failed to upload game log to API")
 

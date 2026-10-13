@@ -390,6 +390,10 @@ class InMemoryScraper:
                 logger.error(f"No replay HTML found for {table_id}")
                 return None
             
+            # Kept for the caller to store after the parsed log was uploaded (the return value is
+            # the upload payload itself, so the page cannot travel inside it).
+            self.last_replay_html = (str(table_id), replay_html)
+
             # Convert assignment metadata to GameMetadata format
             game_metadata = self.parser.convert_assignment_to_game_metadata(assignment_metadata)
             
