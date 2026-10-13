@@ -3,12 +3,23 @@ Shared API client for BGA TM Scraper GUI
 Handles all API communication with the central registry
 """
 
+import gzip
+import re
 import requests
 import json
 import logging
 from typing import List, Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
+
+# The replay page comes from the contributor's logged-in BGA session and carries a per-session
+# request token in its inline script. It is of no use for parsing and is removed before upload.
+_REQUEST_TOKEN_RE = re.compile(r"""(requestToken\s*:\s*['"])[^'"]*(['"])""")
+
+
+def sanitize_replay_html(html: str) -> str:
+    """Strip session-specific values from a replay page before it is stored."""
+    return _REQUEST_TOKEN_RE.sub(r"\1REDACTED\2", html)
 
 
 class APIClient:
@@ -200,6 +211,36 @@ class APIClient:
             logger.error(f"Error storing game log: {e}")
             return False
     
+    def store_replay_html(self, table_id: str, player_perspective: str, html: str, scraped_by_email: str = None) -> bool:
+        """
+        POST the raw replay page (gzipped) to the API, after the parsed log was stored.
+
+        Best effort: returns False on any problem and never raises, so a failure here must not
+        change the outcome of the scrape. Old API hosts without the endpoint answer 404 -> False.
+        """
+        try:
+            if not html or len(html) < 10000:
+                logger.warning(f"Replay page for table {table_id} is empty or too small; not stored")
+                return False
+            params = {'code': self.api_key, 'tableId': str(table_id), 'playerPerspective': str(player_perspective)}
+            if self.version:
+                params['version'] = self.version
+            if scraped_by_email:
+                params['scrapedBy'] = scraped_by_email
+            body = gzip.compress(sanitize_replay_html(html).encode('utf-8'), compresslevel=6)
+            headers = {'Content-Type': 'text/html; charset=utf-8', 'Content-Encoding': 'gzip'}
+            response = requests.post(f"{self.base_url}/replay-html", params=params, data=body,
+                                     headers=headers, timeout=self.timeout)
+            response.raise_for_status()
+            logger.info(f"Stored replay page for table {table_id} ({len(body)} bytes gzipped)")
+            return True
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Storing the replay page for table {table_id} failed: {e}")
+            return False
+        except Exception as e:
+            logger.warning(f"Unexpected error storing the replay page for table {table_id}: {e}")
+            return False
+
     def report_game_deleted(self, table_id: str, player_perspective: str, reason: str = "replay_lost") -> bool:
         """Report a game whose replay has been permanently lost/deleted."""
         data = {"tableId": table_id, "playerPerspective": player_perspective, "reason": reason}

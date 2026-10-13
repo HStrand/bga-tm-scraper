@@ -67,6 +67,7 @@ def scrape_and_parse(scraper, tm_parser, table_id, perspective):
     replay_html = replay_result.get("html_content", "")
     if not replay_html:
         return None, "empty replay"
+    scrape_and_parse.last_replay_html = replay_html
 
     game_metadata = None
     table_html = (index_result.get("table_data") or {}).get("html_content", "")
@@ -157,6 +158,8 @@ def main():
                         payload["metadata"]["scraper_version"] = BUILD_VERSION
                         if api.store_game_log(payload, scraped_by_email=game.get("scraped_by") or None):
                             status = "uploaded"
+                            api.store_replay_html(table_id, perspective, getattr(scrape_and_parse, "last_replay_html", ""),
+                                                  scraped_by_email=game.get("scraped_by") or None)
                         else:
                             detail = "upload failed"
                     if status != "failed":

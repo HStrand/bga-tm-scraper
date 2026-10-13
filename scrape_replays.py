@@ -217,6 +217,8 @@ def scraping_loop(api, scraper, parser, games, per_game_delay, email, logger,
                 successes += 1
                 upload_ok = True
                 logger.info(f"  Uploaded logs for game {table_id}")
+                if "html_content" in replay_result:
+                    api.store_replay_html(table_id, player_perspective, replay_result["html_content"], scraped_by_email=email)
             else:
                 failures += 1
                 logger.warning(f"  Failed to upload logs for game {table_id}")
